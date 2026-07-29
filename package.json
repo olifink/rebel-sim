@@ -1,0 +1,16 @@
+{
+  "name": "rebel-sim",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "jsdom": "^28.0.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace=packages/engine && npm run build --workspace=packages/app",
+    "test": "npm run test --workspace=packages/engine",
+    "test:app": "npm run test --workspace=packages/app",
+    "start": "npm run start --workspace=packages/app"
+  }
+}

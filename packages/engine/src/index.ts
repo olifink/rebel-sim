@@ -1,0 +1,8 @@
+export { Arena, MAX_ARENA_SIZE } from './arena.js';
+export { BankTable } from './banks.js';
+export type { Bank } from './banks.js';
+export { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
+export { Sysvars } from './sysvars.js';
+export { executePrimitive, TRUE, FALSE } from './primitives.js';
+export type { PrimitiveContext } from './primitives.js';
+export { Machine } from './repl.js';

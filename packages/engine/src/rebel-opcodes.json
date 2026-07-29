@@ -1,0 +1,52 @@
+{
+  "_provisional": "Authored in Rebel-Sim per FORTH-ARCHITECTURE.md §0. Rebel-ROM's actual generated source-of-truth artifact is not available in this repo. These token IDs, sysvar offsets, and bank tags are Rebel-Sim's own provisional layout and MUST be reconciled against Rebel-ROM's real values before any cross-target state (dictionary dumps, etc.) is expected to be compatible. Do not treat these numbers as canonical outside this repo.",
+
+  "cellSize": 4,
+  "docolTokenId": 0,
+
+  "primitives": [
+    { "id": 1, "name": "DUP" },
+    { "id": 2, "name": "DROP" },
+    { "id": 3, "name": "SWAP" },
+    { "id": 4, "name": "OVER" },
+    { "id": 5, "name": "ROT" },
+    { "id": 6, "name": "+" },
+    { "id": 7, "name": "-" },
+    { "id": 8, "name": "*" },
+    { "id": 9, "name": "/" },
+    { "id": 10, "name": "MOD" },
+    { "id": 11, "name": "=" },
+    { "id": 12, "name": "<" },
+    { "id": 13, "name": ">" },
+    { "id": 14, "name": "0=" },
+    { "id": 15, "name": "AND" },
+    { "id": 16, "name": "OR" },
+    { "id": 17, "name": "INVERT" },
+    { "id": 18, "name": "." },
+    { "id": 19, "name": "EMIT" },
+    { "id": 20, "name": "CR" }
+  ],
+
+  "bankTags": {
+    "SYSV": "sysvars, per-arena",
+    "DSTK": "data stack, per-arena",
+    "DICT": "dictionary / user program space, per-arena (reserved, unused until M2)",
+    "RSTK": "return stack, per-arena (reserved, unused until M2)",
+    "CHAR": "character-code grid, per-arena (reserved, unused until M3)"
+  },
+
+  "sysvarGroups": {
+    "FORTH": {
+      "baseOffset": 0,
+      "fields": {
+        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1 hardcodes DSTK bank size instead)" },
+        "RP0": { "offset": 4, "note": "return stack base address (unused until M2)" },
+        "HERE": { "offset": 8, "note": "dictionary next-free pointer (unused until M2)" },
+        "LATEST": { "offset": 12, "note": "most recent dictionary entry (unused until M2)" },
+        "BASE": { "offset": 16, "note": "numeric input/output radix" },
+        "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (unused until M2)" }
+      },
+      "groupSizeBytes": 64
+    }
+  }
+}
