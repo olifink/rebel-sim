@@ -24,14 +24,16 @@
     { "id": 17, "name": "INVERT" },
     { "id": 18, "name": "." },
     { "id": 19, "name": "EMIT" },
-    { "id": 20, "name": "CR" }
+    { "id": 20, "name": "CR" },
+    { "id": 21, "name": "EXIT", "note": "pops the return stack into IP; only meaningful inside a compiled word body, special-cased by the inner interpreter (M2)" },
+    { "id": 22, "name": "LIT", "note": "pushes the next parameter-field cell as a data literal and skips over it; only meaningful inside a compiled word body, special-cased by the inner interpreter (M2)" }
   ],
 
   "bankTags": {
     "SYSV": "sysvars, per-arena",
     "DSTK": "data stack, per-arena",
-    "DICT": "dictionary / user program space, per-arena (reserved, unused until M2)",
-    "RSTK": "return stack, per-arena (reserved, unused until M2)",
+    "DICT": "dictionary / user program space, per-arena (in use since M2)",
+    "RSTK": "return stack, per-arena (in use since M2)",
     "CHAR": "character-code grid, per-arena (reserved, unused until M3)"
   },
 
@@ -39,12 +41,12 @@
     "FORTH": {
       "baseOffset": 0,
       "fields": {
-        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1 hardcodes DSTK bank size instead)" },
-        "RP0": { "offset": 4, "note": "return stack base address (unused until M2)" },
-        "HERE": { "offset": 8, "note": "dictionary next-free pointer (unused until M2)" },
-        "LATEST": { "offset": 12, "note": "most recent dictionary entry (unused until M2)" },
+        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1/M2 hardcode the DSTK bank size instead)" },
+        "RP0": { "offset": 4, "note": "return stack base address (reserved, M2 hardcodes the RSTK bank size instead)" },
+        "HERE": { "offset": 8, "note": "dictionary next-free pointer, grows up within DICT (in use since M2)" },
+        "LATEST": { "offset": 12, "note": "most recently defined dictionary entry's address, 0 = empty dictionary (in use since M2)" },
         "BASE": { "offset": 16, "note": "numeric input/output radix" },
-        "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (unused until M2)" }
+        "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (in use since M2)" }
       },
       "groupSizeBytes": 64
     }

@@ -11,6 +11,14 @@
  * DataView/ArrayBuffer isn't hardware-limited to that (§1). */
 export const MAX_ARENA_SIZE = 0x1_0000_0000;
 
+export const CELL_SIZE = 4;
+
+/** Rounds an offset up to the next 4-byte-aligned cell boundary
+ * (FORTH-ARCHITECTURE.md §6's "alignment applies to the whole entry"). */
+export function alignCell(offset: number): number {
+  return (offset + (CELL_SIZE - 1)) & ~(CELL_SIZE - 1);
+}
+
 export class Arena {
   readonly buffer: ArrayBuffer;
   private readonly view: DataView;

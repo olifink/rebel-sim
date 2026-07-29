@@ -10,7 +10,7 @@ import { Machine } from '@rebel-sim/engine';
 export class App implements AfterViewInit {
   @ViewChild('input') inputRef!: ElementRef<HTMLInputElement>;
 
-  protected readonly log = signal<string>('Rebel-Sim — M1 REPL\n');
+  protected readonly log = signal<string>('Rebel-Sim\n');
   protected readonly stack = signal<number[]>([]);
 
   private readonly machine = new Machine();

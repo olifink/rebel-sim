@@ -36,4 +36,20 @@ export class Sysvars {
   setState(value: number): void {
     this.arena.writeCell(this.offset('STATE'), value);
   }
+
+  getHere(): number {
+    return this.arena.readCellUnsigned(this.offset('HERE'));
+  }
+
+  setHere(value: number): void {
+    this.arena.writeCellUnsigned(this.offset('HERE'), value);
+  }
+
+  getLatest(): number {
+    return this.arena.readCellUnsigned(this.offset('LATEST'));
+  }
+
+  setLatest(value: number): void {
+    this.arena.writeCellUnsigned(this.offset('LATEST'), value);
+  }
 }

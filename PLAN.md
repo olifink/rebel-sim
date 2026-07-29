@@ -164,3 +164,43 @@ Colon-definitions, dictionary/`DICT` bank, real return-stack usage,
 canvas/`CHAR` bank, bitmap fonts, keyboard queue, storage, PWA packaging,
 multi-arena, Web Worker migration, `hal_error`/exceptions. All real, all
 scheduled in the roadmap above, none needed to prove M1's goal.
+
+---
+
+## M2 — Colon-Definitions & Dictionary — **done** (2026-07-29)
+
+**Goal:** `: SQUARE DUP * ; 5 SQUARE .` → `25`, with a *real* dictionary
+and a *real* DOCOL/return-stack threaded call, not a shortcut.
+
+**What shipped:**
+- `dictionary.ts` — the §6 header layout byte-for-byte (4-byte link
+  pointer / 1-byte flags+length / zero-padded name / 4-byte-aligned Code
+  Field), `writeHeader`, `findWord` (chain walk, skips `HIDDEN`,
+  most-recent-wins on shadowing), `markLatestImmediate`, `compileCell`,
+  and `begin`/`end`/`abortDefinition` for the `:`/`;` lifecycle.
+- `inner.ts` — the real §5 DOCOL branch: `executeXT` threads through a
+  DOCOL word's parameter field via an explicit IP register and the real
+  `RSTK` bank (not JS call recursion), so call depth is bounded by RSTK
+  size and hits `StackOverflowError` like any other bank. `EXIT`/`LIT`
+  are primitive token IDs but special-cased in the loop (they need to
+  mutate IP, which a plain stack-effect primitive can't touch).
+- `repl.ts` — `Machine` now boot-registers every primitive as a *real*
+  dictionary entry (uniform search path for primitives and user words —
+  no more parallel name→token-ID table), adds `DICT`+`RSTK` banks, and
+  `interpret()` is now a proper STATE-driven compile/interpret loop with
+  lookahead tokenization (so `:` can consume the following token as a
+  name). A compile-time error rolls the partial definition back
+  (`abortDefinition`) so a REPL typo doesn't corrupt the dictionary.
+- **Deliberate scope cut:** `:`/`;`/`IMMEDIATE` are handled as compiler
+  syntax in `repl.ts`, not as real dictionary words — they need direct
+  access to compiler state (`HERE`/`LATEST`/`STATE`) that a plain
+  primitive's interface doesn't expose. `RECURSE` / self-reference inside
+  a definition isn't supported (a word is `HIDDEN` until `;`, so it can't
+  find itself) — noted, not needed to prove the mechanism.
+- 9 new tests (colon-definitions, nested user-word calls, shadowing,
+  `IMMEDIATE`-at-compile-time semantics, `:`/`;` misuse errors, rollback
+  after a compile error, 31-char name limit, 50-deep nested-call chain
+  through the real RSTK) — 24 engine tests total, all passing. Verified
+  live in a headless browser: nested colon-definitions, `EMIT`/`CR` from
+  a compiled body, and confirmed the dictionary stays usable immediately
+  after a bad definition (no corruption), no console errors.
