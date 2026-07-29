@@ -1,5 +1,9 @@
 # Rebel-Sim Build Plan
 
+This is the decision/build log — what shipped, when, and why. For how
+the engine actually works (concepts, mechanisms, a worked trace), see
+`IMPLEMENTATION.md` instead.
+
 ## Context
 
 `FORTH-ARCHITECTURE.md` and `PORTING-WEB.md` specify what Rebel-Sim must

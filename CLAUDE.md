@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-This repo currently contains **no code** — only two specification/planning
-documents (`FORTH-ARCHITECTURE.md`, `PORTING-WEB.md`). There is no
-`package.json`, build system, linter, or test suite yet. Do not assume any
-of these exist; check before referencing commands to run. When code does
-get scaffolded here, this file should be updated with the actual
-build/lint/test commands.
+**This section is stale** — it describes the repo's pre-code state.
+Implementation is now underway (npm workspace, `packages/engine`,
+`packages/app`); see `PLAN.md` for the milestone log and `IMPLEMENTATION.md`
+for how the engine actually works. This file's build/lint/test guidance
+below has not yet been refreshed to match — verify against `package.json`
+scripts before relying on it.
 
 ## What this project is
 
@@ -39,6 +39,14 @@ Angular project shape, canvas rendering, browser storage, PWA packaging,
 and browser-runtime gotchas (Angular zone/change-detection interaction
 with a hot interpreter loop) that the architecture doc deliberately
 doesn't cover.
+
+**`IMPLEMENTATION.md` documents how the actually-built engine works** —
+a living, concept-by-concept reference (arena/banks/sysvars, the
+dictionary, token threading, compiling) grounded in the real code, kept
+current across milestones. Prefer it over re-deriving mechanisms from
+source when you just need to understand how something works; update it
+when a milestone changes or adds a mechanism. `PLAN.md` is the separate
+decision/build log (what shipped, when, why) — don't conflate the two.
 
 Both documents reference several `docs/*.md` files (`docs/MEMORY-MODEL.md`,
 `docs/SYSVARS.md`, `docs/SCREEN-MODULE.md`, `docs/KEYBOARD.md`,
