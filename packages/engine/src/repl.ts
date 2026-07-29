@@ -13,6 +13,7 @@ import { Bank, BankTable } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
+import { Screen, ScreenHal } from './screen.js';
 import { Inner } from './inner.js';
 import {
   abortDefinition,
@@ -28,11 +29,29 @@ import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 const DOCOL = opcodes.docolTokenId;
 
-const SYSV_BANK_SIZE = 256;
+const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/SYSVARS.md §1)
 const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
-const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M2
+const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M3
+
+// M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
+// mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
+// ownership: deferred") — Rebel-Sim boots into this mode and stays.
+const DEFAULT_SCREEN_WIDTH = 320;
+const DEFAULT_SCREEN_HEIGHT = 240;
+const DEFAULT_CHAR_CELL_W = 8; // matches the ZX Spectrum 8x8 font port
+const DEFAULT_CHAR_CELL_H = 8;
+const DEFAULT_INK = 0x00ff00; // green
+const DEFAULT_PAPER = 0x000000; // black
+
+export interface MachineOptions {
+  arenaSize?: number;
+  /** Host-supplied pixel drawing (canvas, etc). Defaults to a no-op —
+   * the CHAR bank / sysvar state is fully correct without one, which is
+   * all engine-level tests need. */
+  screenHal?: ScreenHal;
+}
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -41,11 +60,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly rstack: DataStack;
   readonly sysvars: Sysvars;
   readonly dictBank: Bank;
+  readonly screen: Screen;
   private readonly inner: Inner;
-  private output = '';
 
-  constructor(arenaSize = DEFAULT_ARENA_SIZE) {
-    this.arena = new Arena(arenaSize);
+  constructor(options: MachineOptions = {}) {
+    this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
     this.banks = new BankTable(this.arena);
     const sysvBank = this.banks.createBank('SYSV', 'main', SYSV_BANK_SIZE);
     const dstkBank = this.banks.createBank('DSTK', 'main', DSTK_BANK_SIZE);
@@ -53,10 +72,28 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.dictBank = this.banks.createBank('DICT', 'main', DICT_BANK_SIZE);
 
     this.sysvars = new Sysvars(this.arena, sysvBank);
+    this.sysvars.initHeader();
     this.sysvars.setBase(10);
     this.sysvars.setState(0);
     this.sysvars.setLatest(0);
     this.sysvars.setHere(this.dictBank.base);
+
+    const charCols = DEFAULT_SCREEN_WIDTH / DEFAULT_CHAR_CELL_W;
+    const charRows = DEFAULT_SCREEN_HEIGHT / DEFAULT_CHAR_CELL_H;
+    this.sysvars.set('SCREEN', 'SCREEN-WIDTH', DEFAULT_SCREEN_WIDTH);
+    this.sysvars.set('SCREEN', 'SCREEN-HEIGHT', DEFAULT_SCREEN_HEIGHT);
+    this.sysvars.set('SCREEN', 'CHAR-CELL-W', DEFAULT_CHAR_CELL_W);
+    this.sysvars.set('SCREEN', 'CHAR-CELL-H', DEFAULT_CHAR_CELL_H);
+    this.sysvars.set('SCREEN', 'CHAR-COLS', charCols);
+    this.sysvars.set('SCREEN', 'CHAR-ROWS', charRows);
+    this.sysvars.set('SCREEN', 'INK', DEFAULT_INK);
+    this.sysvars.set('SCREEN', 'PAPER', DEFAULT_PAPER);
+    this.sysvars.set('CORE', 'CURSOR-X', 0);
+    this.sysvars.set('CORE', 'CURSOR-Y', 0);
+
+    const charBank = this.banks.createBank('CHAR', 'main', charCols * charRows);
+    this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
+    this.screen.cls();
 
     this.stack = new DataStack(this.arena, dstkBank);
     this.rstack = new DataStack(this.arena, rstkBank);
@@ -67,24 +104,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
   }
 
-  emit(char: string): void {
-    this.output += char;
-  }
-
   getBase(): number {
     return this.sysvars.getBase();
   }
 
-  /** Drains and returns everything emitted since the last call. */
-  takeOutput(): string {
-    const out = this.output;
-    this.output = '';
-    return out;
-  }
-
   /** Interprets (or compiles, if STATE is active) one line of Forth
-   * source, returning what it emitted. */
-  interpret(line: string): string {
+   * source. Output is visible through `screen`/`stack`, not a return
+   * value — M1/M2's plain-text output buffer was always a stand-in for
+   * this (see primitives.ts's earlier history), retired now that a real
+   * CHAR-bank-backed screen exists. */
+  interpret(line: string): void {
     const tokens = line.trim().split(/\s+/).filter(Boolean);
     let i = 0;
     try {
@@ -108,7 +137,6 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       }
       throw err;
     }
-    return this.takeOutput();
   }
 
   private interpretExecuting(upper: string, token: string): void {

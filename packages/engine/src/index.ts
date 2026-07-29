@@ -5,4 +5,7 @@ export { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 export { Sysvars } from './sysvars.js';
 export { executePrimitive, TRUE, FALSE } from './primitives.js';
 export type { PrimitiveContext } from './primitives.js';
+export { Screen, NULL_SCREEN_HAL } from './screen.js';
+export type { ScreenHal } from './screen.js';
 export { Machine } from './repl.js';
+export type { MachineOptions } from './repl.js';

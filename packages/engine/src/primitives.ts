@@ -9,15 +9,14 @@
  */
 
 import { DataStack } from './stack.js';
+import { Screen } from './screen.js';
 
 export const TRUE = -1;
 export const FALSE = 0;
 
 export interface PrimitiveContext {
   readonly stack: DataStack;
-  /** Appends to the engine's plain-text output buffer (stand-in for
-   * hal_emit until M3 adds a real CHAR bank / canvas). */
-  emit(char: string): void;
+  readonly screen: Screen;
   getBase(): number;
 }
 
@@ -122,16 +121,47 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 17: // INVERT
       s.push(toCell(~s.pop()));
       break;
-    case 18: { // .
+    case 18: { // . ( n -- )
       const v = s.pop();
-      ctx.emit(v.toString(ctx.getBase()) + ' ');
+      const digits = v.toString(ctx.getBase()) + ' ';
+      for (const ch of digits) {
+        ctx.screen.emit(ch.charCodeAt(0));
+      }
       break;
     }
-    case 19: // EMIT
-      ctx.emit(String.fromCharCode(s.pop() & 0xff));
+    case 19: // EMIT ( char -- )
+      ctx.screen.emit(s.pop());
       break;
-    case 20: // CR
-      ctx.emit('\n');
+    case 20: // CR ( -- )
+      ctx.screen.emit(10); // '\n' — Screen.emit special-cases it as cursor control
+      break;
+    case 23: { // CHAR! ( col row code -- )
+      const code = s.pop();
+      const row = s.pop();
+      const col = s.pop();
+      ctx.screen.writeChar(col, row, code);
+      break;
+    }
+    case 24: { // CHAR@ ( col row -- code )
+      const row = s.pop();
+      const col = s.pop();
+      s.push(ctx.screen.readChar(col, row));
+      break;
+    }
+    case 25: // CLS ( -- )
+      ctx.screen.cls();
+      break;
+    case 26: { // AT-XY ( col row -- )
+      const row = s.pop();
+      const col = s.pop();
+      ctx.screen.setCursor(col, row);
+      break;
+    }
+    case 27: // INK ( color -- )
+      ctx.screen.setInk(s.pop());
+      break;
+    case 28: // PAPER ( color -- )
+      ctx.screen.setPaper(s.pop());
       break;
     default:
       throw new Error(`unknown primitive token ${tokenId}`);

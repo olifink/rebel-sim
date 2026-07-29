@@ -4,7 +4,8 @@ import { Machine } from './repl.js';
 describe('Machine.interpret', () => {
   it('evaluates a basic arithmetic expression', () => {
     const m = new Machine();
-    expect(m.interpret('2 3 + .')).toBe('5 ');
+    m.interpret('2 3 + .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('5');
   });
 
   it('supports stack shuffling words', () => {
@@ -41,10 +42,15 @@ describe('Machine.interpret', () => {
     expect(m2.stack.pop()).toBe(0);
   });
 
-  it('EMIT and CR write raw characters to output', () => {
+  it('EMIT writes a character at the cursor and CR moves to the next row', () => {
     const m = new Machine();
-    expect(m.interpret('65 EMIT')).toBe('A');
-    expect(m.interpret('CR')).toBe('\n');
+    m.interpret('65 EMIT');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('A');
+    expect(m.screen.getCursorCol()).toBe(1);
+
+    m.interpret('CR');
+    expect(m.screen.getCursorCol()).toBe(0);
+    expect(m.screen.getCursorRow()).toBe(1);
   });
 
   it('rejects unrecognized words', () => {
@@ -54,13 +60,15 @@ describe('Machine.interpret', () => {
 
   it('handles negative number literals', () => {
     const m = new Machine();
-    expect(m.interpret('-5 3 + .')).toBe('-2 ');
+    m.interpret('-5 3 + .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('-2');
   });
 
   it('divides and mods with truncating semantics, and rejects divide-by-zero', () => {
     const m = new Machine();
-    expect(m.interpret('7 2 / .')).toBe('3 ');
-    expect(m.interpret('7 2 MOD .')).toBe('1 ');
+    m.interpret('7 2 / .');
+    m.interpret('7 2 MOD .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('3 1');
     expect(() => m.interpret('1 0 /')).toThrow(/division by zero/);
   });
 });

@@ -5,7 +5,8 @@ describe('colon-definitions', () => {
   it('defines and calls a simple word', () => {
     const m = new Machine();
     m.interpret(': SQUARE DUP * ;');
-    expect(m.interpret('5 SQUARE .')).toBe('25 ');
+    m.interpret('5 SQUARE .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('25');
   });
 
   it('compiles number literals via LIT', () => {
@@ -19,26 +20,33 @@ describe('colon-definitions', () => {
     const m = new Machine();
     m.interpret(': SQUARE DUP * ;');
     m.interpret(': SUM-OF-SQUARES SQUARE SWAP SQUARE + ;');
-    expect(m.interpret('3 4 SUM-OF-SQUARES .')).toBe('25 ');
+    m.interpret('3 4 SUM-OF-SQUARES .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('25');
   });
 
   it('a redefined word shadows the earlier one (most-recent-wins search)', () => {
     const m = new Machine();
     m.interpret(': DOUBLE 2 * ;');
-    expect(m.interpret('10 DOUBLE .')).toBe('20 ');
+    m.interpret('10 DOUBLE .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('20');
+
     m.interpret(': DOUBLE DUP + ;');
-    expect(m.interpret('10 DOUBLE .')).toBe('20 ');
+    m.screen.cls();
+    m.interpret('10 DOUBLE .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('20');
   });
 
   it('IMMEDIATE words run during compilation of a later word, not deferred', () => {
     const m = new Machine();
     // An IMMEDIATE word that emits at compile time proves it actually ran
     // while SHOUT was being compiled, not when SHOUT is later called.
-    m.interpret(": TATTLE 42 EMIT ; IMMEDIATE");
-    const compileOutput = m.interpret(': SHOUT TATTLE ;');
-    expect(compileOutput).toBe('*'); // char code 42 = '*'
-    // Calling SHOUT itself does nothing further (TATTLE wasn't compiled in).
-    expect(m.interpret('SHOUT')).toBe('');
+    m.interpret(': TATTLE 42 EMIT ; IMMEDIATE');
+    m.interpret(': SHOUT TATTLE ;');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('*'); // char code 42 = '*'
+
+    // Calling SHOUT itself writes nothing further (TATTLE wasn't compiled in).
+    m.interpret('SHOUT');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('*');
   });
 
   it('rejects ; outside a definition and : nested inside one', () => {
@@ -62,7 +70,7 @@ describe('colon-definitions', () => {
     // definition can proceed normally afterward.
     expect(() => m.interpret('BROKEN')).toThrow(/unrecognized word/);
     m.interpret(': OK 1 ;');
-    expect(m.interpret('OK')).toBe('');
+    m.interpret('OK');
     expect(m.stack.pop()).toBe(1);
   });
 
@@ -84,6 +92,7 @@ describe('colon-definitions', () => {
       m.interpret(`: ${name} ${prev} 1 + ;`);
       prev = name;
     }
-    expect(m.interpret(`${prev} .`)).toBe('51 ');
+    m.interpret(`${prev} .`);
+    expect(m.screen.readRowText(0).trimEnd()).toBe('51');
   });
 });

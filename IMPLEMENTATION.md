@@ -98,7 +98,8 @@ the dictionary in another, sysvars in a third, and so on.
 
 *Implementation:* `BankTable` (`banks.ts`) — `createBank(tag, name,
 size)` / `findBank(tag, name)`. Current banks (in creation order):
-`SYSV`, `DSTK`, `RSTK`, `DICT`. (`CHAR`/`SCRN` arrive in M3.)
+`SYSV`, `DSTK`, `RSTK`, `DICT`, `CHAR` (§1.16). `SCRN` — the pixel
+framebuffer — is deliberately **not** one of these; see §1.17.
 
 ### 1.6 Sysvars — the machine's "control panel"
 
@@ -106,13 +107,22 @@ A block of ordinary cells holding interpreter/machine state — things
 like the current number base, whether the interpreter is compiling, and
 pointers into the dictionary. Forth code reads/writes them exactly like
 any other memory; the only thing special about them is what they mean.
-Grouped by owning subsystem (`FORTH`, and in later milestones `SCREEN`,
-`KEYBOARD`, etc.) rather than one flat list.
+Grouped by owning subsystem — `CORE`, `SCREEN`, `KEYBOARD`, `FONT`,
+`SPRITE`, `STORAGE`, plus Rebel-Sim's own `FORTH` group (interpreter
+state Rebel-ROM's Phase 11 doesn't have yet) — rather than one flat
+list. As of M3, group names/order/offsets match the real Rebel-ROM
+implementation exactly (see `rebel-opcodes.json`'s header); only the
+*field*-level layout within each group is Rebel-Sim's own (cell-sized
+fields vs. Rebel-ROM's packed byte/`u16` C structs).
 
-*Implementation:* `Sysvars` class (`sysvars.ts`), offsets sourced from
-`rebel-opcodes.json`'s `sysvarGroups.FORTH`. Fields in use: `BASE`
-(numeric radix), `STATE` (0 = interpreting, -1 = compiling), `HERE`
-(next free dictionary address), `LATEST` (most recently defined word).
+*Implementation:* `Sysvars` class (`sysvars.ts`) — a generic
+`get(group, field)`/`set(group, field, value)` pair (offsets sourced
+from `rebel-opcodes.json`'s `sysvarGroups`), plus a few named
+convenience wrappers for the hottest FORTH-group fields. Fields in use:
+`FORTH.BASE` (numeric radix), `FORTH.STATE` (0 = interpreting, -1 =
+compiling), `FORTH.HERE`/`FORTH.LATEST` (dictionary pointers, §1.9),
+`CORE.CURSOR-X`/`CORE.CURSOR-Y` (§1.18), `SCREEN.INK`/`SCREEN.PAPER`/
+`SCREEN.CHAR-COLS`/`SCREEN.CHAR-ROWS`/etc. (§1.16).
 
 ### 1.7 The Data Stack
 
@@ -290,6 +300,121 @@ bit 0). `FORTH-ARCHITECTURE.md` §7.
 *Implementation:* `TRUE`/`FALSE` constants in `primitives.ts`, used by
 `=`, `<`, `>`, `0=`.
 
+### 1.16 The Screen — one framebuffer, always graphics
+
+There's no separate "text mode." The screen is a pixel framebuffer,
+period; text is a second, independent description of what's on it,
+layered on top. Two pieces of state:
+
+- The **`CHAR` bank** — an ordinary arena bank, one byte per screen
+  cell, holding just the character *code* at each column/row. Plain
+  addressable memory, like anything else — `base + row*cols + col`.
+- The **framebuffer** — the actual pixels. Unlike `CHAR`, this is
+  **not** arena memory (§1.17).
+
+Writing a character updates both, one-directionally: the code goes into
+`CHAR`, and the corresponding glyph gets drawn into the framebuffer.
+Reading a character (`CHAR@`) only ever looks at `CHAR` — cheap, no
+pixel inspection. If something else later draws over those pixels
+(raw graphics, not yet implemented), `CHAR@` still reports the original
+code; the two aren't kept in sync in the other direction.
+
+*Implementation:* `Screen` class (`screen.ts`) — `writeChar`/`readChar`
+(`CHAR!`/`CHAR@`), `emit` (§1.18), `cls` (`CLS`). Matches Rebel-ROM's
+`CScreenModule` behavior exactly, including two easy-to-miss details:
+out-of-range coordinates are silently ignored/return-a-space rather than
+throwing, and there's deliberately no way to read back what color a
+character was written in (colors aren't stored in `CHAR`, only used at
+the moment of writing — see §1.17).
+
+### 1.17 The HAL boundary — why the engine never touches a canvas
+
+`packages/engine` has zero DOM dependencies (`PORTING-WEB.md` §1) — it
+can't import a canvas API even if it wanted to. But drawing a glyph's
+pixels is unavoidably host-specific (a `<canvas>` in a browser, an SPI
+panel on real hardware, nothing at all in a test). The fix is the same
+one real hardware abstraction layers always use: the engine defines an
+*interface* describing what it needs done, and whoever constructs the
+engine supplies an implementation.
+
+```ts
+interface ScreenHal {
+  blitGlyph(col, row, charCode, ink, paper): void; // paint one glyph cell
+  clearScreen(paper): void;                        // paint the whole framebuffer
+}
+```
+
+Every `CHAR`-bank write calls the injected `ScreenHal` synchronously, in
+the same tick — this is why `packages/app` doesn't need any kind of
+"redraw the canvas" step after `Machine.interpret()` returns; by the
+time it returns, every pixel is already correct. Tests (and any future
+headless use) get `NULL_SCREEN_HAL`, a no-op, for free — `CHAR`-bank/
+sysvar state is fully correct without a real HAL, which is all
+engine-level tests need to verify.
+
+This is also *why* the framebuffer (`SCRN` on Rebel-ROM) was never made
+an arena bank the way `CHAR` was: it's owned and drawn by the host side
+of this boundary, not by the engine, so it was never arena-resident
+memory to begin with — consistent with `FORTH-ARCHITECTURE.md` §8
+excluding it from the "dump the arena, load it elsewhere" portability
+claim.
+
+*Implementation:* `ScreenHal` interface + `NULL_SCREEN_HAL` in
+`screen.ts`. The real implementation, `CanvasScreenHal`
+(`packages/app/src/app/canvas-screen-hal.ts`), fills a cell in `paper`
+then draws the glyph's set pixels in `ink`, reading from a ported
+bitmap font table (§1.19). `INK`/`PAPER` are raw 24-bit `0xRRGGBB`
+truecolor values, not palette indices — matching Rebel-ROM's likely
+default mode, and meaning no palette table exists anywhere.
+
+### 1.18 Cursor & wrap-only output — no scrolling
+
+`EMIT`'s streaming behavior (as opposed to `CHAR!`'s positioned
+writes) needs a cursor. It lives in sysvars (`CORE.CURSOR-X`/`-Y`), not
+engine state, so it's just as poke-able as anything else. `AT-XY`
+repositions it with **no bounds-checking at all** — an absurd position
+just self-corrects the next time something advances the cursor, rather
+than being rejected up front (matching Rebel-ROM's `SetCursor` exactly).
+
+The interesting part is what happens at the edges: reaching the end of
+a row wraps to the start of the next one; reaching the last row wraps
+back to **row 0**, silently overwriting whatever was there. There is no
+scrolling. This is a real, deliberate Rebel-ROM design point (not a
+Rebel-Sim shortcut) — scrolling was explicitly cut from its screen
+module's first pass and can be revisited later if a real need shows up.
+
+`\r` and `\n` are handled as cursor-control codes *inside* `emit`
+itself, not as glyphs to draw — `\r` moves to column 0 without changing
+row, `\n` moves to the next row (wrapping per the above). Rebel-Sim's
+`CR` primitive is just `screen.emit(10)` — there's no separate
+cursor-move-only code path, because Rebel-ROM's `Emit()` doesn't have
+one either.
+
+*Implementation:* `Screen.emit`/`Screen.advanceCursor` (private) in
+`screen.ts`.
+
+### 1.19 Bitmap font blitting
+
+Character glyphs are a flat lookup table — one fixed-size bitmap per
+character code, nothing computed at render time. Rebel-Sim ported
+Rebel-ROM's own `font_zxspectrum.cpp` (8×8, generated once from a `.ttf`
+by Rebel-ROM's own tooling) byte-for-byte rather than inventing a font
+or rasterizing one at runtime — real data, not a Rebel-Sim shortcut.
+Each glyph is 8 bytes, one per pixel row, most-significant-bit =
+left-most pixel. A code outside the font's covered range (including
+space) renders as a blank cell.
+
+Drawing a glyph is always two steps: fill the whole cell in the current
+`PAPER` color, then draw only the glyph's *set* pixels in `INK` — never
+draw text with a host text-rendering API (`fillText` and friends) as
+the actual render path, since that can't represent "a Forth program
+poking one glyph cell directly as memory" the way a real bitmap-blit
+does.
+
+*Implementation:* `packages/app/src/app/font-zxspectrum.ts` (the ported
+data + `glyphRows(charCode)` lookup), consumed by `CanvasScreenHal`
+(§1.17).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -315,7 +440,7 @@ TIMES.xt, EXIT.xt]`.
 |---|---|---|
 | `5` | Not a word; parses as a number; pushed. | `[5]` |
 | `SQUARE` | Found; `executeXT`. Code Field is `DOCOL` → push return sentinel, `ip` = start of PFA. Loop: `DUP` runs (`executePrimitive`) → duplicates top; `*` runs → pops both, pushes product; `EXIT` runs → pops the sentinel off the return stack, loop ends. | `[5]` → `[5,5]` → `[25]` |
-| `.` | Found (a primitive, not `DOCOL`) → dispatches directly: pops 25, formats it in the current `BASE`, appends to the output buffer. | `[]`, output: `"25 "` |
+| `.` | Found (a primitive, not `DOCOL`) → dispatches directly: pops 25, formats it in the current `BASE`, streams each character through `screen.emit()` — writing it into the `CHAR` bank at the cursor and blitting it via the `ScreenHal` (§1.16-§1.17). | `[]`, screen row 0: `"25 "` |
 
 No JavaScript recursion occurred anywhere in `SQUARE`'s execution — the
 nesting was carried entirely by the real (bank-backed) return stack,
@@ -353,6 +478,14 @@ exactly as it would be on the bare-metal target.
 | **Return stack** | The LIFO stack of "where to resume" addresses, used when one compiled word calls another. |
 | **LIT** | The primitive that embeds a raw number in a compiled word's body (compiled as `LIT` followed by the literal cell). |
 | **EXIT** | The primitive that ends a compiled word's execution — pops the return stack back into the instruction pointer. |
+| **CHAR bank** | Arena bank holding one character code per screen cell (1 byte each). Never stores color — only the code. |
+| **Framebuffer / `SCRN`** | The actual pixels. Not arena memory — owned by the host side of the HAL boundary (a `<canvas>` in Rebel-Sim), excluded from the portable-dump claim. |
+| **HAL** | Hardware Abstraction Layer — the boundary where the engine defines an interface for something host-specific (drawing pixels) and the host supplies the implementation. |
+| **`ScreenHal`** | Rebel-Sim's HAL interface for screen drawing: `blitGlyph`/`clearScreen`. Defaults to a no-op (`NULL_SCREEN_HAL`) so engine tests don't need a real canvas. |
+| **Glyph** | One character's bitmap — a small fixed-size grid of on/off pixels, looked up by character code, never computed at render time. |
+| **Ink / Paper** | Foreground / background color for a character write. Raw 24-bit truecolor in Rebel-Sim, not a palette index. |
+| **Blit** | Copying a bitmap's pixels onto a destination (here: a glyph's pixels onto the framebuffer) — no scaling or transformation, just placement. |
+| **Wrap (vs. scroll)** | What happens when text output reaches the last row: it overwrites row 0 rather than shifting everything up. A deliberate Rebel-ROM design choice, not a Rebel-Sim gap. |
 
 ---
 
@@ -362,7 +495,7 @@ exactly as it would be on the bare-metal target.
 |---|---|---|
 | **M1** | Arena, banks, sysvars (`FORTH` group), data stack, primitive dispatch (20 primitives), a line-based outer interpreter with no dictionary yet. | `arena.ts`, `banks.ts`, `sysvars.ts`, `stack.ts`, `primitives.ts`, `repl.ts` |
 | **M2** | Real dictionary (§1.9), colon-definitions (§1.11), the DOCOL-threaded inner interpreter with a real return stack (§1.13), `IMMEDIATE` (§1.14). Primitives became real dictionary entries. | `dictionary.ts`, `inner.ts`, `repl.ts` (rewritten) |
-| M3 (planned) | Screen: `CHAR` bank, canvas framebuffer, bitmap-font blitting. | — |
+| **M3** | Screen: `CHAR` bank, the `ScreenHal` HAL boundary (§1.17), cursor/wrap-only output (§1.18), bitmap-font blitting (§1.19) — a real canvas-backed `CHAR!`/`CHAR@`/`EMIT`/`CR`/`CLS`/`AT-XY`/`INK`/`PAPER`. Sysvars grew `CORE`/`SCREEN` groups matching Rebel-ROM's real layout; M1's plain-text output buffer retired. Raw pixel drawing (`hal_draw_*`) deferred — nothing needs it yet. | `screen.ts`, `canvas-screen-hal.ts`, `font-zxspectrum.ts` |
 | M4 (planned) | Keyboard: non-blocking event queue, blocking `KEY`. | — |
 | M5 (planned) | Storage: OPFS-backed projects/carts. | — |
 | M6 (planned) | PWA packaging. | — |

@@ -1,5 +1,5 @@
 {
-  "_provisional": "Authored in Rebel-Sim per FORTH-ARCHITECTURE.md §0. Rebel-ROM's actual generated source-of-truth artifact is not available in this repo. These token IDs, sysvar offsets, and bank tags are Rebel-Sim's own provisional layout and MUST be reconciled against Rebel-ROM's real values before any cross-target state (dictionary dumps, etc.) is expected to be compatible. Do not treat these numbers as canonical outside this repo.",
+  "_provisional": "Authored in Rebel-Sim per FORTH-ARCHITECTURE.md §0. As of M3, this is checked against the real Rebel-ROM reference implementation (a sibling checkout, not in this repo) rather than invented from the spec docs alone: sysvar GROUP NAMES, ORDER, and OFFSETS below match src/sysvars.h and src/screenmodule.h exactly. One deliberate divergence: Rebel-ROM packs sysvar fields as byte/u16 C structs; Rebel-Sim stores every field as a full 4-byte cell for uniformity with the rest of this engine, so FIELD offsets within each group do NOT match Rebel-ROM byte-for-byte, only the group-level map does. Primitive token IDs and the DICT/RSTK/CHAR bank contents are Rebel-Sim-only (Rebel-ROM's Forth/Phase 11 doesn't exist yet) and have no real counterpart to reconcile against.",
 
   "cellSize": 4,
   "docolTokenId": 0,
@@ -22,11 +22,17 @@
     { "id": 15, "name": "AND" },
     { "id": 16, "name": "OR" },
     { "id": 17, "name": "INVERT" },
-    { "id": 18, "name": "." },
-    { "id": 19, "name": "EMIT" },
-    { "id": 20, "name": "CR" },
+    { "id": 18, "name": ".", "note": "formats the popped number in the current BASE and streams it (plus a trailing space) through screen.emit(), one character at a time" },
+    { "id": 19, "name": "EMIT", "note": "pops a raw character code and streams it through screen.emit() (M3: a real CHAR-bank + framebuffer write, matching Rebel-ROM's CScreenModule::Emit — \\r/\\n are handled as control codes there, not glyphs)" },
+    { "id": 20, "name": "CR", "note": "M3: screen.emit(10) — Rebel-ROM's Emit() special-cases '\\n' as cursor-to-next-row rather than treating CR as a HAL call of its own" },
     { "id": 21, "name": "EXIT", "note": "pops the return stack into IP; only meaningful inside a compiled word body, special-cased by the inner interpreter (M2)" },
-    { "id": 22, "name": "LIT", "note": "pushes the next parameter-field cell as a data literal and skips over it; only meaningful inside a compiled word body, special-cased by the inner interpreter (M2)" }
+    { "id": 22, "name": "LIT", "note": "pushes the next parameter-field cell as a data literal and skips over it; only meaningful inside a compiled word body, special-cased by the inner interpreter (M2)" },
+    { "id": 23, "name": "CHAR!", "note": "( col row code -- ) M3: CScreenModule::WriteChar's 3-arg default-ink/paper overload — writes the CHAR bank cell and blits the glyph via the injected ScreenHal" },
+    { "id": 24, "name": "CHAR@", "note": "( col row -- code ) M3: CScreenModule::ReadChar — reads the CHAR bank directly, no framebuffer involved; out-of-range returns 32 (space), matching Rebel-ROM" },
+    { "id": 25, "name": "CLS", "note": "( -- ) M3: CScreenModule::Cls — fills the CHAR bank with spaces, clears the framebuffer to the current PAPER color, resets the cursor to 0,0" },
+    { "id": 26, "name": "AT-XY", "note": "( col row -- ) M3: CScreenModule::SetCursor — sets CURSOR-X/CURSOR-Y directly, no bounds-checking (matching Rebel-ROM; an out-of-range cursor self-corrects on the next EMIT via AdvanceCursor's wrap)" },
+    { "id": 27, "name": "INK", "note": "( color -- ) M3: sets the SCREEN group's default foreground color sysvar used by CHAR!/EMIT/. when no override is given. Rebel-Sim stores this as a raw 24-bit 0xRRGGBB truecolor value (Rebel-ROM's TColor is likewise a raw pixel value, not a palette index — direct/truecolor mode is its likely default per docs/SCREEN-MODULE.md §4)" },
+    { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" }
   ],
 
   "bankTags": {
@@ -34,15 +40,65 @@
     "DSTK": "data stack, per-arena",
     "DICT": "dictionary / user program space, per-arena (in use since M2)",
     "RSTK": "return stack, per-arena (in use since M2)",
-    "CHAR": "character-code grid, per-arena (reserved, unused until M3)"
+    "CHAR": "character-code grid, per-arena, 1 byte per cell, write-through into the framebuffer via ScreenHal (in use since M3, matches Rebel-ROM's CHAR bank exactly — docs/SCREEN-MODULE.md §3)",
+    "SCRN": "pixel framebuffer — NOT an arena bank in Rebel-Sim (matches Rebel-ROM: externally-backed, outside the arena's own memory accounting, excluded from the portable-dump claim per FORTH-ARCHITECTURE.md §8). Rebel-Sim's analog is the host-supplied ScreenHal implementation drawing to a <canvas>, never arena-resident memory."
   },
 
   "sysvarGroups": {
-    "FORTH": {
-      "baseOffset": 0,
+    "CORE": {
+      "baseOffset": 16,
+      "note": "matches src/sysvars.h's SYSVARS_CORE_OFFSET (0x010). Real TCoreSysVars also has SCREEN-MODE/COLOR-DEPTH/PALETTE-BANK/KEYMAP/LAST-ERROR — not implemented in Rebel-Sim yet, added when something needs them, same reserved-slot precedent as everywhere else in this table.",
       "fields": {
-        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1/M2 hardcode the DSTK bank size instead)" },
-        "RP0": { "offset": 4, "note": "return stack base address (reserved, M2 hardcodes the RSTK bank size instead)" },
+        "CURSOR-X": { "offset": 0, "note": "text cursor column. M3: owned by Screen, not bounds-checked on write (matches Rebel-ROM's SetCursor)" },
+        "CURSOR-Y": { "offset": 4, "note": "text cursor row" }
+      },
+      "groupSizeBytes": 48
+    },
+    "SCREEN": {
+      "baseOffset": 64,
+      "note": "matches src/sysvars.h's SYSVARS_SCREEN_OFFSET (0x040) and screenmodule.h's TScreenSysVars. COLOR-DEPTH/PALETTE-SIZE omitted — Rebel-Sim's canvas HAL is truecolor-only, no palette-indirection mode to track.",
+      "fields": {
+        "SCREEN-WIDTH": { "offset": 0, "note": "framebuffer width in pixels" },
+        "SCREEN-HEIGHT": { "offset": 4, "note": "framebuffer height in pixels" },
+        "CHAR-CELL-W": { "offset": 8, "note": "current glyph cell width in pixels" },
+        "CHAR-CELL-H": { "offset": 12, "note": "current glyph cell height in pixels" },
+        "CHAR-COLS": { "offset": 16, "note": "character grid width = SCREEN-WIDTH / CHAR-CELL-W; the actual addressing stride into the CHAR bank (docs/SCREEN-MODULE.md §3.2), not recomputed on the fly" },
+        "CHAR-ROWS": { "offset": 20, "note": "character grid height = SCREEN-HEIGHT / CHAR-CELL-H" },
+        "INK": { "offset": 24, "note": "default foreground color (0xRRGGBB) for character writes" },
+        "PAPER": { "offset": 28, "note": "default background color (0xRRGGBB) for character writes" }
+      },
+      "groupSizeBytes": 64
+    },
+    "KEYBOARD": {
+      "baseOffset": 128,
+      "note": "matches src/sysvars.h's SYSVARS_KEYBOARD_OFFSET (0x080). Reserved, no fields yet — populated when M4 lands.",
+      "fields": {},
+      "groupSizeBytes": 64
+    },
+    "FONT": {
+      "baseOffset": 192,
+      "note": "matches src/sysvars.h's SYSVARS_FONT_OFFSET (0x0C0), Rebel-ROM's Phase 6 font-blob system. Rebel-Sim doesn't have a Forth-addressable FONT bank — M3's glyph bitmap is a static host-side asset in packages/app, not arena memory — so this group stays reserved/empty rather than reimplemented.",
+      "fields": {},
+      "groupSizeBytes": 64
+    },
+    "SPRITE": {
+      "baseOffset": 256,
+      "note": "matches src/sysvars.h's SYSVARS_SPRITE_OFFSET (0x100). Reserved.",
+      "fields": {},
+      "groupSizeBytes": 64
+    },
+    "STORAGE": {
+      "baseOffset": 320,
+      "note": "matches src/sysvars.h's SYSVARS_STORAGE_OFFSET (0x140). Reserved, populated when M5 lands.",
+      "fields": {},
+      "groupSizeBytes": 64
+    },
+    "FORTH": {
+      "baseOffset": 384,
+      "note": "Rebel-Sim-only group (Rebel-ROM's Phase 11/Forth doesn't exist yet) — appended after Rebel-ROM's real groups (STORAGE ends at 0x180) rather than colliding with them, same 64-byte-slot incremental-reservation pattern.",
+      "fields": {
+        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1-M3 hardcode the DSTK bank size instead)" },
+        "RP0": { "offset": 4, "note": "return stack base address (reserved, M2-M3 hardcode the RSTK bank size instead)" },
         "HERE": { "offset": 8, "note": "dictionary next-free pointer, grows up within DICT (in use since M2)" },
         "LATEST": { "offset": 12, "note": "most recently defined dictionary entry's address, 0 = empty dictionary (in use since M2)" },
         "BASE": { "offset": 16, "note": "numeric input/output radix" },
