@@ -35,6 +35,7 @@ export interface DictionaryContext {
 export interface DictionaryEntry {
   readonly entryAddr: number;
   readonly cfa: number;
+  readonly name: string;
   readonly immediate: boolean;
   /** M8: FLAG_COMPILE_ONLY was reserved in the header layout from the
    * start but never actually checked anywhere until control-flow words
@@ -43,6 +44,14 @@ export interface DictionaryEntry {
    * interpreter (repl.ts) rejects a compile-only word found while
    * interpreting (STATE=0). */
   readonly compileOnly: boolean;
+}
+
+function decodeName(ctx: DictionaryContext, addr: number, len: number): string {
+  let name = '';
+  for (let i = 0; i < len; i++) {
+    name += String.fromCharCode(ctx.arena.readByte(addr + 5 + i));
+  }
+  return name;
 }
 
 export class DictionaryOverflowError extends Error {}
@@ -87,6 +96,7 @@ export function writeHeader(
   return {
     entryAddr,
     cfa,
+    name: upperName,
     immediate: (extraFlags & FLAG_IMMEDIATE) !== 0,
     compileOnly: (extraFlags & FLAG_COMPILE_ONLY) !== 0,
   };
@@ -117,6 +127,7 @@ export function findWord(ctx: DictionaryContext, name: string): DictionaryEntry 
         return {
           entryAddr: addr,
           cfa,
+          name: upperName,
           immediate: (flagsByte & FLAG_IMMEDIATE) !== 0,
           compileOnly: (flagsByte & FLAG_COMPILE_ONLY) !== 0,
         };
@@ -127,6 +138,37 @@ export function findWord(ctx: DictionaryContext, name: string): DictionaryEntry 
   }
 
   return undefined;
+}
+
+/** Walks the LATEST chain like findWord, but collects every visible
+ * (non-HIDDEN) entry instead of matching one name — for UI/debugging
+ * use only (e.g. an inspector panel). Most-recently-defined first,
+ * same order the Forth-level WORDS walk prints. */
+export function listDictionaryEntries(ctx: DictionaryContext): DictionaryEntry[] {
+  const { arena } = ctx;
+  const entries: DictionaryEntry[] = [];
+  let addr = ctx.sysvars.getLatest();
+
+  while (addr !== 0) {
+    const flagsByte = arena.readByte(addr + 4);
+    const len = flagsByte & NAME_LEN_MASK;
+    const hidden = (flagsByte & FLAG_HIDDEN) !== 0;
+
+    if (!hidden) {
+      const cfa = alignCell(addr + 5 + len);
+      entries.push({
+        entryAddr: addr,
+        cfa,
+        name: decodeName(ctx, addr, len),
+        immediate: (flagsByte & FLAG_IMMEDIATE) !== 0,
+        compileOnly: (flagsByte & FLAG_COMPILE_ONLY) !== 0,
+      });
+    }
+
+    addr = arena.readCellUnsigned(addr);
+  }
+
+  return entries;
 }
 
 export function markLatestImmediate(ctx: DictionaryContext): void {

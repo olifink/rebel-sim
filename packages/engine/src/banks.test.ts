@@ -50,4 +50,12 @@ describe('BankTable', () => {
     const banks = new BankTable(new Arena(1 << 16));
     expect(() => banks.requireBank('DATA', 'MISSING')).toThrow(/not found/);
   });
+
+  it('getAllBanks lists every bank in creation order', () => {
+    const banks = new BankTable(new Arena(1 << 16));
+    expect(banks.getAllBanks()).toEqual([]);
+    const a = banks.createBank('DSTK', 64);
+    const b = banks.createBank('RSTK', 64);
+    expect(banks.getAllBanks()).toEqual([a, b]);
+  });
 });

@@ -1,5 +1,6 @@
 import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
-import { Machine, runStorageSelfTest } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, listDictionaryEntries } from '@rebel-sim/engine';
+import type { Bank, DictionaryEntry } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
@@ -22,6 +23,9 @@ export class App implements AfterViewInit, OnDestroy {
   @ViewChild('screen') screenRef!: ElementRef<HTMLCanvasElement>;
 
   protected readonly stack = signal<number[]>([]);
+  protected readonly returnStack = signal<number[]>([]);
+  protected readonly dictionaryWords = signal<DictionaryEntry[]>([]);
+  protected readonly bankTable = signal<readonly Bank[]>([]);
   protected readonly storageStatus = signal<string>('checking…');
 
   // Constructed in ngAfterViewInit — the engine's Screen.cls() (M3) runs
@@ -73,6 +77,8 @@ export class App implements AfterViewInit, OnDestroy {
       storageHal,
     });
     this.screenRef.nativeElement.focus();
+    this.bankTable.set(this.machine.banks.getAllBanks());
+    this.lastBankCount = this.machine.banks.getAllBanks().length;
 
     // M5's end-to-end proof, mirroring CKernel::RunStorageSelfTest
     // (docs/STORAGE.md §8): round-trip a synthetic asset through the real
@@ -170,6 +176,9 @@ export class App implements AfterViewInit, OnDestroy {
   // on the empty queue — all before this call returns), so the tick
   // where the stack actually changed can still report 'blocked'.
   private lastStackSnapshot: number[] = [];
+  private lastRStackSnapshot: number[] = [];
+  private lastLatestAddr = -1;
+  private lastBankCount = 0;
 
   // Must be called from outside the Angular zone (ngAfterViewInit's call
   // site already is) — requestAnimationFrame callbacks scheduled there
@@ -207,6 +216,29 @@ export class App implements AfterViewInit, OnDestroy {
       if (!arraysEqual(current, this.lastStackSnapshot)) {
         this.lastStackSnapshot = current;
         this.zone.run(() => this.stack.set(current));
+      }
+      const currentRStack = this.machine.rstack.toArray();
+      if (!arraysEqual(currentRStack, this.lastRStackSnapshot)) {
+        this.lastRStackSnapshot = currentRStack;
+        this.zone.run(() => this.returnStack.set(currentRStack));
+      }
+      // New definitions only ever append to LATEST — comparing the
+      // address is a cheap enough guard to avoid re-walking the whole
+      // dictionary chain (listDictionaryEntries) on every frame.
+      const latestAddr = this.machine.sysvars.getLatest();
+      if (latestAddr !== this.lastLatestAddr) {
+        this.lastLatestAddr = latestAddr;
+        const entries = listDictionaryEntries(this.machine);
+        this.zone.run(() => this.dictionaryWords.set(entries));
+      }
+      // Banks are effectively boot-fixed today (M8's vocabulary has no
+      // way to create one at runtime), but diff by count anyway rather
+      // than assuming that stays true, matching the other two guards.
+      const bankCount = this.machine.banks.getAllBanks().length;
+      if (bankCount !== this.lastBankCount) {
+        this.lastBankCount = bankCount;
+        const banks = this.machine.banks.getAllBanks();
+        this.zone.run(() => this.bankTable.set(banks));
       }
       requestAnimationFrame(tick);
     };

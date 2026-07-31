@@ -98,4 +98,10 @@ export class BankTable {
     }
     return bank;
   }
+
+  /** Every bank in creation order — for UI/debugging use only (e.g. an
+   * inspector panel), same spirit as DataStack.toArray(). */
+  getAllBanks(): readonly Bank[] {
+    return this.banks;
+  }
 }

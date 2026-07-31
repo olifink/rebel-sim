@@ -1,13 +1,45 @@
 <main class="repl">
-  <canvas #screen class="screen" tabindex="0"></canvas>
+  <div class="console">
+    <canvas #screen class="screen" tabindex="0"></canvas>
 
-  <div class="stack-bar">
-    <span class="stack-label">stack (top→bottom):</span>
-    <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
+    <div class="stack-bar">
+      <span class="stack-label">stack (top→bottom):</span>
+      <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
+    </div>
+
+    <div class="storage-bar">
+      <span class="stack-label">storage:</span>
+      <span class="storage-status">{{ storageStatus() }}</span>
+    </div>
   </div>
 
-  <div class="storage-bar">
-    <span class="stack-label">storage:</span>
-    <span class="storage-status">{{ storageStatus() }}</span>
-  </div>
+  <aside class="inspector">
+    <div class="inspector-section">
+      <div class="inspector-label">dictionary ({{ dictionaryWords().length }}):</div>
+      <div class="inspector-words">
+        @for (w of dictionaryWords(); track w.entryAddr) {
+          <span class="inspector-word">{{ w.name }}@if (w.immediate) {<span class="flag-immediate">*</span>}</span>
+        }
+      </div>
+    </div>
+
+    <div class="inspector-section">
+      <div class="inspector-label">return stack (top→bottom):</div>
+      <div class="inspector-values">{{ returnStack().join(' ') || '(empty)' }}</div>
+    </div>
+
+    <div class="inspector-section">
+      <div class="inspector-label">banks:</div>
+      <table class="bank-table">
+        @for (b of bankTable(); track b.name) {
+          <tr>
+            <td>{{ b.tag }}</td>
+            <td>{{ b.name }}</td>
+            <td>{{ b.base }}</td>
+            <td>{{ b.size }}</td>
+          </tr>
+        }
+      </table>
+    </div>
+  </aside>
 </main>

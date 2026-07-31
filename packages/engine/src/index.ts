@@ -15,3 +15,5 @@ export { Storage, NULL_STORAGE_HAL, runStorageSelfTest } from './storage.js';
 export type { StorageHal } from './storage.js';
 export { Machine } from './repl.js';
 export type { MachineOptions, StepStatus } from './repl.js';
+export { listDictionaryEntries } from './dictionary.js';
+export type { DictionaryEntry } from './dictionary.js';

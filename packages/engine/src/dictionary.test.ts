@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
+import { FLAG_HIDDEN, FLAG_IMMEDIATE, listDictionaryEntries, writeHeader } from './dictionary.js';
 
 describe('colon-definitions', () => {
   it('defines and calls a simple word', () => {
@@ -94,5 +95,41 @@ describe('colon-definitions', () => {
     }
     m.interpret(`${prev} .`);
     expect(m.screen.readRowText(0).trimEnd()).toBe('51');
+  });
+});
+
+describe('listDictionaryEntries', () => {
+  it('lists boot-registered primitives with names, most-recently-defined first', () => {
+    const m = new Machine();
+    const entries = listDictionaryEntries(m);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0].entryAddr).toBe(m.sysvars.getLatest());
+    expect(entries.every((e) => e.name.length > 0)).toBe(true);
+  });
+
+  it('includes a user colon-definition with its flags and name', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    const entries = listDictionaryEntries(m);
+    const entry = entries.find((e) => e.name === 'SQUARE');
+    expect(entry).toBeDefined();
+    expect(entry!.immediate).toBe(false);
+    expect(entry!.compileOnly).toBe(false);
+  });
+
+  it('excludes a HIDDEN entry (mid-definition state)', () => {
+    const m = new Machine();
+    const before = listDictionaryEntries(m).length;
+    writeHeader(m, 'INVISIBLE', FLAG_HIDDEN, 0);
+    const after = listDictionaryEntries(m);
+    expect(after.length).toBe(before);
+    expect(after.some((e) => e.name === 'INVISIBLE')).toBe(false);
+  });
+
+  it('reports IMMEDIATE on entries that carry the flag', () => {
+    const m = new Machine();
+    writeHeader(m, 'SHOUTY', FLAG_IMMEDIATE, 0);
+    const entry = listDictionaryEntries(m).find((e) => e.name === 'SHOUTY');
+    expect(entry?.immediate).toBe(true);
   });
 });
