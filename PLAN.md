@@ -67,12 +67,13 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
    build anything portable on top of it — memory access, control flow,
    return-stack words, defining words, strings, remaining stack/arithmetic
    ops.
-10. **M9 — Remote channel (WebMCP)**: `RemoteChannel` binding the outer
-    loop to a WebMCP-driven input source, per §7a's "zero interpreter
-    changes" design goal. Deliberately sequenced after M8 — a remote/MCP
-    surface is only as useful as the vocabulary it can exercise. Revisit
-    REI's MCP tool-surface ideas (`execute_word`/`define_word`/
-    `trace_execution`/etc.) here once there's a vocabulary worth wrapping.
+10. **M9 — Remote channel (WebMCP)** — **done**: `RemoteChannel`/
+    `CompositeChannel` binding the outer loop to a WebMCP-driven input
+    source via Angular's own `declareExperimentalWebMcpTool`, per §7a's
+    "zero interpreter changes" design goal — no `execute_word`/
+    `define_word`/`trace_execution` tools needed, a plain `type()` plus
+    reads over the M8 inspector panel's introspection surface covers it
+    (Forth's homoiconic). Detailed below.
 11. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
@@ -1148,3 +1149,119 @@ user-defined words, stack-neutral, terminating cleanly.
 `TYPE` greeting, and a `VARIABLE`/`@`/`!` round-trip — every one printed
 the correct result directly on the canvas, stack left clean after each,
 zero console errors throughout.
+
+## M9 — Remote channel (WebMCP)
+
+### What the plan assumed, and what turned out to be wrong
+
+The first design pass assumed "WebMCP" meant building bespoke
+infrastructure to get MCP access into a browser tab — a Node process
+hosting a WebSocket server (for the page) and an MCP-over-HTTP server
+(for a client), auto-started alongside `ng serve`. That design was
+never implemented: a review question ("why does this need a localhost
+server at all?") prompted checking what "WebMCP" actually names, and
+it turned out to be a specific, already-real web platform feature
+(`webmachinelearning/webmcp`) where **the page itself** registers
+tools via `document.modelContext.registerTool(...)`, with the
+browser/an extension doing the client-facing bridging — no server of
+any kind belongs in this repo. Better still, Angular 22.0.8 (already
+the installed version here) ships this natively as
+`declareExperimentalWebMcpTool`/`provideExperimentalWebMcpTools`
+(`@angular/core`), confirmed directly against
+`node_modules/@angular/core/types/core.d.ts` before writing any code
+against it. The lesson worth keeping: an unfamiliar named technology
+in a design doc is a fact to verify, not a shape to infer from the
+name and prior experience with similar-sounding patterns.
+
+### What shipped
+
+**Engine (`packages/engine/src`):** `RemoteChannel` and
+`CompositeChannel`, two small additions to `channel.ts` alongside the
+existing `Channel` interface/`KeyboardChannel`. `RemoteChannel` is a
+plain FIFO of chars fed by `push(text)` — deliberately uncapped, unlike
+`Keyboard`'s 32-slot ring buffer, since that cap models real HID
+hardware and programmatic input has no such constraint to honor.
+`CompositeChannel` merges N channels into one, first-ready-wins,
+scanned in argument order. `Machine`'s constructor
+(`repl.ts`) gained a `remoteChannel?: RemoteChannel` option
+(`channel`, if given, still wins — fully backward compatible); when
+`remoteChannel` is supplied without an explicit `channel`, the
+constructor binds `CompositeChannel([KeyboardChannel, remoteChannel])`
+instead of a bare `KeyboardChannel` — resolved *after* `this.keyboard`
+exists specifically to sidestep the chicken-and-egg problem of needing
+a `Keyboard` instance to build a `KeyboardChannel` before `Machine`
+itself exists. Zero changes to `inner.ts`/`primitives.ts` — `KEY`'s
+dispatch through `ctx.channel` was already the M7 design's whole
+point, and it held exactly as advertised.
+
+**App (`packages/app/src/app/app.ts`):** a `RemoteChannel` field wired
+into `Machine` construction, and a `registerWebMcpTools()` method
+(called once, right after `this.machine` exists in `ngAfterViewInit`)
+that calls `declareExperimentalWebMcpTool` six times — one write
+(`type`, pushing text into `remoteChannel`) and five reads
+(`read_screen`, `read_stack`, `read_return_stack`, `read_dictionary`,
+`read_banks`) — every read closing directly over `machine`, reusing
+exactly the introspection surface the M8 inspector panel already
+exposes (`Machine.stack`/`rstack`, `listDictionaryEntries`,
+`Machine.banks.getAllBanks()`, `Screen.readRowText()`). No
+`execute_word`/`define_word` tools — Forth's homoiconic, so `type()`
+already covers both ("`5 SQUARE .`" executes, "`: SQUARE DUP * ;`"
+defines — both are just text sent to the same REPL).
+`declareExperimentalWebMcpTool` needs an explicit `Injector` when
+called outside a constructor/field-initializer context, so `App`
+now injects `Injector` alongside its existing `NgZone`. Each
+registration call is wrapped (`safeRegisterWebMcpTool`) against both a
+synchronous throw and an async `Promise` rejection — WebMCP is gated
+behind `chrome://flags/#enable-webmcp-testing` as of this writing, and
+the app must keep booting normally on a browser without it, same as
+the existing OPFS-storage-unsupported path.
+
+**A real gap surfaced during implementation, not before:** looping
+`declareExperimentalWebMcpTool` over an array of six differently-shaped
+tool objects (one needs a `text` argument, five take none) fails to
+compile — TypeScript's generic inference collapses to a single
+`InputSchema` across the whole array/loop rather than inferring one
+per element. Fixed by making each `declareExperimentalWebMcpTool` call
+its own independent statement (six call sites, each its own generic
+instantiation) rather than a shared loop, with the try/catch
+boilerplate factored into the small `safeRegisterWebMcpTool` helper
+instead.
+
+**Verified live in the browser:** `document.modelContext` was not
+present in the Chrome instance available for testing (Chrome 150,
+without the WebMCP testing flag enabled, and browser-internal
+`chrome://` pages aren't reachable through the automation tooling used
+this session) — so the actual `declareExperimentalWebMcpTool`-to-agent
+path couldn't be exercised end-to-end today. What *was* verified
+directly: the app boots with zero console errors when
+`document.modelContext` is absent (graceful degradation confirmed);
+and, bypassing only the registration call itself,
+`remoteChannel.push('2 3 + .\n')` correctly typed, executed, and
+printed `5` on the framebuffer exactly as a real `type` tool call
+would, immediately followed by physical keyboard input (`7 DUP .`)
+proving `CompositeChannel` genuinely merges both sources into the same
+live session rather than one displacing the other. The one piece not
+directly observed end-to-end is Angular's own `declareExperimentalWebMcpTool`
+plumbing in a browser that actually has `document.modelContext` —
+that's Angular's tested code, not this repo's, and the app-side wiring
+around it (what *is* this repo's code) is what got verified.
+
+**Tests:** `channel.test.ts` gained cases for `RemoteChannel` (FIFO
+order, empty-queue `-1`, accumulation across multiple `push()` calls)
+and `CompositeChannel` (no data when no sub-channel has data,
+first-ready-wins in argument order, each source's own order preserved,
+a mixed `KeyboardChannel`+`RemoteChannel` composite) — 151 engine tests
+total, all passing; 8 app tests unaffected (`app.spec.ts`'s
+keyboard-driven test staying green is what confirms `CompositeChannel`
+didn't regress the M7a on-screen REPL flow).
+
+**Consuming this today is explicitly out of this repo's scope.** As of
+this writing, no mainstream MCP client — including the `claude-in-chrome`
+extension — discovers or calls page-registered WebMCP tools natively
+yet. The practical path is a generic, page-agnostic bridge (a browser
+extension plus the community `webmcp-server` npm package registered as
+a stdio MCP server) that works against *any* WebMCP-enabled page, not
+something Rebel-Sim vendors or depends on. This milestone's job was
+making Rebel-Sim correctly WebMCP-enabled per the real spec; how a
+given client reaches it is that client's concern, and gets easier over
+time as native support and agent-side discovery both mature.

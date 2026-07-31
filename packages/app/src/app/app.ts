@@ -1,5 +1,15 @@
-import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
-import { Machine, runStorageSelfTest, listDictionaryEntries } from '@rebel-sim/engine';
+import {
+  Component,
+  NgZone,
+  Injector,
+  signal,
+  ViewChild,
+  ElementRef,
+  AfterViewInit,
+  OnDestroy,
+  declareExperimentalWebMcpTool,
+} from '@angular/core';
+import { Machine, runStorageSelfTest, listDictionaryEntries, RemoteChannel } from '@rebel-sim/engine';
 import type { Bank, DictionaryEntry } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
@@ -33,6 +43,12 @@ export class App implements AfterViewInit, OnDestroy {
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
 
+  // M9 (WebMCP): fed by registered tools' execute() handlers, merged
+  // with keyboard input via Machine's own CompositeChannel wiring
+  // (repl.ts) — a human at the keyboard and a WebMCP caller share the
+  // same session, neither displaces the other.
+  private readonly remoteChannel = new RemoteChannel();
+
   // The engine draws into this offscreen, DOM-detached canvas at the
   // framebuffer's true 1:1 resolution — CanvasScreenHal never touches
   // the visible canvas directly. Presenting the two separately (rather
@@ -55,7 +71,10 @@ export class App implements AfterViewInit, OnDestroy {
   // Guards against overlapping requestAnimationFrame chains.
   private pumping = false;
 
-  constructor(private readonly zone: NgZone) {}
+  constructor(
+    private readonly zone: NgZone,
+    private readonly injector: Injector,
+  ) {}
 
   ngAfterViewInit(): void {
     this.offscreen.width = FRAMEBUFFER_WIDTH;
@@ -75,10 +94,12 @@ export class App implements AfterViewInit, OnDestroy {
     this.machine = new Machine({
       screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
       storageHal,
+      remoteChannel: this.remoteChannel,
     });
     this.screenRef.nativeElement.focus();
     this.bankTable.set(this.machine.banks.getAllBanks());
     this.lastBankCount = this.machine.banks.getAllBanks().length;
+    this.registerWebMcpTools();
 
     // M5's end-to-end proof, mirroring CKernel::RunStorageSelfTest
     // (docs/STORAGE.md §8): round-trip a synthetic asset through the real
@@ -109,8 +130,9 @@ export class App implements AfterViewInit, OnDestroy {
     // PORTING-WEB.md §4). M7a retired the DOM `<input>` this used to be
     // gated on ("only route when the input box isn't focused") — the
     // whole page is the simulated keyboard now, so every key routes
-    // unconditionally. There's still only one Channel binding (M9's
-    // remote channel hasn't landed), so there's nothing to arbitrate yet.
+    // unconditionally. M9's remoteChannel merges in via Machine's own
+    // CompositeChannel (repl.ts), not here — nothing to arbitrate at
+    // this layer.
     this.zone.runOutsideAngular(() => {
       window.addEventListener('keydown', this.onKeyDown);
       window.addEventListener('keyup', this.onKeyUp);
@@ -166,6 +188,136 @@ export class App implements AfterViewInit, OnDestroy {
     }
     e.preventDefault();
     this.machine.keyboard.pushRawEvent(usageCode, pressed);
+  }
+
+  // M9 (WebMCP): registers this page's tools via Angular's own
+  // (experimental) WebMCP support — the real web-platform mechanism
+  // (document.modelContext), not a bespoke server. Six tools: one write
+  // (type) merging into the same session the keyboard feeds via
+  // remoteChannel, five reads reusing exactly the introspection surface
+  // already built for the inspector panel (Machine.stack/rstack,
+  // listDictionaryEntries, Machine.banks, Screen.readRowText) — no new
+  // engine-level introspection needed. declareExperimentalWebMcpTool
+  // needs an explicit injector here since ngAfterViewInit isn't itself
+  // an active injection context. Wrapped defensively: WebMCP is an
+  // experimental browser feature (chrome://flags/#enable-webmcp-testing
+  // as of this writing) — must degrade silently on browsers without it,
+  // same as OPFS storage support above.
+  private registerWebMcpTools(): void {
+    const machine = this.machine;
+    const remoteChannel = this.remoteChannel;
+    const noArgsSchema = { type: 'object', properties: {}, required: [] } as const;
+
+    // Each declareExperimentalWebMcpTool call is its own generic
+    // instantiation (a distinct inputSchema per tool) — kept as
+    // separate call sites rather than looped over a mixed-shape array,
+    // which collapses TS's per-tool schema inference.
+    this.safeRegisterWebMcpTool('type', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'type',
+          description:
+            'Type text into the running Rebel-Sim Forth REPL, as if typed on the keyboard. ' +
+            'Include a trailing newline to submit the line. Executing a word (e.g. "5 SQUARE .") ' +
+            'and defining one (e.g. ": SQUARE DUP * ;") both just work — send them as text.',
+          inputSchema: {
+            type: 'object',
+            properties: { text: { type: 'string', description: 'Characters to type, in order.' } },
+            required: ['text'],
+          },
+          execute: ({ text }) => {
+            remoteChannel.push(text);
+            return `queued ${text.length} char(s)`;
+          },
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('read_screen', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'read_screen',
+          description: 'Read the current text screen buffer, one row per line.',
+          inputSchema: noArgsSchema,
+          execute: () => {
+            const rows: string[] = [];
+            for (let r = 0; r < machine.screen.rows; r++) {
+              rows.push(machine.screen.readRowText(r));
+            }
+            return rows.join('\n');
+          },
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('read_stack', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'read_stack',
+          description: 'Read the data stack, top to bottom, space-separated.',
+          inputSchema: noArgsSchema,
+          execute: () => machine.stack.toArray().join(' ') || '(empty)',
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('read_return_stack', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'read_return_stack',
+          description: 'Read the return stack, top to bottom, space-separated.',
+          inputSchema: noArgsSchema,
+          execute: () => machine.rstack.toArray().join(' ') || '(empty)',
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('read_dictionary', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'read_dictionary',
+          description: 'List all defined word names, most-recently-defined first.',
+          inputSchema: noArgsSchema,
+          execute: () => listDictionaryEntries(machine).map((e) => e.name).join(' ') || '(empty)',
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('read_banks', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'read_banks',
+          description: 'List memory banks (tag, name, base offset, size in bytes), one per line.',
+          inputSchema: noArgsSchema,
+          execute: () =>
+            machine.banks
+              .getAllBanks()
+              .map((b) => `${b.tag} ${b.name} ${b.base} ${b.size}`)
+              .join('\n'),
+        },
+        this.injector,
+      ),
+    );
+  }
+
+  // WebMCP is an experimental browser feature
+  // (chrome://flags/#enable-webmcp-testing as of this writing) — must
+  // degrade silently on browsers without it, same as OPFS storage
+  // support above. Guards both a synchronous throw (NG0203-style) and
+  // an async rejection from the returned Promise.
+  private safeRegisterWebMcpTool(name: string, register: () => Promise<void>): void {
+    try {
+      register().catch((err: unknown) => {
+        console.warn(`WebMCP tool "${name}" not registered (unsupported browser?)`, err);
+      });
+    } catch (err) {
+      console.warn(`WebMCP tool "${name}" not registered (unsupported browser?)`, err);
+    }
   }
 
   // Compared against each tick's stack snapshot so the Angular zone is

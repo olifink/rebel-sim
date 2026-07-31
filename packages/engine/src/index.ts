@@ -9,7 +9,7 @@ export { Screen, NULL_SCREEN_HAL } from './screen.js';
 export type { ScreenHal } from './screen.js';
 export { Keyboard } from './keyboard.js';
 export type { KeyEvent } from './keyboard.js';
-export { KeyboardChannel } from './channel.js';
+export { KeyboardChannel, RemoteChannel, CompositeChannel } from './channel.js';
 export type { Channel } from './channel.js';
 export { Storage, NULL_STORAGE_HAL, runStorageSelfTest } from './storage.js';
 export type { StorageHal } from './storage.js';

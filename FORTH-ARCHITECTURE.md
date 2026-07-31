@@ -564,11 +564,20 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
    the concrete flash layout isn't.
 10. **[v5]** Independent-session vs. shared-session arbitration once a
     second `Channel` binding actually exists on any target (§7a,
-    `CHANNELS-DESIGN.md` §6) — deliberately not built ahead of a real need.
+    `CHANNELS-DESIGN.md` §6) — **resolved for Rebel-Sim, M9**: shared
+    session via `CompositeChannel`, not independent sessions — a human
+    at the keyboard and a WebMCP caller feed the same `Machine`, no
+    arbiter needed since both are just `Channel`s merged first-ready-
+    wins. Rebel-ROM's daemon-phase equivalent remains open.
 11. **[v5]** Remote channel transport: Unix domain socket vs. TCP
-    (Rebel-ROM daemon) and the WebMCP transport shape (Rebel-Sim) — both
-    deferred to when that channel is actually built (Rebel-ROM's daemon
-    phase; Rebel-Sim's M8).
+    (Rebel-ROM daemon) — still open. **Rebel-Sim's WebMCP transport
+    shape resolved, M9**: no bridge/server of any kind — the page
+    itself registers tools via the real `document.modelContext`/WebMCP
+    browser API (Angular's own `declareExperimentalWebMcpTool`), and an
+    MCP client reaches them however the browser/an extension bridges
+    that, not via anything this repo runs. See `PLAN.md`'s M9 section
+    for what was initially assumed (a bespoke relay server) and why
+    that was wrong.
 
 ---
 

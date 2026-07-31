@@ -36,7 +36,7 @@ import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
-import { Channel, KeyboardChannel } from './channel.js';
+import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
 import { Storage, StorageHal } from './storage.js';
 import { Inner, StepSignal } from './inner.js';
 import {
@@ -85,9 +85,15 @@ export interface MachineOptions {
   storageHal?: StorageHal;
   /** What blocking `KEY` binds to (FORTH-ARCHITECTURE.md §7a). Defaults
    * to a `KeyboardChannel` wrapping this Machine's own `keyboard` — a
-   * test can inject a fake `Channel` instead, and M8's `RemoteChannel`
-   * will plug in here with no other engine changes. */
+   * test can inject a fake `Channel` instead. Takes priority over
+   * `remoteChannel` below if both are given. */
   channel?: Channel;
+  /** M9 (WebMCP): a `RemoteChannel` a host can push() text into (e.g. a
+   * WebMCP tool's execute() handler) without displacing the keyboard —
+   * when given (and `channel` isn't), input is merged via
+   * `CompositeChannel([KeyboardChannel, remoteChannel])` so a human at
+   * the keyboard and a remote/agent caller share the same session. */
+  remoteChannel?: RemoteChannel;
 }
 
 /** `step()`'s return: `'idle'` — no session in flight, nothing to do.
@@ -160,7 +166,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE);
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
-    this.channel = options.channel ?? new KeyboardChannel(this.keyboard);
+    this.channel = options.channel
+      ?? (options.remoteChannel
+            ? new CompositeChannel([new KeyboardChannel(this.keyboard), options.remoteChannel])
+            : new KeyboardChannel(this.keyboard));
 
     this.storage = new Storage(this.arena, this.banks, options.storageHal);
 

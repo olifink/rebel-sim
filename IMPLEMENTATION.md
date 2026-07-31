@@ -857,6 +857,52 @@ parser is real, scoped-out follow-up work, not a bug.
 
 ---
 
+### 1.30 The remote channel — `RemoteChannel`, `CompositeChannel`, and WebMCP
+
+M7 built `Channel` (`hasData()`/`readByte()`) specifically so blocking
+`KEY` never has to know *which* input source it's bound to. M9 is that
+design paying off: `RemoteChannel` (`channel.ts`) is a plain FIFO of
+chars with one method, `push(text)` — no capacity cap, unlike
+`Keyboard`'s 32-slot ring buffer, since that cap models real USB HID
+hardware and programmatic input has no such constraint to honor.
+`CompositeChannel` merges any number of `Channel`s into one,
+first-ready-wins in argument order. `Machine`'s constructor
+(`repl.ts`), given a `remoteChannel` option, binds
+`CompositeChannel([KeyboardChannel, remoteChannel])` instead of a bare
+`KeyboardChannel` — a human at the keyboard and a remote caller share
+one session, one `Machine`, no arbitration logic needed anywhere.
+
+The actual "remote" part isn't a server. **WebMCP**
+(`webmachinelearning/webmcp`) is a real, in-progress web platform
+feature: a page registers callable tools via
+`document.modelContext.registerTool(...)`, and the browser (natively,
+eventually) or an extension bridges those to an MCP client — the page
+never runs a server, it just declares what it can do. Angular 22
+(already this project's installed version) ships this as
+`declareExperimentalWebMcpTool`/`provideExperimentalWebMcpTools`
+(`@angular/core`). `App.registerWebMcpTools()` (`app.ts`) calls the
+former six times, once per tool, each a fresh generic instantiation
+rather than looped over an array (a mixed-shape array collapses
+TypeScript's per-tool `inputSchema` inference to one shape — a real
+compile error hit and fixed during M9, not a hypothetical). One write
+(`type`, pushing into `remoteChannel`) and five reads (`read_screen`,
+`read_stack`, `read_return_stack`, `read_dictionary`, `read_banks`),
+every read closing directly over the live `Machine` and reusing
+exactly the introspection surface the M8 inspector panel already
+exposes — no new engine-level read methods needed for M9 at all.
+Registration is wrapped defensively against both a synchronous throw
+and an async `Promise` rejection, since WebMCP is gated behind
+`chrome://flags/#enable-webmcp-testing` as of this writing and the app
+must keep booting normally without it (verified: `document.modelContext`
+absent → zero console errors, same degrade-gracefully contract already
+established for OPFS storage).
+
+*Implementation:* `channel.ts` (`RemoteChannel`, `CompositeChannel`),
+`repl.ts` (`MachineOptions.remoteChannel`), `app.ts`
+(`registerWebMcpTools`, `safeRegisterWebMcpTool`).
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -970,5 +1016,6 @@ exactly as it would be on the bare-metal target.
 | **M7** | Execution loop & `Channel` binding (§1.23-§1.24) — `executeXT` became a resumable generator, blocking `KEY` suspends instead of throwing, `Machine.beginLine()`/`step()`/`interpret()`. Main-thread generator model chosen over a Web Worker (faithful to both hardware targets' cooperative execution). Sets up M9 (remote/WebMCP channel) to need zero interpreter changes. | `channel.ts`, `inner.ts` (rewritten), `repl.ts` (rewritten) |
 | **M7a** | On-screen REPL (§1.25) — `ACCEPT` (a second, multi-step blocking primitive built the same way as `KEY`), `TIB` bank, `Machine.startRepl()`/`replLoop()`. `packages/app`'s DOM `<input>`/`<form>`/`.log` retired entirely — the whole page is the terminal now, keyboard routing no longer gated on any element's focus. | `inner.ts` (`accept()`), `repl.ts` (`startRepl`) |
 | **M8** | Core vocabulary (§1.26-§1.29, 61 new primitives, tokens 32-92): memory access, return-stack words, control flow (`BRANCH`/`0BRANCH` + the `IF`/`BEGIN`/`DO`/... IMMEDIATE compiler words), `CREATE`/`DOES>` (two more Code Field sentinels, `DOVAR`/`DODOES`), strings (`S"`/`."`, scoped to single-token literals — a real tokenizer limitation, documented not hidden), and the remaining stack/arithmetic fillers. `FLAG_COMPILE_ONLY` (reserved since M2) finally enforced. `WORDS`/`VLIST` (`CORE-VOCABULARY.md` §12's own sufficiency check) runs correctly on nothing but this vocabulary, proving it's actually enough. | `primitives.ts`, `inner.ts`, `dictionary.ts`, `rebel-opcodes.json` |
+| **M9** | Remote channel / WebMCP (§1.30): `RemoteChannel`/`CompositeChannel` merge remote input with the keyboard into one shared session — no interpreter changes, exactly as M7's `Channel` design intended. No server: the page registers tools via the real WebMCP browser API (`document.modelContext`, Angular's `declareExperimentalWebMcpTool`) — `type` plus five reads over the M8 inspector panel's existing introspection. Initial design assumed a bespoke bridge server; corrected after review, see `PLAN.md`. | `channel.ts`, `repl.ts`, `app.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

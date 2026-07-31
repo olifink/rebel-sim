@@ -172,14 +172,17 @@ coherent command/response cycle looks like.
   edge-detection lives inside `CKeyboardModule`/`Keyboard` itself, no
   separate device-services debounce stage exists. Pointer-state ownership
   is still open, but moot until a pointer device exists on either target.
-- Independent-session vs shared-session model (§4) — still open, revisit
-  once a second input channel (serial-bound or remote-bound Forth session)
-  actually exists on either target. Recommendation unchanged: don't build
-  the arbiter until a real need surfaces.
+- Independent-session vs shared-session model (§4) — **resolved for
+  Rebel-Sim, M9**: shared session, via `CompositeChannel` merging
+  keyboard and remote (WebMCP) input into the one `Machine`/`Channel`
+  binding — no arbiter built, matching this doc's own recommendation.
+  Rebel-ROM's serial-bound-session equivalent is still open.
 - Remote channel transport — for Rebel-ROM, Unix domain socket vs TCP,
-  decide when the daemon is built. For Rebel-Sim, the equivalent decision
-  is the WebMCP transport shape itself — also deferred to M8, doesn't
-  affect this doc's layering either way.
+  still open, decide when the daemon is built. **For Rebel-Sim,
+  resolved, M9**: no daemon/server at all — `RemoteChannel` is fed
+  directly by a page-registered WebMCP tool's `execute()` handler
+  (Angular's `declareExperimentalWebMcpTool`), same JS process as the
+  engine, no transport layer to design.
 - ~~Whether `EMIT`/`TYPE` dispatch through a channel~~ — **resolved, §8**:
   no, they call the screen HAL directly.
 
@@ -196,11 +199,12 @@ coherent command/response cycle looks like.
    sharing memory banks/sysvars.
 5. `RemoteChannel` + daemon (separate design pass, informed by this doc).
 
-**Rebel-Sim (M7, in progress — see `PLAN.md`):** the TypeScript equivalent
-of targets 1-3 above, running ahead of Rebel-ROM's Phase 11 in this
-instance. `RemoteChannel`-as-WebMCP (target 5's analog) is scoped as M8,
-deliberately not designed in now beyond the interface shape in §3, per
-this doc's own "don't build ahead of a real need" recommendation.
+**Rebel-Sim (M7, done — see `PLAN.md`):** the TypeScript equivalent
+of targets 1-3 above, run ahead of Rebel-ROM's Phase 11 in this
+instance. `RemoteChannel`-as-WebMCP (target 5's analog) shipped as M9
+(`PLAN.md`) — no daemon, since Rebel-Sim's "transport" is just a
+page-registered WebMCP tool calling `RemoteChannel.push()` directly in
+the same JS process.
 
 ## 8. Reconciliation notes (2026-07-31)
 

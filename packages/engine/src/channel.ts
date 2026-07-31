@@ -42,3 +42,43 @@ export class KeyboardChannel implements Channel {
     return char ?? -1;
   }
 }
+
+/** M9: plain FIFO of chars, fed by push() from outside the engine (a
+ * WebMCP tool's execute() handler, packages/app). Unlike Keyboard's
+ * ring buffer, no capacity cap — that 32-slot cap models real HID
+ * hardware; programmatic remote input has no such constraint to
+ * honor. */
+export class RemoteChannel implements Channel {
+  private readonly queue: number[] = [];
+
+  push(text: string): void {
+    for (const ch of text) {
+      this.queue.push(ch.charCodeAt(0));
+    }
+  }
+
+  hasData(): boolean {
+    return this.queue.length > 0;
+  }
+
+  readByte(): number {
+    return this.queue.length ? this.queue.shift()! : -1;
+  }
+}
+
+/** M9: merges N input channels into one — first-ready-wins, scanned in
+ * argument order each call. Lets keyboard and remote (WebMCP) input
+ * feed the same REPL session with zero interpreter-level change; only
+ * this host-side binding decides which sources exist. */
+export class CompositeChannel implements Channel {
+  constructor(private readonly channels: readonly Channel[]) {}
+
+  hasData(): boolean {
+    return this.channels.some((c) => c.hasData());
+  }
+
+  readByte(): number {
+    const ready = this.channels.find((c) => c.hasData());
+    return ready ? ready.readByte() : -1;
+  }
+}
