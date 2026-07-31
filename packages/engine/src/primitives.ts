@@ -11,6 +11,7 @@
 import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
+import { Channel } from './channel.js';
 
 export const TRUE = -1;
 export const FALSE = 0;
@@ -19,6 +20,7 @@ export interface PrimitiveContext {
   readonly stack: DataStack;
   readonly screen: Screen;
   readonly keyboard: Keyboard;
+  readonly channel: Channel;
   getBase(): number;
 }
 
@@ -168,12 +170,18 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 29: // KEY? ( -- flag )
       s.push(ctx.keyboard.hasEvent() ? TRUE : FALSE);
       break;
-    case 30: { // KEY ( -- char )
-      const event = ctx.keyboard.readEvent();
-      if (!event) {
-        throw new Error('KEY: no event queued (blocking KEY not yet implemented)');
+    case 30: { // KEY ( -- char ) — M7: blocks (FORTH-ARCHITECTURE.md §7a).
+      // Reads through the bound Channel, not ctx.keyboard directly, so a
+      // future RemoteChannel (M8) needs no change here. inner.ts's step
+      // loop guards this dispatch on ctx.channel.hasData() first, so
+      // readByte() always has something by the time this case runs; the
+      // -1 check is a defensive internal-invariant guard, not a normal
+      // Forth-level failure mode.
+      const char = ctx.channel.readByte();
+      if (char < 0) {
+        throw new Error('KEY: internal error — dispatched with no channel data available');
       }
-      s.push(event.char);
+      s.push(char);
       break;
     }
     default:

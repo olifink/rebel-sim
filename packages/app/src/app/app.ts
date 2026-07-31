@@ -1,5 +1,5 @@
 import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
-import { Machine, runStorageSelfTest } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, StepStatus } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
@@ -101,6 +101,18 @@ export class App implements AfterViewInit, OnDestroy {
     this.machine.keyboard.pushRawEvent(usageCode, pressed);
   }
 
+  // Primitives run per animation frame while a line is in flight (M7).
+  // Generous enough that any line expressible today (no loop/recursion
+  // words exist yet) finishes within a single frame — same invisible
+  // latency as before M7 — while still bounding worst-case per-frame
+  // work if that ever changes. The only thing that makes a line span
+  // multiple frames today is a blocking KEY with nothing queued yet.
+  private static readonly STEP_BUDGET = 2000;
+
+  // Guards against overlapping requestAnimationFrame chains if startPump()
+  // were ever called while one is already running.
+  private pumping = false;
+
   submit(): void {
     const el = this.inputRef.nativeElement;
     const line = el.value;
@@ -109,26 +121,61 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
 
-    // The interpreter loop itself runs outside Angular's zone
-    // (PORTING-WEB.md §6) — only the resulting stack snapshot crosses
-    // back in to trigger a render. Forth's own output now lands on the
-    // canvas directly (via the HAL, M3), not through this return path.
-    let error: string | undefined;
-    let stackSnapshot: number[] = [];
+    this.log.update((prev) => prev + `> ${line}\n`);
+
+    // beginLine()/step() (not the old single interpret() call) so a
+    // blocking KEY inside this line suspends instead of throwing or
+    // freezing the tab (PORTING-WEB.md §6, FORTH-ARCHITECTURE.md §7a).
+    // Runs outside Angular's zone throughout — the driving pump below
+    // only crosses back in once the line actually finishes or errors.
     this.zone.runOutsideAngular(() => {
       try {
-        this.machine.interpret(line);
+        this.machine.beginLine(line);
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        this.zone.run(() => this.reportError(e));
+        return;
       }
-      stackSnapshot = this.machine.stack.toArray();
+      this.startPump();
     });
+  }
 
-    this.zone.run(() => {
-      let entry = `> ${line}\n`;
-      if (error) entry += `! ${error}\n`;
-      this.log.update((prev) => prev + entry);
-      this.stack.set(stackSnapshot);
-    });
+  // Must be called from outside the Angular zone (submit() already is) —
+  // requestAnimationFrame callbacks scheduled there stay outside it too,
+  // which is the point: no change detection runs on frames that don't
+  // need it. Forth's own output lands on the canvas synchronously as
+  // primitives execute (the HAL, M3), independent of this pump's pace.
+  private startPump(): void {
+    if (this.pumping) {
+      return;
+    }
+    this.pumping = true;
+
+    const tick = (): void => {
+      let status: StepStatus;
+      try {
+        status = this.machine.step(App.STEP_BUDGET);
+      } catch (e) {
+        this.pumping = false;
+        this.zone.run(() => this.reportError(e));
+        return;
+      }
+      if (status === 'idle') {
+        this.pumping = false;
+        this.zone.run(() => this.stack.set(this.machine.stack.toArray()));
+        return;
+      }
+      // 'blocked' or 'more-to-run' — keep pumping. A frame spent
+      // 'blocked' is cheap (Channel.hasData() is an O(queue length)
+      // scan) and lets the browser's own event loop (keydown delivery,
+      // rendering, everything else) get a turn between checks.
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  private reportError(e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    this.log.update((prev) => prev + `! ${message}\n`);
+    this.stack.set(this.machine.stack.toArray());
   }
 }

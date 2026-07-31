@@ -6,6 +6,19 @@
  * text-interpreter loop. `:`/`;`/`IMMEDIATE` are handled as special
  * compiler syntax rather than dictionary words (see dictionary.ts's
  * header comment for why).
+ *
+ * M7 (FORTH-ARCHITECTURE.md §7a): one line is now a resumable session
+ * (`runLine`, a generator), not a single run-to-completion call — the
+ * mechanism blocking `KEY` needs. Two entry points sit on top of it:
+ * `beginLine()` (start a session, run nothing yet) and `step(budget)`
+ * (drive the current session up to `budget` steps, stopping early if it
+ * blocks). `interpret()` is unchanged in *contract* for every existing
+ * caller/test: `beginLine()` + an effectively-unbounded `step()` call,
+ * so a line that never calls `KEY` (everything before M7) still runs
+ * fully to completion synchronously, throwing exactly as before on a
+ * genuine error. The one real behavior change: a line that blocks on an
+ * empty-queued `KEY` now returns with the session still alive (drive it
+ * further via `step()`) instead of throwing "no event queued" (M4).
  */
 
 import { Arena } from './arena.js';
@@ -15,8 +28,9 @@ import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
+import { Channel, KeyboardChannel } from './channel.js';
 import { Storage, StorageHal } from './storage.js';
-import { Inner } from './inner.js';
+import { Inner, StepSignal } from './inner.js';
 import {
   abortDefinition,
   beginDefinition,
@@ -58,7 +72,19 @@ export interface MachineOptions {
    * no-op — openProject()/saveAsset() calls just do nothing useful,
    * which is fine for engine-level tests that don't exercise storage. */
   storageHal?: StorageHal;
+  /** What blocking `KEY` binds to (FORTH-ARCHITECTURE.md §7a). Defaults
+   * to a `KeyboardChannel` wrapping this Machine's own `keyboard` — a
+   * test can inject a fake `Channel` instead, and M8's `RemoteChannel`
+   * will plug in here with no other engine changes. */
+  channel?: Channel;
 }
+
+/** `step()`'s return: `'idle'` — no session in flight, nothing to do.
+ * `'blocked'` — the session is alive but waiting on the bound channel
+ * (e.g. `KEY` with nothing queued); call `step()` again later, once
+ * `hasData()` might be true. `'more-to-run'` — the budget ran out before
+ * the line finished; call `step()` again to continue it. */
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -70,7 +96,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly screen: Screen;
   readonly keyboard: Keyboard;
   readonly storage: Storage;
+  readonly channel: Channel;
   private readonly inner: Inner;
+  private session: Generator<StepSignal, void, void> | undefined;
 
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
@@ -106,6 +134,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE);
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
+    this.channel = options.channel ?? new KeyboardChannel(this.keyboard);
 
     this.storage = new Storage(this.arena, this.banks, options.storageHal);
 
@@ -122,12 +151,67 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     return this.sysvars.getBase();
   }
 
-  /** Interprets (or compiles, if STATE is active) one line of Forth
-   * source. Output is visible through `screen`/`stack`, not a return
-   * value — M1/M2's plain-text output buffer was always a stand-in for
-   * this (see primitives.ts's earlier history), retired now that a real
-   * CHAR-bank-backed screen exists. */
+  /** Starts a new session for one line of Forth source, without running
+   * anything yet — call `step()` to actually drive it. Throws if a
+   * previous session is still in flight (running or blocked): Rebel-Sim
+   * has one outer-loop instance bound to one channel
+   * (CHANNELS-DESIGN.md §4's session model) — no multiplexing/queuing of
+   * concurrent lines exists, or is needed, yet. */
+  beginLine(line: string): void {
+    if (this.session) {
+      throw new Error('a previous line is still running or blocked — call step() to continue it');
+    }
+    this.session = this.runLine(line);
+  }
+
+  /** Drives the current session up to `budget` steps. Returns `'idle'`
+   * immediately if there's no session; `'blocked'` the instant the
+   * session yields blocked (never busy-spins waiting for the channel —
+   * that can only ever be resolved by something outside this call, e.g.
+   * a keystroke, so spinning here would just freeze synchronously for
+   * no reason); `'more-to-run'` if the budget ran out first; `'idle'`
+   * once the session actually finishes (and clears it). An error thrown
+   * mid-session propagates out of this call and clears the session (it's
+   * dead either way — same as a completed one). */
+  step(budget: number): StepStatus {
+    if (!this.session) {
+      return 'idle';
+    }
+    try {
+      for (let i = 0; i < budget; i++) {
+        const { value, done } = this.session.next();
+        if (done) {
+          this.session = undefined;
+          return 'idle';
+        }
+        if (value === 'blocked') {
+          return 'blocked';
+        }
+      }
+      return 'more-to-run';
+    } catch (err) {
+      this.session = undefined;
+      throw err;
+    }
+  }
+
+  /** Convenience wrapper preserving the pre-M7 synchronous contract:
+   * `beginLine()` plus an effectively-unbounded `step()` call. A line
+   * that never blocks (everything before M7, and the overwhelming
+   * majority of Forth source in general) still runs to completion
+   * synchronously and throws exactly as before on a genuine error.
+   * Output is visible through `screen`/`stack`, not a return value —
+   * M1/M2's plain-text output buffer was always a stand-in for this (see
+   * primitives.ts's earlier history), retired once a real CHAR-bank-
+   * backed screen existed (M3). If the line blocks (e.g. `KEY` with an
+   * empty queue), this returns anyway with the session still alive —
+   * drive it further via `step()` once the channel might have data. */
   interpret(line: string): void {
+    this.beginLine(line);
+    this.step(Number.MAX_SAFE_INTEGER);
+  }
+
+  private *runLine(line: string): Generator<StepSignal, void, void> {
     const tokens = line.trim().split(/\s+/).filter(Boolean);
     let i = 0;
     try {
@@ -136,13 +220,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         const upper = token.toUpperCase();
 
         if (this.sysvars.getState() === -1) {
-          this.interpretCompiling(upper, token);
+          yield* this.interpretCompiling(upper, token);
         } else {
           if (upper === ':') {
             beginDefinition(this, tokens[i++], DOCOL);
+            yield 'progress';
             continue;
           }
-          this.interpretExecuting(upper, token);
+          yield* this.interpretExecuting(upper, token);
         }
       }
     } catch (err) {
@@ -153,17 +238,18 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
   }
 
-  private interpretExecuting(upper: string, token: string): void {
+  private *interpretExecuting(upper: string, token: string): Generator<StepSignal, void, void> {
     if (upper === ';') {
       throw new Error('; used outside a definition');
     }
     if (upper === 'IMMEDIATE') {
       markLatestImmediate(this);
+      yield 'progress';
       return;
     }
     const found = findWord(this, upper);
     if (found) {
-      this.inner.executeXT(found.cfa);
+      yield* this.inner.executeXT(found.cfa);
       return;
     }
     const n = parseNumber(token, this.getBase());
@@ -171,22 +257,25 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       throw new Error(`? unrecognized word: ${token}`);
     }
     this.stack.push(n);
+    yield 'progress';
   }
 
-  private interpretCompiling(upper: string, token: string): void {
+  private *interpretCompiling(upper: string, token: string): Generator<StepSignal, void, void> {
     if (upper === ':') {
       throw new Error(': cannot nest definitions');
     }
     if (upper === ';') {
       endDefinition(this, findWord(this, 'EXIT')!.cfa);
+      yield 'progress';
       return;
     }
     const found = findWord(this, upper);
     if (found) {
       if (found.immediate) {
-        this.inner.executeXT(found.cfa);
+        yield* this.inner.executeXT(found.cfa);
       } else {
         compileCell(this, found.cfa);
+        yield 'progress';
       }
       return;
     }
@@ -196,6 +285,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
     compileCell(this, findWord(this, 'LIT')!.cfa);
     compileCell(this, n);
+    yield 'progress';
   }
 }
 

@@ -109,8 +109,14 @@ describe('Keyboard', () => {
     expect(m.stack.pop()).toBe('a'.charCodeAt(0));
   });
 
-  it('KEY throws when the queue is empty (blocking KEY not yet implemented)', () => {
+  it('KEY blocks (does not throw) when the queue is empty, and resumes once data arrives', () => {
     const m = new Machine();
-    expect(() => m.interpret('KEY')).toThrow(/no event queued/);
+    m.interpret('KEY'); // starts the session; blocks immediately, empty queue
+    expect(m.stack.depth).toBe(0); // nothing pushed yet
+
+    m.keyboard.pushRawEvent(0x04, true); // 'a' arrives
+    const status = m.step(100);
+    expect(status).toBe('idle'); // session completed
+    expect(m.stack.pop()).toBe('a'.charCodeAt(0));
   });
 });

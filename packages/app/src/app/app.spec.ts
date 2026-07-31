@@ -1,6 +1,19 @@
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 
+// M7: a submitted line is now driven by a requestAnimationFrame pump
+// rather than finishing synchronously inside submit() — poll for the
+// expected DOM state instead of asserting immediately after dispatch.
+async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('waitFor: condition never became true');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe('App', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -41,6 +54,10 @@ describe('App', () => {
     await fixture.whenStable();
 
     expect(compiled.querySelector('.log')?.textContent).toContain('> 2 3 +');
+
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('5'));
+    fixture.detectChanges();
+
     expect(compiled.querySelector('.log')?.textContent).not.toContain('!');
     expect(compiled.querySelector('.stack-values')?.textContent).toContain('5');
   });

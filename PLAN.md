@@ -566,7 +566,7 @@ real command" lesson as the `@angular/pwa` resolution issue above.
   reported `OK` (OPFS is a local API, unaffected by network state), all
   with zero console errors online or offline.
 
-## M7 — Execution Loop & Channel Binding — **planned**
+## M7 — Execution Loop & Channel Binding — **done** (2026-07-31)
 
 **Goal:** `: WAIT-KEY BEGIN KEY DUP 0<> UNTIL ;`-style blocking `KEY`
 actually suspends and resumes instead of throwing (M4's current
@@ -674,3 +674,104 @@ a second one is actually needed).
   renders) while it waits, confirm a keystroke unblocks it and the word
   completes correctly, no console errors — same "test the golden path in
   a browser" bar M1 set.
+
+### What actually shipped, and where the plan above got refined
+
+The design above held up essentially as written — generator-based
+`inner.ts`, input-only `Channel`, `EMIT` untouched — with one real API
+refinement made during implementation, plus one correction to a claim
+`CHANNELS-DESIGN.md` made about existing (pre-M7) behavior.
+
+**API refinement: `interpret()` stayed, `beginLine()`/`step()` sit
+underneath it, rather than `interpret()` itself becoming the step-driven
+entry point.** The plan's phrasing ("`interpret()` becomes step-driven")
+would have meant `interpret()` no longer runs a line to completion
+synchronously — but 60 of the 61 existing M1-M6 tests call `interpret()`
+expecting exactly that (`m.interpret('2 3 + .'); expect(m.screen...)`,
+with no `step()`-driving in between). Rewriting that whole suite wasn't
+warranted for a change with no behavioral upside for non-blocking
+lines. Instead: **`beginLine(line)`** starts a session without running
+anything (throws if a previous session is still alive — the single-
+session model, `CHANNELS-DESIGN.md` §4); **`step(budget)`** drives up to
+`budget` primitives, returning `'idle' | 'blocked' | 'more-to-run'`;
+**`interpret(line)`** is now sugar for `beginLine(line)` + a
+`step(Number.MAX_SAFE_INTEGER)` call. Since nothing expressible in
+Rebel-Sim's Forth today can loop or recurse (M2's documented cut — no
+`RECURSE`/control-flow words exist yet), the *only* way `step()` can
+ever return before finishing is a blocking `KEY` with nothing queued —
+so for every M1-M6 test (none of which touch `KEY`), `interpret()`
+behaves byte-for-byte as before, no rewrite needed. The one real
+behavior change, isolated to a single test: a line that blocks now
+returns from `interpret()` with the session still alive (continue it via
+`step()`) instead of throwing "no event queued" (M4's stand-in
+behavior).
+
+**Correction to `CHANNELS-DESIGN.md` §3's claim about existing KEY/KEY?
+filtering.** The doc states unmapped keys have "no byte-stream
+representation and stay invisible to Channel, exactly as it already does
+to KEY/KEY?" — checking the actual M4 code, that wasn't quite true:
+`KEY` (primitives.ts case 30) popped the raw next queued event
+regardless of its translated char, so a modifier-press event ahead of a
+real key would have surfaced as `char 0` rather than being skipped. Fixed
+as part of this milestone: `Keyboard` gained
+`hasTranslatedEvent()`/`readTranslatedChar()` (skip-and-discard char-0
+events, non-destructive peek for the former), and `KeyboardChannel`
+wraps those rather than `Keyboard`'s raw `hasEvent()`/`readEvent()` —
+which `KEY` now goes through instead of `Keyboard` directly. `KEY?`
+(token 29) is intentionally untouched: it still reports on the raw,
+unfiltered queue, a deliberately different (lower-level, diagnostic)
+view than the one `KEY`/`Channel` now present.
+
+**What shipped:**
+- `channel.ts` — `Channel` interface (`hasData`/`readByte`) and
+  `KeyboardChannel`, exactly as planned.
+- `keyboard.ts` — the two new filtering methods above.
+- `inner.ts` — `executeXT` is now a generator (`Generator<StepSignal,
+  void, void>`) yielding `'progress'` once per DOCOL slot/primitive
+  dispatched, or `'blocked'` (repeatedly, without ever advancing `ip`)
+  while `KEY`'s dispatch waits on `ctx.channel.hasData()`. This fell out
+  naturally from M2's own earlier design choice to thread DOCOL nesting
+  through an explicit `ip`+`rstack` loop rather than JS recursion —
+  there was no call-stack depth to preserve across a suspend, only one
+  loop-local variable a generator already keeps alive across `yield` for
+  free.
+- `repl.ts` — `runLine`/`interpretExecuting`/`interpretCompiling` are now
+  generators too (`yield*`-delegating into `inner.executeXT`),
+  `beginLine`/`step`/`interpret` as described above, `Machine` gained a
+  `channel` field (`MachineOptions.channel`, default `KeyboardChannel`
+  wrapping its own `keyboard`).
+- `primitives.ts` — `PrimitiveContext` gained `channel: Channel`; `KEY`
+  (case 30) reads via `ctx.channel.readByte()` rather than
+  `ctx.keyboard.readEvent()`; no longer throws on an empty queue (guarded
+  by `inner.ts` before dispatch, so it always has data by the time it
+  runs).
+- `packages/app`: `app.ts`'s `submit()` calls `beginLine()` then a
+  `requestAnimationFrame`-driven pump calling `step(2000)` repeatedly
+  (outside Angular's zone throughout, per `PORTING-WEB.md` §6), crossing
+  back into the zone only once the line finishes or errors. Simpler than
+  the plan's `setTimeout(0)`/`queueMicrotask` framing between individual
+  `step()` calls — one `requestAnimationFrame`-scheduled tick per frame,
+  each doing up to 2000 primitives of work, comfortably covers every
+  currently-expressible line in a single frame and still yields to the
+  browser's event loop (keydown delivery included) between frames while
+  blocked.
+- 13 new engine tests: `channel.test.ts` (6 — `KeyboardChannel` filtering,
+  non-destructive `hasData()`, shared-queue draining with
+  `Keyboard.hasEvent()`), `repl.test.ts`'s new "Machine step-driven
+  execution" block (7 — budget-of-1 stepping through a colon-definition
+  with exact intermediate stack assertions, large-budget parity with
+  `interpret()`, the single-session guard, blocking/resuming via a fake
+  `Channel` test double, repeated-`'blocked'`-without-consuming-the-
+  session, error-clears-session), plus `keyboard.test.ts`'s old
+  throw-on-empty `KEY` test rewritten to assert blocking/resume instead
+  — 74 engine tests total, all passing; 3 app tests updated to poll for
+  the now-`requestAnimationFrame`-driven completion instead of asserting
+  immediately post-dispatch, still passing.
+- Verified live in a headless browser: a normal line (`2 3 + .`) still
+  completes within one frame, indistinguishable from pre-M7; `KEY EMIT`
+  with an empty queue blocks without throwing; submitting a second line
+  while blocked surfaces the single-session guard error cleanly (proving
+  the page never froze — the JS event loop kept running the whole time);
+  pressing a key while the canvas has focus unblocks the session, which
+  then correctly emits that character to the screen; the REPL is fully
+  usable again immediately after; zero console errors throughout.

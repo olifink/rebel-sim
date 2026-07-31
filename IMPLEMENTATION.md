@@ -569,6 +569,92 @@ System. `runStorageSelfTest()` is a standalone round-trip proof (write a
 byte-pattern bank, save it, reload it fresh, compare) that `app.ts` runs
 once at startup, surfaced as a small `storage: OK`/`FAILED` status line.
 
+### 1.23 Blocking `KEY` — suspending mid-execution, without threads
+
+Every primitive before M7 ran to completion the instant it was
+dispatched — `+` pops two cells and pushes their sum, all in one
+synchronous step, no waiting involved. `KEY` breaks that assumption on
+purpose: a classic Forth `KEY` is supposed to wait for a keypress if none
+is available yet, effectively pausing the *entire program* — including
+whatever colon-definition called it, and whatever called *that* — until
+one arrives.
+
+JavaScript has no threads to "pause" in the traditional sense, and
+Rebel-Sim's inner interpreter deliberately avoids using the host call
+stack for word-calling-word nesting (§1.13) — which turns out to make
+this easier, not harder. Because nesting is already carried by an
+explicit instruction pointer (`ip`) and a real return stack rather than
+JS function calls, there's no hidden call-stack state that would need
+capturing to "come back later." A JavaScript **generator function** —
+one that can `yield` control back to its caller mid-execution and later
+resume exactly where it left off — is a natural fit: `ip` is just a
+local variable inside the generator, and it stays alive across a `yield`
+for free, the same way any local variable in a paused function does.
+
+So `executeXT` (§1.13) is a generator. It `yield`s once after every
+ordinary step (one primitive dispatched, one literal pushed, one `EXIT`
+processed) — a signal meaning *"I made progress, but there's likely more
+to do."* When it reaches a `KEY` dispatch with no input available, it
+instead `yield`s a *different* signal — *"I'm stuck, nothing to do until
+more input shows up"* — and, critically, does **not** advance past that
+point. The very next time it's resumed, it checks again, in exactly the
+same spot, whether input has arrived; if not, it reports "stuck" again;
+if so, it finally proceeds.
+
+Something has to actually call this generator repeatedly to make
+progress happen — a generator that's never resumed just sits there
+forever. That's `Machine.step(budget)`: it resumes the current line's
+generator up to `budget` times, stopping early the instant it sees a
+"stuck" signal (there's no point spending more of the budget hammering a
+question whose answer can't change until something external — a
+keypress — happens), or once the whole line finishes. The host
+(`packages/app`) calls `step()` repeatedly, once per animation frame, for
+as long as there's a line in flight — which is what actually gives the
+browser tab a chance to keep handling keystrokes, rendering, and
+everything else *while* Forth code is "waiting" on `KEY`, instead of the
+page appearing frozen.
+
+*Implementation:* `inner.ts`'s `Inner.executeXT` (a `Generator<StepSignal,
+void, void>`, `StepSignal` = `'progress' | 'blocked'`) and `repl.ts`'s
+`Machine.beginLine()`/`step()`/`interpret()`. `interpret()` itself is
+unchanged in what it *feels* like to call for any line that never
+touches `KEY` — it still runs the whole line synchronously and returns,
+exactly as before M7; see §4's M7 row for why that compatibility was
+worth preserving deliberately rather than treated as a side effect.
+
+### 1.24 The Channel abstraction — what blocking `KEY` actually waits on
+
+`KEY` doesn't check the keyboard directly. It asks a **`Channel`** —
+an interface with exactly two operations: *"do you have something for
+me?"* (`hasData()`) and *"give me the next thing"* (`readByte()`). The
+keyboard is the only real implementation today (`KeyboardChannel`,
+wrapping the M4 `Keyboard` class), but nothing about `KEY` or the
+generator-based suspend/resume mechanism in §1.23 knows or cares that
+it's specifically a keyboard behind that interface.
+
+This indirection is the entire point, not incidental plumbing: a
+*different* input source — a remote command sent over the network, say
+— can be made to look like a `Channel` too (same two methods, different
+implementation), and `KEY` would suspend and resume against it exactly
+the same way, with **zero changes** to `inner.ts`, `repl.ts`, or `KEY`
+itself. That's the shape a future "control this Forth session remotely"
+feature is expected to take — not designed or built yet, but the reason
+`Channel` exists as its own small interface now rather than `KEY` simply
+calling `Keyboard` by name.
+
+`KeyboardChannel` also does one small but meaningful filtering job: some
+keyboard events (a Caps Lock press, a Shift release) have no printable
+character at all (§1.21) — `hasData()`/`readByte()` silently skip past
+those, so `KEY` only ever sees events that actually produce a character.
+This is a deliberately different, lower-level view than `KEY?`
+(§1.20), which still reports on *every* queued event, translated or not
+— two tools answering two different questions over the same underlying
+queue.
+
+*Implementation:* `channel.ts` — the `Channel` interface and
+`KeyboardChannel`. `Machine` holds one bound `Channel` (`MachineOptions.
+channel`, defaulting to a `KeyboardChannel` over its own `keyboard`).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -651,6 +737,11 @@ exactly as it would be on the bare-metal target.
 | **Asset file** | One project file, always `<bank-name>.<extension>` — the extension maps to the bank's `tag` (`DATA`↔`.DAT`, etc.), preceded by a small 6-byte sanity header. |
 | **Size class** | One of a fixed ladder of bank sizes (XS 4 KiB through XXL 4 MiB, each 4x the previous). A loaded file's bank size is looked up (round up to the smallest class that fits), not calculated. |
 | **`StorageHal`** | Rebel-Sim's HAL interface for project/cart file I/O: `ensureDir`/`listFiles`/`readFile`/`writeFile`. Backed by OPFS in `packages/app`; defaults to a no-op (`NULL_STORAGE_HAL`) so engine tests don't need a real filesystem. |
+| **Generator (JS)** | A function that can pause itself mid-execution (`yield`) and be resumed later exactly where it left off, with its local variables intact. What `executeXT` is built on (§1.23) — the mechanism blocking `KEY` needs. |
+| **`StepSignal`** | What `executeXT`'s generator yields on every pause: `'progress'` (one step completed, likely more to do) or `'blocked'` (waiting on the bound `Channel`, the same point will be retried on resume). |
+| **`StepStatus`** | What `Machine.step()` returns to its caller: `'idle'` (nothing running), `'blocked'`, or `'more-to-run'` (budget ran out, call `step()` again). |
+| **`Channel`** | The abstraction blocking `KEY` waits on: `hasData()`/`readByte()`, deliberately input-only. `KeyboardChannel` is the only real implementation today; a future remote/network channel would implement the same two methods with zero changes to `KEY` or the interpreter (§1.24). |
+| **`beginLine()` / `step()` / `interpret()`** | Three layers over one mechanism: `beginLine(line)` starts a session without running it; `step(budget)` drives it incrementally, reporting a `StepStatus`; `interpret(line)` is `beginLine` + an effectively-unbounded `step()` call, preserving the pre-M7 "runs to completion synchronously" feel for any line that never blocks. |
 
 ---
 
@@ -664,5 +755,6 @@ exactly as it would be on the bare-metal target.
 | **M4** | Keyboard: `KMAP` bank (§1.21), non-blocking event queue (§1.20), `KEY?`/`KEY` primitives, `KEYBOARD.MODIFIERS` sysvar. Browser `keydown`/`keyup` → raw usage codes → the queue, routed only when the REPL input box isn't focused. Blocking `KEY` deferred (no task-suspension model yet). | `keyboard.ts`, `browser-keymap.ts` |
 | **M5** | Storage: the real projects/carts model (§1.22) — `Storage` class, `StorageHal`, OPFS backing, bank identity retrofit (`name` vs. `tag`, §1.5), size classes, `runStorageSelfTest()`. Superseded `FORTH-ARCHITECTURE.md`'s original raw-block/`SCRS` framing, per that doc's own resolved divergence note. | `storage.ts`, `opfs-storage-hal.ts` |
 | **M6** | PWA packaging — `packages/app` only, no engine changes. Angular's own PWA schematic (manifest, service worker, precaching), an on-brand icon set generated from the real `font-zxspectrum.ts` 'R' glyph, `navigator.storage.persist()`. Verified offline-bootable against a real production build, not just unit tests. | `packages/app/public/manifest.webmanifest`, `ngsw-config.json`, `app.config.ts` |
+| **M7** | Execution loop & `Channel` binding (§1.23-§1.24) — `executeXT` became a resumable generator, blocking `KEY` suspends instead of throwing, `Machine.beginLine()`/`step()`/`interpret()`. Main-thread generator model chosen over a Web Worker (faithful to both hardware targets' cooperative execution). Sets up M8 (remote/WebMCP channel) to need zero interpreter changes. | `channel.ts`, `inner.ts` (rewritten), `repl.ts` (rewritten) |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

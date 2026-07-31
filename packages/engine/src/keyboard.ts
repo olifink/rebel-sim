@@ -171,4 +171,37 @@ export class Keyboard {
     this.tail = (this.tail + 1) % KEYBOARD_QUEUE_SIZE;
     return event;
   }
+
+  /** M7/channel.ts support: non-destructively checks whether the queue
+   * holds an event with a real translated character, skipping past any
+   * with char 0 (modifier presses, unmapped special keys) — the filter
+   * `KeyboardChannel`/`CHANNELS-DESIGN.md` §3 describes ("an unmapped key
+   * has no byte-stream representation and stays invisible to Channel").
+   * `KEY?` (primitives.ts) deliberately does NOT use this — it reports on
+   * the raw queue, unfiltered, unchanged since M4. */
+  hasTranslatedEvent(): boolean {
+    for (let i = this.tail; i !== this.head; i = (i + 1) % KEYBOARD_QUEUE_SIZE) {
+      if (this.queue[i].char !== 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Pops and discards events until (and including) the next one with a
+   * non-zero translated char; returns that char, or undefined once the
+   * queue is exhausted without finding one. Shares the same physical
+   * queue `readEvent()`/`hasEvent()` use — draining via one is visible to
+   * the other, exactly as there being only one real hardware queue would
+   * imply. */
+  readTranslatedChar(): number | undefined {
+    let event = this.readEvent();
+    while (event !== undefined) {
+      if (event.char !== 0) {
+        return event.char;
+      }
+      event = this.readEvent();
+    }
+    return undefined;
+  }
 }

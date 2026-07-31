@@ -34,7 +34,7 @@
     { "id": 27, "name": "INK", "note": "( color -- ) M3: sets the SCREEN group's default foreground color sysvar used by CHAR!/EMIT/. when no override is given. Rebel-Sim stores this as a raw 24-bit 0xRRGGBB truecolor value (Rebel-ROM's TColor is likewise a raw pixel value, not a palette index — direct/truecolor mode is its likely default per docs/SCREEN-MODULE.md §4)" },
     { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" },
     { "id": 29, "name": "KEY?", "note": "( -- flag ) M4: CKeyboardModule::ReadEvent peeked non-destructively — TRUE if the event queue is non-empty, matching FORTH-ARCHITECTURE.md's hal_key_pressed? non-blocking-read requirement" },
-    { "id": 30, "name": "KEY", "note": "( -- char ) M4: non-blocking pop of the oldest queued event's translated character. Real Rebel-ROM's own Phase 11 Forth KEY word (which would block a task on this same queue, docs/KEYBOARD.md §10) isn't built there either yet — Rebel-Sim's interpreter has no task-suspension model to build a blocking word on top of, so this errors if the queue is empty rather than blocking; deferred to a follow-up once one exists (same shape as M3's hal_draw_* deferral)" }
+    { "id": 30, "name": "KEY", "note": "( -- char ) M7: blocks (FORTH-ARCHITECTURE.md §7a) — suspends the running session via inner.ts's generator-based step loop until the bound Channel (channel.ts, default KeyboardChannel) has a translated-char event, then pops and pushes it. M4's original throw-on-empty behavior is gone; KEY?/token 29 is unchanged (still a raw, unfiltered, non-blocking peek at the Keyboard queue)." }
   ],
 
   "bankTags": {
