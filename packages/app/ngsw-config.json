@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/@angular/service-worker/config/schema.json",
+  "index": "/index.html",
+  "assetGroups": [
+    {
+      "name": "ng-icon-forge-icons",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": [
+          "/apple-touch-icon.png",
+          "/favicon.ico",
+          "/icons/icon-128x128.png",
+          "/icons/icon-144x144.png",
+          "/icons/icon-152x152.png",
+          "/icons/icon-192x192.png",
+          "/icons/icon-384x384.png",
+          "/icons/icon-512x512.png",
+          "/icons/icon-72x72.png",
+          "/icons/icon-96x96.png",
+          "/icons/icon-maskable-192x192.png",
+          "/icons/icon-maskable-512x512.png"
+        ]
+      }
+    },
+    {
+      "name": "app",
+      "installMode": "prefetch",
+      "resources": {
+        "files": [
+          "/favicon.ico",
+          "/index.csr.html",
+          "/index.html",
+          "/manifest.webmanifest",
+          "/*.css",
+          "/*.js"
+        ]
+      }
+    },
+    {
+      "name": "assets",
+      "installMode": "lazy",
+      "updateMode": "prefetch",
+      "resources": {
+        "files": ["/**/*.(svg|cur|jpg|jpeg|png|apng|webp|avif|gif|otf|ttf|woff|woff2)"]
+      }
+    }
+  ]
+}

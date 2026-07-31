@@ -11,13 +11,14 @@
   "private": true,
   "packageManager": "npm@11.17.0",
   "dependencies": {
-    "@rebel-sim/engine": "*",
     "@angular/common": "^22.0.0",
     "@angular/compiler": "^22.0.0",
     "@angular/core": "^22.0.0",
     "@angular/forms": "^22.0.0",
     "@angular/platform-browser": "^22.0.0",
     "@angular/router": "^22.0.0",
+    "@angular/service-worker": "22.0.8",
+    "@rebel-sim/engine": "*",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

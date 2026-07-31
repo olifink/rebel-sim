@@ -483,3 +483,78 @@ comment:**
   `storage: OK` status after the real self-test round-trips through actual
   OPFS, still `OK` after a full page reload with the prior run's file
   already on disk, no console errors, REPL/keyboard regressions checked.
+
+## M6 — PWA packaging — **done** (2026-07-31)
+
+**Goal:** a genuinely installable PWA that precaches everything needed to
+boot to a usable Forth prompt and requests persistent storage
+(`PORTING-WEB.md` §7: "instant-on is the point, not a checkbox").
+
+**Scaffolded via Angular's own PWA schematic** (`ng add @angular/pwa`),
+not hand-rolled — `manifest.webmanifest`, `ngsw-config.json`,
+`provideServiceWorker()` wiring in `app.config.ts`, and `index.html`'s
+manifest/icon `<head>` tags are all standard Angular CLI output, matching
+`PORTING-WEB.md`'s "current PWA schematic" assumption. Two npm quirks hit
+along the way, both fixed by pinning: `ng add @angular/pwa`'s own
+"compatible version" resolution picked `@angular/pwa@12.2.18` (an
+Angular-12-era version, wildly incompatible) instead of the `22.x` this
+workspace actually needs — pinning `@angular/pwa@22.0.9` explicitly fixed
+it; the schematic's own `package.json` write for `@angular/service-worker`
+used `^22.0.0`, which npm then resolved to a newer `22.1.0` with an
+*exact* (not caret) `@angular/core` peer requirement, conflicting with
+this workspace's actual `22.0.8` — pinned to the exact matching
+`22.0.8` instead. Also hit a **fresh instance of the exact npm-workspace
+hoisting bug M1 already found with `jsdom`**: after this round of
+installs, `@angular/core` (needed by both `packages/app` and the newly
+added `@angular/service-worker`) got hoisted to the workspace root, but
+`@angular/compiler` (only ever needed by `packages/app`) didn't — so
+root's hoisted `@angular/core/testing.mjs` failed to resolve its own
+`@angular/compiler` import at test time, since Node's module resolution
+only walks *up* from the importing file, never back down into
+`packages/app/node_modules`. Same fix as M1: add `@angular/compiler` as
+an explicit root-level `devDependency`, forcing it to hoist to root too.
+
+**Icons are a real, on-brand asset, not the schematic's placeholder
+Angular logo**: generated via the `ng-icon-forge` skill/schematic from a
+hand-authored source SVG (`icon-src/rebel-sim-logo.svg`, kept in the
+scratch directory, not committed) that draws the *exact* ZX Spectrum 'R'
+glyph bitmap already shipping in `font-zxspectrum.ts` (rows `0xF8, 0x84,
+0x84, 0xF8, 0x88, 0x84`), scaled up and centered on the glyph's own 6×6
+bounding box rather than the font's padded 8×8 cell. Same green-on-black
+(`#00ff00`/`#000000`) as the running app. `ng-icon-forge`'s own `--dry-run`
+flag errored (a bug in that schematic version, unrelated to this repo —
+worked fine without it) — same "pin the exact version, verify with the
+real command" lesson as the `@angular/pwa` resolution issue above.
+
+**What shipped:**
+- `public/manifest.webmanifest` — `name`/`short_name: "Rebel-Sim"`, a
+  real `description`, `theme_color`/`background_color: "#000000"`
+  (matching the terminal chrome), 10 icons (8 `any` sizes 72–512px + 2
+  `maskable` 192/512px variants with the schematic's default 20% safe-zone
+  padding).
+- `ngsw-config.json` — verified (not just assumed) against the real
+  compiled `ngsw.json` in a production build: the `app` asset group
+  (`installMode: prefetch`, so precached at install time, before first
+  offline use) covers exactly `index.html` + the main JS bundle +
+  `manifest.webmanifest` + CSS — everything needed to boot to a working
+  Forth prompt with zero network. Icons are `lazy` — correct, since
+  nothing about booting to a prompt needs them upfront.
+- `app.config.ts` — `provideServiceWorker('ngsw-worker.js', { enabled:
+  !isDevMode(), registrationStrategy: 'registerWhenStable:30000' })`,
+  schematic default (never blocks initial render on registration).
+- `app.ts` — `navigator.storage.persist()` requested once at startup
+  (best-effort, alongside the existing OPFS availability check from M5)
+  so a user's saved projects aren't subject to casual eviction under
+  storage pressure.
+- Root `package.json` — added `@angular/compiler` as an explicit
+  devDependency (the hoisting fix, above).
+- **Verified end-to-end against a real production build**, not just the
+  dev server (which never registers the service worker,
+  `enabled: !isDevMode()`): served `dist/app/browser` over plain HTTP,
+  confirmed in a headless browser that the manifest resolves with the
+  right identity, the service worker reaches `activated` state, Cache
+  Storage holds the precached asset groups, then — the actual proof —
+  went **fully offline** (`context.setOffline(true)`) and reloaded: the
+  app booted, ran `2 3 + .` correctly, and the M5 storage self-test still
+  reported `OK` (OPFS is a local API, unaffected by network state), all
+  with zero console errors online or offline.

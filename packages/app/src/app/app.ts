@@ -47,6 +47,15 @@ export class App implements AfterViewInit, OnDestroy {
     // only ever finding out storage is broken the first time a real
     // project tries to use it.
     if (storageHal) {
+      // PORTING-WEB.md §7: ask the browser not to casually evict a
+      // user's project data (OPFS) the way ordinary origin storage can
+      // be reclaimed under pressure — losing work because storage was
+      // tight is a bad failure mode for a tool meant to feel like it
+      // owns its own memory. Best-effort: the browser may still say no
+      // (persist() resolves false), and there's nothing useful to do
+      // about that beyond having asked.
+      void navigator.storage?.persist?.();
+
       runStorageSelfTest(storageHal)
         .then((passed) => this.zone.run(() => this.storageStatus.set(passed ? 'OK' : 'FAILED')))
         .catch((err: unknown) => {
