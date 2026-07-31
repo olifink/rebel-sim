@@ -389,6 +389,17 @@ bitmap font table (§1.19). `INK`/`PAPER` are raw 24-bit `0xRRGGBB`
 truecolor values, not palette indices — matching Rebel-ROM's likely
 default mode, and meaning no palette table exists anywhere.
 
+The host is free to do whatever it wants with the surface it's drawing
+into beyond that — `CanvasScreenHal` targets a DOM-detached, true-
+resolution (320x240) offscreen canvas rather than the visible one
+directly; `packages/app`'s own per-frame pump is what presents that
+onto the actually-visible canvas (a `drawImage` upscale, sized to always
+land on a clean integer pixel multiple regardless of the display's
+`devicePixelRatio` — a real rendering bug, fixed after M7a shipped, see
+`PLAN.md`'s M7a follow-up note). None of that is visible at the `ScreenHal`
+contract level; it's purely how the host chooses to present what the HAL
+already drew correctly.
+
 ### 1.18 Cursor & wrap-only output — no scrolling
 
 `EMIT`'s streaming behavior (as opposed to `CHAR!`'s positioned

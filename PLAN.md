@@ -914,6 +914,84 @@ how much more `ACCEPT` actually needs to do there.
   alive and accepting further input immediately after; zero console
   errors throughout.
 
+### Follow-up fix (2026-07-31): uneven glyph pixel widths at fractional `devicePixelRatio`
+
+Reported by Oliver after using M7a's on-screen REPL for real: with more
+text visible on screen, identical characters (two `l`s in "hello") were
+rendering with visibly different stroke widths — one looked "correct,"
+one looked thinner. Not a font bug (the ZX Spectrum glyph data ported in
+M3 was never touched) and not the M7a work itself — a real bug in how
+`packages/app` had been presenting the framebuffer since M3, only
+becoming *visible* now that there was enough on-screen text to notice it
+with.
+
+**Root cause:** the visible `<canvas>`'s backing-store resolution was
+fixed at the true framebuffer size (320x240 — `CanvasScreenHal` draws
+exactly one canvas pixel per `Screen` pixel) and stretched to a
+hardcoded `640px x 480px` via CSS — a clean, uniform 2x upscale only
+when the browser's `devicePixelRatio` happens to be a whole number. At
+any fractional DPR (Windows 125%/150% scaling, some Linux fractional-
+scaling setups — all common, none exotic), the actual device-pixel
+upscale factor is `2 * devicePixelRatio`, which isn't a whole number, so
+different source pixels land on different numbers of physical pixels:
+some columns of the *same* glyph render one physical pixel wide, others
+two — exactly the "identical characters look different" symptom
+reported, and exactly what "a rounding error in fractional screen math"
+(Oliver's own guess) actually was.
+
+**Fix — the standard "crisp canvas at any DPR" pattern:** split what was
+one canvas into two. `CanvasScreenHal` now draws into a DOM-detached
+*offscreen* canvas at the framebuffer's true 320x240 resolution,
+unchanged internally. The *visible* canvas's backing-store resolution is
+computed (`canvas-presenter.ts`) as an exact integer multiple of
+320x240, chosen so that multiple times `devicePixelRatio` lands close to
+a target on-screen size — its CSS size is then set from that backing
+resolution divided by `devicePixelRatio`. The browser never needs to
+scale the visible canvas at all (its backing-store pixel count already
+equals its physical pixel footprint exactly, by construction); the
+framebuffer -> backing-store upscale happens once, deterministically,
+inside `drawImage` with `imageSmoothingEnabled = false`, done once per
+animation frame by the same pump loop M7a already had running
+continuously.
+
+**A genuine side benefit, not scope creep:** this finally wires up the
+decoupled render cadence `PORTING-WEB.md` §6 called for from M1 onward
+("a `requestAnimationFrame`-driven render cadence, decoupled from
+however fast the interpreter itself ticks") — before this fix, the
+canvas was painted directly and synchronously on every single primitive
+dispatch, coupling render to interpreter pace exactly as that section
+warned against. Presenting once per frame from the pump was the natural
+place to fix the DPR bug and happened to satisfy that original,
+previously-unmet architectural note at the same time.
+
+**What shipped:** `canvas-presenter.ts` (`computePresentationSize()`, a
+small pure function — given a framebuffer size, a target CSS width, and
+a `devicePixelRatio`, returns the backing/CSS size to use; picks the
+nearest-neighbor integer scale via `Math.round`, never below 1x). `app.
+ts`: an offscreen canvas `CanvasScreenHal` now targets instead of the
+visible one; `applyPresentationSize()` sizes the visible canvas and
+reapplies `imageSmoothingEnabled = false` (canvas resizes reset context
+state) on init and on `window`'s `resize` event (covers DPR changing at
+runtime — dragging the window to a different-DPI display, browser zoom);
+the pump's `tick()` now does one `drawImage` per frame before its
+existing `step()`/stack-diff work. 5 new app tests
+(`canvas-presenter.spec.ts`): DPR-1 parity with the old hardcoded 2x
+behavior, backing size is always an exact framebuffer multiple across a
+spread of DPR values (1 through 3, integer and fractional), CSS size's
+device-pixel footprint always exactly equals the backing size, scale
+never drops below 1x, non-positive DPR falls back to 1 — 8 app tests
+total, all passing.
+
+**Verified live in a headless browser at devicePixelRatio 1, 1.25, 1.5,
+and 2** (Playwright's `deviceScaleFactor` context option): confirmed
+programmatically that the visible canvas's backing resolution is an
+exact integer multiple of 320x240 at every one of those (640x480,
+960x720, 960x720, 1280x960 respectively); typed "hello" at DPR 1.25 —
+the exact fractional-scaling scenario that reproduces the bug — and,
+zoomed into a screenshot pixel-for-pixel, both `l` characters render as
+identical, uniform blocks with no stroke-width discrepancy. No console
+errors at any tested DPR.
+
 ## M8 — Core Vocabulary — **planned**
 
 **Goal:** the primitive/control-flow/defining-word set a "passable"

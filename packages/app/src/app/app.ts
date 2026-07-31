@@ -3,6 +3,14 @@ import { Machine, runStorageSelfTest } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
+import { computePresentationSize } from './canvas-presenter.js';
+
+// The real framebuffer resolution (matches repl.ts's DEFAULT_SCREEN_WIDTH/
+// HEIGHT — the engine has no reason to expose these, they're boot-fixed
+// per FORTH-ARCHITECTURE.md's current "no runtime mode change" state).
+const FRAMEBUFFER_WIDTH = 320;
+const FRAMEBUFFER_HEIGHT = 240;
+const TARGET_CSS_WIDTH = 640; // ~2x at devicePixelRatio 1, same footprint as before
 
 @Component({
   selector: 'app-root',
@@ -21,6 +29,15 @@ export class App implements AfterViewInit, OnDestroy {
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
 
+  // The engine draws into this offscreen, DOM-detached canvas at the
+  // framebuffer's true 1:1 resolution — CanvasScreenHal never touches
+  // the visible canvas directly. Presenting the two separately (rather
+  // than displaying this one, scaled via CSS) is what fixes the uneven-
+  // pixel-width rendering bug: see canvas-presenter.ts's header comment.
+  private readonly offscreen = document.createElement('canvas');
+  private offscreenCtx: CanvasRenderingContext2D | null = null;
+  private presentCtx: CanvasRenderingContext2D | null = null;
+
   // Bound once so removeEventListener in ngOnDestroy actually matches.
   private readonly onKeyDown = (e: KeyboardEvent): void => this.handleKeyEvent(e, true);
   private readonly onKeyUp = (e: KeyboardEvent): void => this.handleKeyEvent(e, false);
@@ -37,13 +54,22 @@ export class App implements AfterViewInit, OnDestroy {
   constructor(private readonly zone: NgZone) {}
 
   ngAfterViewInit(): void {
+    this.offscreen.width = FRAMEBUFFER_WIDTH;
+    this.offscreen.height = FRAMEBUFFER_HEIGHT;
     // getContext('2d') can be null in environments with no real canvas
     // backing (e.g. jsdom in unit tests) — degrade to the engine's
     // default no-op HAL rather than crashing; a real browser always has one.
-    const ctx = this.screenRef.nativeElement.getContext('2d');
+    this.offscreenCtx = this.offscreen.getContext('2d');
+    this.presentCtx = this.screenRef.nativeElement.getContext('2d');
+    if (this.presentCtx) {
+      this.presentCtx.imageSmoothingEnabled = false;
+    }
+    this.applyPresentationSize();
+    window.addEventListener('resize', this.onResize);
+
     const storageHal = createOpfsStorageHalIfSupported();
     this.machine = new Machine({
-      screenHal: ctx ? new CanvasScreenHal(ctx) : undefined,
+      screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
       storageHal,
     });
     this.screenRef.nativeElement.focus();
@@ -96,6 +122,32 @@ export class App implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('resize', this.onResize);
+  }
+
+  // Bound once so removeEventListener actually matches. Recomputes the
+  // visible canvas's backing resolution — devicePixelRatio can change at
+  // runtime (dragging the window to a different-DPI display, browser
+  // zoom), and `resize` fires for the common cases of that.
+  private readonly onResize = (): void => this.applyPresentationSize();
+
+  private applyPresentationSize(): void {
+    const canvas = this.screenRef.nativeElement;
+    const size = computePresentationSize(
+      FRAMEBUFFER_WIDTH,
+      FRAMEBUFFER_HEIGHT,
+      TARGET_CSS_WIDTH,
+      window.devicePixelRatio || 1,
+    );
+    canvas.width = size.backingWidth;
+    canvas.height = size.backingHeight;
+    canvas.style.width = `${size.cssWidth}px`;
+    canvas.style.height = `${size.cssHeight}px`;
+    // Resizing a canvas resets its 2D context state, including
+    // imageSmoothingEnabled — reapply it every time.
+    if (this.presentCtx) {
+      this.presentCtx.imageSmoothingEnabled = false;
+    }
   }
 
   private handleKeyEvent(e: KeyboardEvent, pressed: boolean): void {
@@ -122,9 +174,13 @@ export class App implements AfterViewInit, OnDestroy {
   // Must be called from outside the Angular zone (ngAfterViewInit's call
   // site already is) — requestAnimationFrame callbacks scheduled there
   // stay outside it too, which is the point: no change detection runs on
-  // frames that don't need it. Forth's own output lands on the canvas
-  // synchronously as primitives execute (the HAL, M3), independent of
-  // this pump's pace.
+  // frames that don't need it. The engine draws into the offscreen
+  // framebuffer canvas synchronously as primitives execute (the HAL,
+  // M3); this pump is what actually presents it to the visible canvas,
+  // once per frame, independent of the interpreter's own pace
+  // (PORTING-WEB.md §6) — the decoupled render cadence that section
+  // originally called for, finally wired up as a side effect of fixing
+  // the uneven-pixel-width bug (canvas-presenter.ts).
   private startPump(): void {
     if (this.pumping) {
       return;
@@ -142,6 +198,10 @@ export class App implements AfterViewInit, OnDestroy {
         this.pumping = false;
         console.error('Rebel-Sim REPL loop crashed', e);
         return;
+      }
+      if (this.presentCtx) {
+        const canvas = this.screenRef.nativeElement;
+        this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
       }
       const current = this.machine.stack.toArray();
       if (!arraysEqual(current, this.lastStackSnapshot)) {

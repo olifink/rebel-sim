@@ -13,8 +13,10 @@
 }
 
 .screen {
-  width: 640px;
-  height: 480px;
+  /* width/height are set inline by canvas-presenter.ts, computed from
+     devicePixelRatio so the framebuffer -> screen upscale is always a
+     clean integer multiple in real device pixels (no fixed px here —
+     a stale value would just be misleading). */
   max-width: 100%;
   image-rendering: pixelated;
   border: 1px solid #0f0;
