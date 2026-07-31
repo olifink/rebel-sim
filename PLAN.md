@@ -294,3 +294,93 @@ Rebel-ROM exactly, *field*-level offsets within a group don't.
   `AT-XY` positioning, `CLS` respecting current `PAPER`, ink persisting
   across `CLS` (matching `Cls()` — only paper/char-bank/cursor reset),
   no console errors.
+
+## M4 — Keyboard — **done** (2026-07-31)
+
+**Goal:** raw keyboard events in, a translated non-blocking queue out
+(`PORTING-WEB.md` §4's heading, verbatim) — `KEY?`/`KEY` primitives a
+Forth program can poll directly, independent of the M1 REPL `<input>`
+line-reader.
+
+**Built against the real Rebel-ROM reference** (`docs/KEYBOARD.md`,
+`src/keyboardmodule.h/.cpp`): matched the `KMAP` bank shape (`u8[2][256]`,
+unshifted/shifted planes), the default US keymap byte-for-byte
+(`BuildDefaultKeymap` — only printable keys plus Enter/Backspace/Tab/
+Space get a translated char; Caps Lock/F-keys/PrintScreen/arrows/GUI stay
+at char 0, identified only by usage code), the modifier
+press/release-as-pseudo-events convention (usage code `0x80 + bit`,
+folded into the *same* event queue as ordinary keys — confirmed by
+browser verification below, which initially looked like a bug until
+re-tracing showed it's exactly what `OnRawReport` does on real hardware),
+and `PushEvent`'s full-queue behavior (drop the new event, never
+overwrite or block).
+
+**Deliberate simplifications vs. the reference**, each documented in
+`keyboard.ts`'s header comment:
+- No raw-report diffing needed — Circle's raw USB handler can refire
+  without a real change (`docs/KEYBOARD.md` §1), so `CKeyboardModule`
+  diffs each report against the last one itself to derive edges. DOM
+  `keydown`/`keyup` are already clean edges; the host only needs to
+  filter `KeyboardEvent.repeat` (auto-repeat) before calling in.
+- `nKeyboardCount` (attached-device count) omitted from the `KEYBOARD`
+  sysvar group — browser DOM APIs have no USB-hotplug-style device
+  enumeration to report, so there's nothing meaningful to put there.
+- `KMAP` is per-arena in Rebel-Sim even though `CLAUDE.md` classifies it
+  as shared/singular like `SCRN` — moot until multi-arena isolation
+  exists (there's only ever one arena today); flagged in
+  `rebel-opcodes.json` as a real distinction to revisit then, not
+  overlooked.
+
+**What shipped:**
+- `keyboard.ts` — the `Keyboard` class: builds the default US `KMAP`
+  table into a new `KMAP` bank (4 KiB, XS class, matching
+  `docs/KEYBOARD.md` §6 — the table itself is 512 bytes), `pushRawEvent
+  (usageCode, pressed)` (modifier pseudo-code diffing into the
+  `KEYBOARD.MODIFIERS` sysvar + KMAP-plane translation + enqueue),
+  `hasEvent()`/`readEvent()` (non-blocking peek/pop against a 32-slot
+  ring buffer, one slot sacrificed for full/empty detection — same as
+  Rebel-ROM's `m_Queue`).
+- `primitives.ts`/`rebel-opcodes.json` — two new primitives: `KEY?`
+  ( `-- flag` , non-blocking, doesn't consume) and `KEY` ( `-- char` ,
+  non-blocking pop). **Blocking `KEY` is explicitly deferred**: Rebel-ROM
+  itself hasn't built its own blocking Forth `KEY` yet either (`docs/
+  KEYBOARD.md` §10 — it'd block a task on this same queue once Phase 11
+  lands there); Rebel-Sim's interpreter has no task-suspension model to
+  build a blocking word on top of, so `KEY` throws on an empty queue
+  rather than faking a block. Same deferral shape as M3's `hal_draw_*`.
+- `packages/app`: `browser-keymap.ts` (DOM `KeyboardEvent.code` → raw USB
+  HID usage code — the browser-host driver layer real hardware's USB
+  report parsing plays; modifiers map straight to the `0x80+bit`
+  pseudo-codes `Keyboard.pushRawEvent()` expects, since DOM already
+  reports each physical modifier key as its own discrete press/release,
+  unlike the boot-protocol modifier bitmask). `app.ts` wires `window`
+  `keydown`/`keyup` listeners (installed `NgZone.runOutsideAngular()`) to
+  `machine.keyboard.pushRawEvent()`, `preventDefault()` on every key it
+  recognizes. Focus is the routing switch: while the REPL `<input>` has
+  DOM focus, events are left alone for normal cooked text entry instead
+  (Rebel-Sim has no multi-arena/screen-attachment model yet for
+  `PORTING-WEB.md` §4's "only the attached arena receives routed input"
+  to hook into — DOM focus on the REPL box is a deliberately simple
+  stand-in, not a redesign to revisit once one exists).
+- 12 new engine tests (`keyboard.test.ts`: unshifted/shifted translation,
+  digit/symbol row, Enter/Backspace/Tab/Space, untranslated special keys
+  staying at char 0, release events carrying no char, independent L/R
+  modifier bit tracking, queue-full drop behavior, `KEY?`/`KEY` via
+  `Machine.interpret`, `KEY` throwing on empty) — 44 engine tests total,
+  all passing; 3 app tests unaffected.
+- **Live browser verification surfaced a real dev-tooling gotcha, not an
+  app bug**: Vite's `optimizeDeps` pre-bundle of the workspace-linked
+  `@rebel-sim/engine` package is cached under
+  `packages/app/.angular/cache/**/vite/deps/`, keyed off `package.json`/
+  lockfile content rather than the actual resolved file contents — so
+  editing `packages/engine/src/*.ts` and rebuilding its `dist/` does
+  *not* invalidate a dev server already holding that cache (nor does
+  starting a fresh `ng serve`, since the cache is only rebuilt when Vite
+  judges the *dependency graph shape* to have changed). A stray
+  already-running `ng serve` process from the M3 session, still bound to
+  port 4200, made this doubly confusing at first. Fix: fully stop any
+  running `ng serve`, delete `packages/app/.angular` (not just its
+  `cache/` contents were being reliably removed — always verify the
+  `rm -rf` actually ran, don't trust a non-error exit code alone), then
+  restart. Worth remembering for M5/M6 too if a dev-server session ever
+  seems to be ignoring fresh engine changes.

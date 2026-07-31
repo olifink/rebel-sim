@@ -415,6 +415,86 @@ does.
 data + `glyphRows(charCode)` lookup), consumed by `CanvasScreenHal`
 (§1.17).
 
+### 1.20 The keyboard queue — raw events in, translated chars out
+
+Mirroring the screen module's shape (§1.16-§1.18), keyboard input is a
+two-layer pipeline: a host-specific *raw* layer feeding a small,
+engine-owned, host-agnostic *event queue*.
+
+- The host (an Angular `keydown`/`keyup` listener in Rebel-Sim; a USB HID
+  report handler on real hardware) turns a physical key press/release
+  into a **raw usage code** — a small integer identifying *which key*,
+  independent of what character (if any) it produces. Modifier keys
+  (Ctrl/Shift/Alt/GUI, left and right kept distinct) get *pseudo* usage
+  codes in a reserved range (`0x80 + bit`) rather than a separate
+  mechanism, so they flow through the exact same event pipeline as an
+  ordinary letter key.
+- `Keyboard.pushRawEvent(usageCode, pressed)` is the one entry point from
+  that raw layer into the engine. It does two things: updates a live
+  modifier bitmask (visible as a sysvar, so Forth code can read "is Shift
+  currently held" without draining the queue), and — on a *press* only —
+  translates the usage code into a character via the `KMAP` bank (§1.21),
+  then pushes a `{usageCode, modifiers, char, pressed}` event onto a
+  fixed-size ring buffer. A *release* event carries no character
+  (`char = 0`) even for an otherwise-printable key.
+- The queue is deliberately **non-blocking and lossy under pressure**: if
+  it's full, a new event is silently dropped rather than overwriting an
+  older unconsumed one or blocking the caller. Forth reads it with two
+  primitives — `KEY?` (peek: is there anything queued, without consuming
+  it) and `KEY` (pop the oldest event's character). Both are immediate,
+  synchronous operations; there is currently no way for a Forth program
+  to *wait* for a key ("block" until one arrives) — see the note below.
+
+**Why modifier presses are their own queue entries, not just a bitmask
+flip:** it's tempting to assume only "real" keys (letters, digits, ...)
+belong in the queue and Shift/Ctrl/Alt are purely a side-channel state
+bit. They're both: every press *and* release — including a bare tap of
+Shift with nothing else held — is a real, orderable event in the queue,
+in addition to updating the live bitmask. This matters for anything that
+needs to reconstruct exact timing/ordering (e.g. "was Shift already down
+*before* this letter, or did they arrive in the same tick") rather than
+only ever seeing the modifier bitmask's *current* value at some later,
+unrelated read.
+
+**Why there's no blocking `KEY` yet:** a traditional Forth `KEY` blocks
+the calling task until a key is available — useful for writing
+`: MAIN BEGIN KEY ... AGAIN ;`-style programs without a manual poll
+loop. Building that requires *something* to suspend on ("come back to
+this exact point once the queue is non-empty") — a task-suspension or
+async execution model the interpreter doesn't have yet (today,
+`Machine.interpret()` runs one line to completion, synchronously, with
+no notion of "pause here"). `KEY` (§3) errors on an empty queue rather
+than pretending to block; adding real blocking later is additive (a new
+code path layered on the same queue), not a redesign of anything built
+here — the same shape as `hal_draw_*` being deferred in M3.
+
+### 1.21 The `KMAP` bank — usage code to character, as data not code
+
+Rather than a `switch` statement or if-chain mapping usage codes to
+characters, translation is table-driven: a bank (tag `KMAP`) holding two
+256-entry planes — unshifted and shifted — indexed directly by usage
+code. Translating a key is just `table[shiftPlane][usageCode]`, an
+ordinary byte read.
+
+Only keys with an obvious single character get a non-zero entry:
+letters, digits (and their shifted symbol-row counterparts, e.g. `1` /
+`!`), the standard US punctuation row, and Enter/Backspace/Tab/Space
+(mapped to `'\n'`/`'\b'`/`'\t'`/`' '`). Everything else — Caps Lock,
+function keys, Print Screen, arrow keys, the GUI/Windows key — is left
+at `0` in the table. Those keys are still fully visible to Forth code
+(their press/release events still flow through the queue with their real
+usage code), just with no character meaning; a program that wants to
+react to, say, an arrow key reads `usageCode` directly rather than
+`char`. This is a deliberate "identify the key now, decide what it does
+later" split, not an oversight — a command-palette or game-input word
+built later can react to raw usage codes without this table needing to
+change at all.
+
+Being a real bank (not a JS object/`Map`) means the table lives in the
+same portable arena memory as everything else — swapping to a different
+physical layout (a non-US keyboard, say) is only ever a matter of
+loading different bytes into this bank, never a code change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -486,6 +566,12 @@ exactly as it would be on the bare-metal target.
 | **Ink / Paper** | Foreground / background color for a character write. Raw 24-bit truecolor in Rebel-Sim, not a palette index. |
 | **Blit** | Copying a bitmap's pixels onto a destination (here: a glyph's pixels onto the framebuffer) — no scaling or transformation, just placement. |
 | **Wrap (vs. scroll)** | What happens when text output reaches the last row: it overwrites row 0 rather than shifting everything up. A deliberate Rebel-ROM design choice, not a Rebel-Sim gap. |
+| **Usage code** | A small integer identifying *which physical key* was pressed/released, independent of any character it might produce (a Caps Lock press has a usage code but no character). |
+| **Pseudo usage code** | The `0x80 + bit` convention for reporting a modifier key's (Ctrl/Shift/Alt/GUI) own press/release as an ordinary queue event, alongside real keys, rather than only ever exposing modifiers as a side-channel bitmask. |
+| **`KMAP` bank** | Arena bank holding the usage-code → character translation table (two 256-entry planes: unshifted, shifted). Data, not code — swapping layouts means loading different bytes, not changing translation logic. |
+| **Keyboard event queue** | A small, fixed-size, non-blocking ring buffer of `{usageCode, modifiers, char, pressed}` events. Drops new events when full rather than overwriting or blocking. Not arena/bank memory — host/module-owned, like the framebuffer. |
+| **`KEY?`** | Primitive: `-- flag` — TRUE if the keyboard queue has at least one event, without consuming it. |
+| **`KEY`** | Primitive: `-- char` — pops the oldest queued event's translated character. Non-blocking; errors if the queue is empty (blocking `KEY` is deferred — see §1.20). |
 
 ---
 
@@ -496,7 +582,7 @@ exactly as it would be on the bare-metal target.
 | **M1** | Arena, banks, sysvars (`FORTH` group), data stack, primitive dispatch (20 primitives), a line-based outer interpreter with no dictionary yet. | `arena.ts`, `banks.ts`, `sysvars.ts`, `stack.ts`, `primitives.ts`, `repl.ts` |
 | **M2** | Real dictionary (§1.9), colon-definitions (§1.11), the DOCOL-threaded inner interpreter with a real return stack (§1.13), `IMMEDIATE` (§1.14). Primitives became real dictionary entries. | `dictionary.ts`, `inner.ts`, `repl.ts` (rewritten) |
 | **M3** | Screen: `CHAR` bank, the `ScreenHal` HAL boundary (§1.17), cursor/wrap-only output (§1.18), bitmap-font blitting (§1.19) — a real canvas-backed `CHAR!`/`CHAR@`/`EMIT`/`CR`/`CLS`/`AT-XY`/`INK`/`PAPER`. Sysvars grew `CORE`/`SCREEN` groups matching Rebel-ROM's real layout; M1's plain-text output buffer retired. Raw pixel drawing (`hal_draw_*`) deferred — nothing needs it yet. | `screen.ts`, `canvas-screen-hal.ts`, `font-zxspectrum.ts` |
-| M4 (planned) | Keyboard: non-blocking event queue, blocking `KEY`. | — |
+| **M4** | Keyboard: `KMAP` bank (§1.21), non-blocking event queue (§1.20), `KEY?`/`KEY` primitives, `KEYBOARD.MODIFIERS` sysvar. Browser `keydown`/`keyup` → raw usage codes → the queue, routed only when the REPL input box isn't focused. Blocking `KEY` deferred (no task-suspension model yet). | `keyboard.ts`, `browser-keymap.ts` |
 | M5 (planned) | Storage: OPFS-backed projects/carts. | — |
 | M6 (planned) | PWA packaging. | — |
 

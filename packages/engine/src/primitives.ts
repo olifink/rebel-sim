@@ -10,6 +10,7 @@
 
 import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
+import { Keyboard } from './keyboard.js';
 
 export const TRUE = -1;
 export const FALSE = 0;
@@ -17,6 +18,7 @@ export const FALSE = 0;
 export interface PrimitiveContext {
   readonly stack: DataStack;
   readonly screen: Screen;
+  readonly keyboard: Keyboard;
   getBase(): number;
 }
 
@@ -163,6 +165,17 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 28: // PAPER ( color -- )
       ctx.screen.setPaper(s.pop());
       break;
+    case 29: // KEY? ( -- flag )
+      s.push(ctx.keyboard.hasEvent() ? TRUE : FALSE);
+      break;
+    case 30: { // KEY ( -- char )
+      const event = ctx.keyboard.readEvent();
+      if (!event) {
+        throw new Error('KEY: no event queued (blocking KEY not yet implemented)');
+      }
+      s.push(event.char);
+      break;
+    }
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

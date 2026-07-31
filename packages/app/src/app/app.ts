@@ -1,6 +1,7 @@
-import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
+import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
 import { Machine } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
+import { codeToUsage } from './browser-keymap.js';
 
 @Component({
   selector: 'app-root',
@@ -8,7 +9,7 @@ import { CanvasScreenHal } from './canvas-screen-hal.js';
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
-export class App implements AfterViewInit {
+export class App implements AfterViewInit, OnDestroy {
   @ViewChild('input') inputRef!: ElementRef<HTMLInputElement>;
   @ViewChild('screen') screenRef!: ElementRef<HTMLCanvasElement>;
 
@@ -20,6 +21,10 @@ export class App implements AfterViewInit {
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
 
+  // Bound once so removeEventListener in ngOnDestroy actually matches.
+  private readonly onKeyDown = (e: KeyboardEvent): void => this.handleKeyEvent(e, true);
+  private readonly onKeyUp = (e: KeyboardEvent): void => this.handleKeyEvent(e, false);
+
   constructor(private readonly zone: NgZone) {}
 
   ngAfterViewInit(): void {
@@ -29,6 +34,40 @@ export class App implements AfterViewInit {
     const ctx = this.screenRef.nativeElement.getContext('2d');
     this.machine = new Machine({ screenHal: ctx ? new CanvasScreenHal(ctx) : undefined });
     this.inputRef.nativeElement.focus();
+
+    // Raw keydown/keyup -> the engine's keyboard event queue (M4,
+    // PORTING-WEB.md §4) — a separate channel from the REPL <input> below,
+    // which stays a plain cooked text field for typing Forth source at
+    // tool-development speed. Rebel-Sim has no multi-arena/focus-
+    // attachment model yet (FORTH-ARCHITECTURE.md's "current arena" is
+    // fixed), so whether the REPL input box itself has DOM focus is used
+    // as a simple proxy for "attached to the simulated keyboard or not":
+    // while typing a command, keystrokes go to the input field only, not
+    // into the Forth-visible queue.
+    this.zone.runOutsideAngular(() => {
+      window.addEventListener('keydown', this.onKeyDown);
+      window.addEventListener('keyup', this.onKeyUp);
+    });
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+  }
+
+  private handleKeyEvent(e: KeyboardEvent, pressed: boolean): void {
+    if (document.activeElement === this.inputRef.nativeElement) {
+      return; // typing a REPL command — not routed to the simulated keyboard
+    }
+    if (pressed && e.repeat) {
+      return; // auto-repeat isn't a new press edge (docs/KEYBOARD.md §1)
+    }
+    const usageCode = codeToUsage(e.code);
+    if (usageCode === undefined) {
+      return;
+    }
+    e.preventDefault();
+    this.machine.keyboard.pushRawEvent(usageCode, pressed);
   }
 
   submit(): void {

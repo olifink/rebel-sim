@@ -14,6 +14,7 @@ import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
+import { Keyboard } from './keyboard.js';
 import { Inner } from './inner.js';
 import {
   abortDefinition,
@@ -33,7 +34,8 @@ const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/S
 const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
-const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M3
+const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
+const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M4
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
 // mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
@@ -61,6 +63,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly sysvars: Sysvars;
   readonly dictBank: Bank;
   readonly screen: Screen;
+  readonly keyboard: Keyboard;
   private readonly inner: Inner;
 
   constructor(options: MachineOptions = {}) {
@@ -94,6 +97,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     const charBank = this.banks.createBank('CHAR', 'main', charCols * charRows);
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
     this.screen.cls();
+
+    const kmapBank = this.banks.createBank('KMAP', 'main', KMAP_BANK_SIZE);
+    this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
 
     this.stack = new DataStack(this.arena, dstkBank);
     this.rstack = new DataStack(this.arena, rstkBank);

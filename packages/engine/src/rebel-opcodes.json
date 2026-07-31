@@ -32,7 +32,9 @@
     { "id": 25, "name": "CLS", "note": "( -- ) M3: CScreenModule::Cls — fills the CHAR bank with spaces, clears the framebuffer to the current PAPER color, resets the cursor to 0,0" },
     { "id": 26, "name": "AT-XY", "note": "( col row -- ) M3: CScreenModule::SetCursor — sets CURSOR-X/CURSOR-Y directly, no bounds-checking (matching Rebel-ROM; an out-of-range cursor self-corrects on the next EMIT via AdvanceCursor's wrap)" },
     { "id": 27, "name": "INK", "note": "( color -- ) M3: sets the SCREEN group's default foreground color sysvar used by CHAR!/EMIT/. when no override is given. Rebel-Sim stores this as a raw 24-bit 0xRRGGBB truecolor value (Rebel-ROM's TColor is likewise a raw pixel value, not a palette index — direct/truecolor mode is its likely default per docs/SCREEN-MODULE.md §4)" },
-    { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" }
+    { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" },
+    { "id": 29, "name": "KEY?", "note": "( -- flag ) M4: CKeyboardModule::ReadEvent peeked non-destructively — TRUE if the event queue is non-empty, matching FORTH-ARCHITECTURE.md's hal_key_pressed? non-blocking-read requirement" },
+    { "id": 30, "name": "KEY", "note": "( -- char ) M4: non-blocking pop of the oldest queued event's translated character. Real Rebel-ROM's own Phase 11 Forth KEY word (which would block a task on this same queue, docs/KEYBOARD.md §10) isn't built there either yet — Rebel-Sim's interpreter has no task-suspension model to build a blocking word on top of, so this errors if the queue is empty rather than blocking; deferred to a follow-up once one exists (same shape as M3's hal_draw_* deferral)" }
   ],
 
   "bankTags": {
@@ -41,7 +43,8 @@
     "DICT": "dictionary / user program space, per-arena (in use since M2)",
     "RSTK": "return stack, per-arena (in use since M2)",
     "CHAR": "character-code grid, per-arena, 1 byte per cell, write-through into the framebuffer via ScreenHal (in use since M3, matches Rebel-ROM's CHAR bank exactly — docs/SCREEN-MODULE.md §3)",
-    "SCRN": "pixel framebuffer — NOT an arena bank in Rebel-Sim (matches Rebel-ROM: externally-backed, outside the arena's own memory accounting, excluded from the portable-dump claim per FORTH-ARCHITECTURE.md §8). Rebel-Sim's analog is the host-supplied ScreenHal implementation drawing to a <canvas>, never arena-resident memory."
+    "SCRN": "pixel framebuffer — NOT an arena bank in Rebel-Sim (matches Rebel-ROM: externally-backed, outside the arena's own memory accounting, excluded from the portable-dump claim per FORTH-ARCHITECTURE.md §8). Rebel-Sim's analog is the host-supplied ScreenHal implementation drawing to a <canvas>, never arena-resident memory.",
+    "KMAP": "raw-usage-code -> character translation table, u8[2][256] (unshifted/shifted planes), in use since M4 (docs/KEYBOARD.md §6). CLAUDE.md lists KMAP as shared/singular rather than per-arena like SCRN — Rebel-Sim only has one arena today (no multi-arena isolation yet), so it's allocated inside that arena like CHAR; the shared/singular distinction becomes visible once multi-arena support lands."
   },
 
   "sysvarGroups": {
@@ -71,8 +74,10 @@
     },
     "KEYBOARD": {
       "baseOffset": 128,
-      "note": "matches src/sysvars.h's SYSVARS_KEYBOARD_OFFSET (0x080). Reserved, no fields yet — populated when M4 lands.",
-      "fields": {},
+      "note": "matches src/sysvars.h's SYSVARS_KEYBOARD_OFFSET (0x080). M4: populated with MODIFIERS only — real TKeyboardSysVars also has nKeyboardCount (attached-device count), omitted here since browser DOM APIs have no USB-hotplug-style device enumeration to report; there's always implicitly 'some keyboard'.",
+      "fields": {
+        "MODIFIERS": { "offset": 0, "note": "live modifier bitmask (docs/KEYBOARD.md §2): bit0-3 = L Ctrl/Shift/Alt/GUI, bit4-7 = R Ctrl/Shift/Alt/GUI. Updated on every modifier press/release pseudo-event (0x80+bit convention)." }
+      },
       "groupSizeBytes": 64
     },
     "FONT": {

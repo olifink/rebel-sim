@@ -7,5 +7,7 @@ export { executePrimitive, TRUE, FALSE } from './primitives.js';
 export type { PrimitiveContext } from './primitives.js';
 export { Screen, NULL_SCREEN_HAL } from './screen.js';
 export type { ScreenHal } from './screen.js';
+export { Keyboard } from './keyboard.js';
+export type { KeyEvent } from './keyboard.js';
 export { Machine } from './repl.js';
 export type { MachineOptions } from './repl.js';
