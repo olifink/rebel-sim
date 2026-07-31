@@ -41,6 +41,13 @@ for implementation detail this document only summarizes.
   * a constants file (or assembler `.equ` set) for Rebel-Board.
 * **Why:** Three hand-maintained copies of `DUP = 1, SWAP = 2` will drift. This is the single highest-risk item for the whole "shared source" goal — everything else in this document assumes it's solved first.
 * **Agent task:** generate this file and the three codegen outputs before writing any interpreter logic.
+* **[NEW] `CORE-VOCABULARY.md` (companion doc, scoped from `PLAN.md`'s
+  M8) adds four tokens that belong in this table once M8 implementation
+  starts:** `BRANCH`/`0BRANCH` (control flow) and `DOVAR`/`DODOES`
+  (`CREATE`/`DOES>`, the latter pair flagged `[OPEN]` there pending
+  confirmation before building). Reserve them here rather than letting
+  each target invent its own numbering independently — the exact
+  failure mode this section exists to prevent.
 * **[CROSS-CHECK]** `docs/SYSVARS.md` §7 already flagged this *exact*
   class of risk, scoped to sysvars alone ("the C++ struct offsets and the
   Forth constant addresses are two independent hand-written descriptions

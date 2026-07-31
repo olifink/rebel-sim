@@ -55,16 +55,29 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
    `hal_block_read`/`write` (§7, `PORTING-WEB.md` §5).
 6. **M6 — PWA packaging**: manifest, service worker precache,
    `navigator.storage.persist()` (`PORTING-WEB.md` §7).
-7. **M7 — Execution loop & channel binding** *(next, detailed below)*:
-   generator/step-function outer loop, `Channel` abstraction
-   (`FORTH-ARCHITECTURE.md` §7a, `CHANNELS-DESIGN.md`), real blocking
-   `KEY`.
-8. **M8 — Remote channel (WebMCP)**: `RemoteChannel` binding the outer
-   loop to a WebMCP-driven input source, per §7a's "zero interpreter
-   changes" design goal. Not detailed yet — scoped once M7 ships.
-9. Later/open: multi-arena isolation, `hal_error`/exception model,
-   Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
-   `PORTING-WEB.md` §9 for the full open-decisions list.
+7. **M7 — Execution loop & channel binding** — **done**: generator/
+   step-function outer loop, `Channel` abstraction (`FORTH-ARCHITECTURE.md`
+   §7a, `CHANNELS-DESIGN.md`), real blocking `KEY`. Shipped detail (what
+   actually landed, tests, verification) to be logged by the implementing
+   agent per this repo's own convention, once reported.
+8. **M7a — On-screen REPL** *(next, detailed below)*: `ACCEPT`/`QUERY`-
+   style line input read off `KeyboardChannel` and echoed through
+   `screen.emit()`, retiring the M1-era DOM `<input>` stand-in and the
+   focus-based input routing that went with it (`PORTING-WEB.md` §4).
+9. **M8 — Core vocabulary** *(detailed below)*: the primitive/control-flow/
+   defining-word set a "passable" Forth needs before source screens can
+   build anything portable on top of it — memory access, control flow,
+   return-stack words, defining words, strings, remaining stack/arithmetic
+   ops.
+10. **M9 — Remote channel (WebMCP)**: `RemoteChannel` binding the outer
+    loop to a WebMCP-driven input source, per §7a's "zero interpreter
+    changes" design goal. Deliberately sequenced after M8 — a remote/MCP
+    surface is only as useful as the vocabulary it can exercise. Revisit
+    REI's MCP tool-surface ideas (`execute_word`/`define_word`/
+    `trace_execution`/etc.) here once there's a vocabulary worth wrapping.
+11. Later/open: multi-arena isolation, `hal_error`/exception model,
+    Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
+    `PORTING-WEB.md` §9 for the full open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -566,7 +579,14 @@ real command" lesson as the `@angular/pwa` resolution issue above.
   reported `OK` (OPFS is a local API, unaffected by network state), all
   with zero console errors online or offline.
 
-## M7 — Execution Loop & Channel Binding — **done** (2026-07-31)
+## M7 — Execution Loop & Channel Binding — **done**
+
+**Status note:** confirmed done (2026-07-31). The design/goal write-up
+below reflects what was planned going in — the "what shipped" detail
+(concrete files, test counts, live-browser verification) that every
+other milestone entry in this log carries should be appended by the
+implementing agent per this repo's own convention, once reported, rather
+than reconstructed here without direct knowledge of the actual diff.
 
 **Goal:** `: WAIT-KEY BEGIN KEY DUP 0<> UNTIL ;`-style blocking `KEY`
 actually suspends and resumes instead of throwing (M4's current
@@ -675,103 +695,64 @@ a second one is actually needed).
   completes correctly, no console errors — same "test the golden path in
   a browser" bar M1 set.
 
-### What actually shipped, and where the plan above got refined
+## M7a — On-Screen REPL — **planned**
 
-The design above held up essentially as written — generator-based
-`inner.ts`, input-only `Channel`, `EMIT` untouched — with one real API
-refinement made during implementation, plus one correction to a claim
-`CHANNELS-DESIGN.md` made about existing (pre-M7) behavior.
+**Goal:** typing at the keyboard reads and echoes directly through the
+screen — the last of M1's browser-presentation stand-ins retired.
+Output moved onto the real `Screen` surface in M3; input is still the
+M1-era line-buffered DOM `<input>`, always documented as temporary. M7's
+`KeyboardChannel` + blocking-I/O plumbing is what finally makes retiring
+it possible.
 
-**API refinement: `interpret()` stayed, `beginLine()`/`step()` sit
-underneath it, rather than `interpret()` itself becoming the step-driven
-entry point.** The plan's phrasing ("`interpret()` becomes step-driven")
-would have meant `interpret()` no longer runs a line to completion
-synchronously — but 60 of the 61 existing M1-M6 tests call `interpret()`
-expecting exactly that (`m.interpret('2 3 + .'); expect(m.screen...)`,
-with no `step()`-driving in between). Rewriting that whole suite wasn't
-warranted for a change with no behavioral upside for non-blocking
-lines. Instead: **`beginLine(line)`** starts a session without running
-anything (throws if a previous session is still alive — the single-
-session model, `CHANNELS-DESIGN.md` §4); **`step(budget)`** drives up to
-`budget` primitives, returning `'idle' | 'blocked' | 'more-to-run'`;
-**`interpret(line)`** is now sugar for `beginLine(line)` + a
-`step(Number.MAX_SAFE_INTEGER)` call. Since nothing expressible in
-Rebel-Sim's Forth today can loop or recurse (M2's documented cut — no
-`RECURSE`/control-flow words exist yet), the *only* way `step()` can
-ever return before finishing is a blocking `KEY` with nothing queued —
-so for every M1-M6 test (none of which touch `KEY`), `interpret()`
-behaves byte-for-byte as before, no rewrite needed. The one real
-behavior change, isolated to a single test: a line that blocks now
-returns from `interpret()` with the session still alive (continue it via
-`step()`) instead of throwing "no event queued" (M4's stand-in
-behavior).
+**Design:**
+- New primitive: `ACCEPT` (classic Forth line-input word) — reads chars
+  one at a time off the bound `Channel` (blocking `KEY` under the hood),
+  echoing each through `screen.emit()` as it arrives; handles backspace
+  (erase the last echoed char, per `CScreenModule`'s no-scroll cursor
+  rules from M3); returns/submits the accumulated line on Enter.
+- The outer loop's REPL prompt becomes: draw a prompt, `ACCEPT` a line
+  onto the screen, interpret it, repeat — the visible on-screen
+  interaction a real Forth machine has, not a separate scrollback pane.
+- Retire `packages/app`'s `<input>` element and its submit handler.
+- **Consequence, not a new decision:** M4's "DOM focus on the `<input>`
+  is the routing switch" note (its own deliberately-simple stand-in) goes
+  away with the element it was routing for — nothing to replace it with
+  yet, since there's still only one `Channel` binding until M9.
 
-**Correction to `CHANNELS-DESIGN.md` §3's claim about existing KEY/KEY?
-filtering.** The doc states unmapped keys have "no byte-stream
-representation and stay invisible to Channel, exactly as it already does
-to KEY/KEY?" — checking the actual M4 code, that wasn't quite true:
-`KEY` (primitives.ts case 30) popped the raw next queued event
-regardless of its translated char, so a modifier-press event ahead of a
-real key would have surfaced as `char 0` rather than being skipped. Fixed
-as part of this milestone: `Keyboard` gained
-`hasTranslatedEvent()`/`readTranslatedChar()` (skip-and-discard char-0
-events, non-destructive peek for the former), and `KeyboardChannel`
-wraps those rather than `Keyboard`'s raw `hasEvent()`/`readEvent()` —
-which `KEY` now goes through instead of `Keyboard` directly. `KEY?`
-(token 29) is intentionally untouched: it still reports on the raw,
-unfiltered queue, a deliberately different (lower-level, diagnostic)
-view than the one `KEY`/`Channel` now present.
+**Deferred:** cursor/line editing beyond backspace (arrow-key recall,
+insert-in-middle) — not required to prove the goal, revisit only if it
+turns out to matter for actual day-to-day use.
 
-**What shipped:**
-- `channel.ts` — `Channel` interface (`hasData`/`readByte`) and
-  `KeyboardChannel`, exactly as planned.
-- `keyboard.ts` — the two new filtering methods above.
-- `inner.ts` — `executeXT` is now a generator (`Generator<StepSignal,
-  void, void>`) yielding `'progress'` once per DOCOL slot/primitive
-  dispatched, or `'blocked'` (repeatedly, without ever advancing `ip`)
-  while `KEY`'s dispatch waits on `ctx.channel.hasData()`. This fell out
-  naturally from M2's own earlier design choice to thread DOCOL nesting
-  through an explicit `ip`+`rstack` loop rather than JS recursion —
-  there was no call-stack depth to preserve across a suspend, only one
-  loop-local variable a generator already keeps alive across `yield` for
-  free.
-- `repl.ts` — `runLine`/`interpretExecuting`/`interpretCompiling` are now
-  generators too (`yield*`-delegating into `inner.executeXT`),
-  `beginLine`/`step`/`interpret` as described above, `Machine` gained a
-  `channel` field (`MachineOptions.channel`, default `KeyboardChannel`
-  wrapping its own `keyboard`).
-- `primitives.ts` — `PrimitiveContext` gained `channel: Channel`; `KEY`
-  (case 30) reads via `ctx.channel.readByte()` rather than
-  `ctx.keyboard.readEvent()`; no longer throws on an empty queue (guarded
-  by `inner.ts` before dispatch, so it always has data by the time it
-  runs).
-- `packages/app`: `app.ts`'s `submit()` calls `beginLine()` then a
-  `requestAnimationFrame`-driven pump calling `step(2000)` repeatedly
-  (outside Angular's zone throughout, per `PORTING-WEB.md` §6), crossing
-  back into the zone only once the line finishes or errors. Simpler than
-  the plan's `setTimeout(0)`/`queueMicrotask` framing between individual
-  `step()` calls — one `requestAnimationFrame`-scheduled tick per frame,
-  each doing up to 2000 primitives of work, comfortably covers every
-  currently-expressible line in a single frame and still yields to the
-  browser's event loop (keydown delivery included) between frames while
-  blocked.
-- 13 new engine tests: `channel.test.ts` (6 — `KeyboardChannel` filtering,
-  non-destructive `hasData()`, shared-queue draining with
-  `Keyboard.hasEvent()`), `repl.test.ts`'s new "Machine step-driven
-  execution" block (7 — budget-of-1 stepping through a colon-definition
-  with exact intermediate stack assertions, large-budget parity with
-  `interpret()`, the single-session guard, blocking/resuming via a fake
-  `Channel` test double, repeated-`'blocked'`-without-consuming-the-
-  session, error-clears-session), plus `keyboard.test.ts`'s old
-  throw-on-empty `KEY` test rewritten to assert blocking/resume instead
-  — 74 engine tests total, all passing; 3 app tests updated to poll for
-  the now-`requestAnimationFrame`-driven completion instead of asserting
-  immediately post-dispatch, still passing.
-- Verified live in a headless browser: a normal line (`2 3 + .`) still
-  completes within one frame, indistinguishable from pre-M7; `KEY EMIT`
-  with an empty queue blocks without throwing; submitting a second line
-  while blocked surfaces the single-session guard error cleanly (proving
-  the page never froze — the JS event loop kept running the whole time);
-  pressing a key while the canvas has focus unblocks the session, which
-  then correctly emits that character to the screen; the REPL is fully
-  usable again immediately after; zero console errors throughout.
+## M8 — Core Vocabulary — **planned**
+
+**Goal:** the primitive/control-flow/defining-word set a "passable"
+Forth needs before source screens can build anything portable on top of
+it. Everything is currently missing — M1-M7 shipped arithmetic, basic
+stack ops, comparison, logic, screen, and keyboard primitives, but
+nothing beyond that.
+
+**Full specification: `CORE-VOCABULARY.md`** — split out as its own
+document rather than kept inline here, since it's meant to be shared
+verbatim across Rebel-Sim, Rebel-ROM, and Rebel-Board (same relationship
+`FORTH-ARCHITECTURE.md` and `CHANNELS-DESIGN.md` already have to this
+repo). Covers memory access, return-stack words, control flow (needs two
+new opcode tokens — `BRANCH`/`0BRANCH`, not yet in
+`FORTH-ARCHITECTURE.md` §0's canonical table), defining words
+(`CREATE`/`DOES>`, needing two more — `DOVAR`/`DODOES`, flagged `[OPEN]`
+there pending confirmation before implementation starts), strings, and
+the remaining stack/arithmetic ops.
+
+**Sequencing note (why this comes before M9, not after):** a remote/MCP
+channel's value is in letting an agent define and exercise Forth words
+interactively — with none of `CORE-VOCABULARY.md`'s words built, there's
+nothing to define anything *with*. `Channel` binding (M7/M7a) and
+vocabulary completeness (M8) are orthogonal axes; there's no dependency
+forcing the remote channel first, and every reason to want a system
+worth talking to before opening a remote surface onto it.
+
+**Deferred out of M8:** `LOAD`/screen-source interpretation itself (a
+related but distinct subsystem — reading a `SCRS` bank's contents as
+Forth source, per `FORTH-ARCHITECTURE.md` §7's storage-model note) is
+not in this milestone's scope; M8 is what a screen's *contents* would be
+written in, not the loader that reads them in. Revisit once M8's
+vocabulary makes writing something worth loading realistic.
