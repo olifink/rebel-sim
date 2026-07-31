@@ -20,19 +20,8 @@
   border: 1px solid #0f0;
   background: #000;
   flex-shrink: 0;
-}
-
-.log {
-  width: 100%;
-  max-width: 640px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-  font-size: 13px;
-  opacity: 0.85;
+  outline: none; /* the whole page is the "terminal" now (M7a) — no DOM
+                    text field to visually distinguish focus from */
 }
 
 .stack-bar {
@@ -53,28 +42,4 @@
   max-width: 640px;
   opacity: 0.8;
   font-size: 14px;
-}
-
-.input-row {
-  width: 100%;
-  max-width: 640px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-top: 1px solid #0f0;
-  padding-top: 4px;
-}
-
-.prompt {
-  font-weight: bold;
-}
-
-input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #0f0;
-  font-family: inherit;
-  font-size: inherit;
 }

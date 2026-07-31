@@ -19,6 +19,14 @@
  * genuine error. The one real behavior change: a line that blocks on an
  * empty-queued `KEY` now returns with the session still alive (drive it
  * further via `step()`) instead of throwing "no event queued" (M4).
+ *
+ * M7a: `startRepl()` puts the *same* session slot to a different use —
+ * a self-contained, never-completing on-screen REPL (prompt, `ACCEPT` a
+ * line into the `TIB` bank, interpret, repeat) driven by the host purely
+ * through `step()`, with no more per-line `beginLine()` calls from
+ * outside. `beginLine()`/`interpret()` remain exactly as before for
+ * feeding a line programmatically (tests, mainly) — the two entry points
+ * share one session, so only one can be active at a time.
  */
 
 import { Arena } from './arena.js';
@@ -50,7 +58,8 @@ const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
-const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M4
+const TIB_BANK_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a); not a formal size class, just a fixed small scratch region
+const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
 // mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
@@ -98,6 +107,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly storage: Storage;
   readonly channel: Channel;
   private readonly inner: Inner;
+  private readonly tibBank: Bank;
+  private readonly acceptCfa: number;
   private session: Generator<StepSignal, void, void> | undefined;
 
   constructor(options: MachineOptions = {}) {
@@ -145,6 +156,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     for (const p of opcodes.primitives) {
       writeHeader(this, p.name, 0, p.id);
     }
+
+    this.tibBank = this.banks.createBank('TIB', TIB_BANK_SIZE, 'TIB');
+    this.acceptCfa = findWord(this, 'ACCEPT')!.cfa;
   }
 
   getBase(): number {
@@ -211,30 +225,100 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.step(Number.MAX_SAFE_INTEGER);
   }
 
-  private *runLine(line: string): Generator<StepSignal, void, void> {
-    const tokens = line.trim().split(/\s+/).filter(Boolean);
-    let i = 0;
-    try {
-      while (i < tokens.length) {
-        const token = tokens[i++];
-        const upper = token.toUpperCase();
+  /** Starts the self-contained on-screen REPL (M7a): draw a prompt,
+   * `ACCEPT` a line onto the screen, interpret it, repeat forever — the
+   * visible on-screen interaction a real Forth machine has, not a
+   * separate DOM scrollback pane. Uses the same `session`/`step()`
+   * machinery as `beginLine()`; the two are mutually exclusive (only one
+   * session at a time, CHANNELS-DESIGN.md §4) — don't call `beginLine()`/
+   * `interpret()` externally once this is running. Errors print directly
+   * to the screen (`? <message>`) and the loop continues; they never
+   * escape this call the way they would from `step()` after `beginLine()`. */
+  startRepl(): void {
+    if (this.session) {
+      throw new Error('a previous line is still running or blocked — call step() to continue it');
+    }
+    this.session = this.replLoop();
+  }
 
-        if (this.sysvars.getState() === -1) {
-          yield* this.interpretCompiling(upper, token);
-        } else {
-          if (upper === ':') {
-            beginDefinition(this, tokens[i++], DOCOL);
-            yield 'progress';
-            continue;
-          }
-          yield* this.interpretExecuting(upper, token);
-        }
+  private *replLoop(): Generator<StepSignal, void, void> {
+    while (true) {
+      this.emitString('> ');
+      yield 'progress';
+
+      this.stack.push(this.tibBank.base);
+      this.stack.push(this.tibBank.size);
+      yield* this.inner.executeXT(this.acceptCfa);
+      const len = this.stack.pop();
+
+      this.screen.emit(10);
+      yield 'progress';
+
+      let line = '';
+      for (let i = 0; i < len; i++) {
+        line += String.fromCharCode(this.arena.readByte(this.tibBank.base + i));
       }
+      if (line.trim().length === 0) {
+        continue;
+      }
+
+      try {
+        yield* this.tokenizeAndRun(line);
+      } catch (err) {
+        if (this.sysvars.getState() === -1) {
+          abortDefinition(this);
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        this.emitString(`? ${message}`);
+      }
+      // End this line's cycle on a fresh row before the next prompt —
+      // but only if something was actually printed mid-row (`.`'s
+      // trailing space, an error message): a line whose interpretation
+      // produced no output at all (the common case — most words are
+      // silent) is already sitting at column 0 from the CR right after
+      // ACCEPT above, and forcing another one would leave a spurious
+      // blank row before every quiet line.
+      if (this.screen.getCursorCol() !== 0) {
+        this.screen.emit(10);
+        yield 'progress';
+      }
+    }
+  }
+
+  private emitString(s: string): void {
+    for (const ch of s) {
+      this.screen.emit(ch.charCodeAt(0));
+    }
+  }
+
+  private *runLine(line: string): Generator<StepSignal, void, void> {
+    try {
+      yield* this.tokenizeAndRun(line);
     } catch (err) {
       if (this.sysvars.getState() === -1) {
         abortDefinition(this);
       }
       throw err;
+    }
+  }
+
+  private *tokenizeAndRun(line: string): Generator<StepSignal, void, void> {
+    const tokens = line.trim().split(/\s+/).filter(Boolean);
+    let i = 0;
+    while (i < tokens.length) {
+      const token = tokens[i++];
+      const upper = token.toUpperCase();
+
+      if (this.sysvars.getState() === -1) {
+        yield* this.interpretCompiling(upper, token);
+      } else {
+        if (upper === ':') {
+          beginDefinition(this, tokens[i++], DOCOL);
+          yield 'progress';
+          continue;
+        }
+        yield* this.interpretExecuting(upper, token);
+      }
     }
   }
 

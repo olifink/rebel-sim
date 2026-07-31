@@ -1,5 +1,5 @@
 import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
-import { Machine, runStorageSelfTest, StepStatus } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
@@ -11,10 +11,8 @@ import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
   styleUrl: './app.css',
 })
 export class App implements AfterViewInit, OnDestroy {
-  @ViewChild('input') inputRef!: ElementRef<HTMLInputElement>;
   @ViewChild('screen') screenRef!: ElementRef<HTMLCanvasElement>;
 
-  protected readonly log = signal<string>('Rebel-Sim\n');
   protected readonly stack = signal<number[]>([]);
   protected readonly storageStatus = signal<string>('checking…');
 
@@ -26,6 +24,15 @@ export class App implements AfterViewInit, OnDestroy {
   // Bound once so removeEventListener in ngOnDestroy actually matches.
   private readonly onKeyDown = (e: KeyboardEvent): void => this.handleKeyEvent(e, true);
   private readonly onKeyUp = (e: KeyboardEvent): void => this.handleKeyEvent(e, false);
+
+  // Primitives run per animation frame while the REPL loop is active
+  // (M7/M7a). Generous enough that any line expressible today (no loop/
+  // recursion words exist yet) finishes within a single frame, while
+  // still bounding worst-case per-frame work if that ever changes.
+  private static readonly STEP_BUDGET = 2000;
+
+  // Guards against overlapping requestAnimationFrame chains.
+  private pumping = false;
 
   constructor(private readonly zone: NgZone) {}
 
@@ -39,7 +46,7 @@ export class App implements AfterViewInit, OnDestroy {
       screenHal: ctx ? new CanvasScreenHal(ctx) : undefined,
       storageHal,
     });
-    this.inputRef.nativeElement.focus();
+    this.screenRef.nativeElement.focus();
 
     // M5's end-to-end proof, mirroring CKernel::RunStorageSelfTest
     // (docs/STORAGE.md §8): round-trip a synthetic asset through the real
@@ -67,17 +74,22 @@ export class App implements AfterViewInit, OnDestroy {
     }
 
     // Raw keydown/keyup -> the engine's keyboard event queue (M4,
-    // PORTING-WEB.md §4) — a separate channel from the REPL <input> below,
-    // which stays a plain cooked text field for typing Forth source at
-    // tool-development speed. Rebel-Sim has no multi-arena/focus-
-    // attachment model yet (FORTH-ARCHITECTURE.md's "current arena" is
-    // fixed), so whether the REPL input box itself has DOM focus is used
-    // as a simple proxy for "attached to the simulated keyboard or not":
-    // while typing a command, keystrokes go to the input field only, not
-    // into the Forth-visible queue.
+    // PORTING-WEB.md §4). M7a retired the DOM `<input>` this used to be
+    // gated on ("only route when the input box isn't focused") — the
+    // whole page is the simulated keyboard now, so every key routes
+    // unconditionally. There's still only one Channel binding (M9's
+    // remote channel hasn't landed), so there's nothing to arbitrate yet.
     this.zone.runOutsideAngular(() => {
       window.addEventListener('keydown', this.onKeyDown);
       window.addEventListener('keyup', this.onKeyUp);
+    });
+
+    // M7a: the outer loop lives entirely in the engine now — prompt,
+    // ACCEPT a line onto the screen, interpret, repeat, forever. The app
+    // shell's only job is to keep calling step() so it can make progress.
+    this.zone.runOutsideAngular(() => {
+      this.machine.startRepl();
+      this.startPump();
     });
   }
 
@@ -87,9 +99,6 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   private handleKeyEvent(e: KeyboardEvent, pressed: boolean): void {
-    if (document.activeElement === this.inputRef.nativeElement) {
-      return; // typing a REPL command — not routed to the simulated keyboard
-    }
     if (pressed && e.repeat) {
       return; // auto-repeat isn't a new press edge (docs/KEYBOARD.md §1)
     }
@@ -101,49 +110,21 @@ export class App implements AfterViewInit, OnDestroy {
     this.machine.keyboard.pushRawEvent(usageCode, pressed);
   }
 
-  // Primitives run per animation frame while a line is in flight (M7).
-  // Generous enough that any line expressible today (no loop/recursion
-  // words exist yet) finishes within a single frame — same invisible
-  // latency as before M7 — while still bounding worst-case per-frame
-  // work if that ever changes. The only thing that makes a line span
-  // multiple frames today is a blocking KEY with nothing queued yet.
-  private static readonly STEP_BUDGET = 2000;
+  // Compared against each tick's stack snapshot so the Angular zone is
+  // only entered when the stack-bar debug readout actually needs to
+  // change — NOT gated on step()'s status. A whole line can finish *and*
+  // the REPL loop can re-block waiting on the next prompt's ACCEPT
+  // within the same step() call (interpret, loop back, draw "> ", block
+  // on the empty queue — all before this call returns), so the tick
+  // where the stack actually changed can still report 'blocked'.
+  private lastStackSnapshot: number[] = [];
 
-  // Guards against overlapping requestAnimationFrame chains if startPump()
-  // were ever called while one is already running.
-  private pumping = false;
-
-  submit(): void {
-    const el = this.inputRef.nativeElement;
-    const line = el.value;
-    el.value = '';
-    if (line.trim().length === 0) {
-      return;
-    }
-
-    this.log.update((prev) => prev + `> ${line}\n`);
-
-    // beginLine()/step() (not the old single interpret() call) so a
-    // blocking KEY inside this line suspends instead of throwing or
-    // freezing the tab (PORTING-WEB.md §6, FORTH-ARCHITECTURE.md §7a).
-    // Runs outside Angular's zone throughout — the driving pump below
-    // only crosses back in once the line actually finishes or errors.
-    this.zone.runOutsideAngular(() => {
-      try {
-        this.machine.beginLine(line);
-      } catch (e) {
-        this.zone.run(() => this.reportError(e));
-        return;
-      }
-      this.startPump();
-    });
-  }
-
-  // Must be called from outside the Angular zone (submit() already is) —
-  // requestAnimationFrame callbacks scheduled there stay outside it too,
-  // which is the point: no change detection runs on frames that don't
-  // need it. Forth's own output lands on the canvas synchronously as
-  // primitives execute (the HAL, M3), independent of this pump's pace.
+  // Must be called from outside the Angular zone (ngAfterViewInit's call
+  // site already is) — requestAnimationFrame callbacks scheduled there
+  // stay outside it too, which is the point: no change detection runs on
+  // frames that don't need it. Forth's own output lands on the canvas
+  // synchronously as primitives execute (the HAL, M3), independent of
+  // this pump's pace.
   private startPump(): void {
     if (this.pumping) {
       return;
@@ -151,31 +132,28 @@ export class App implements AfterViewInit, OnDestroy {
     this.pumping = true;
 
     const tick = (): void => {
-      let status: StepStatus;
       try {
-        status = this.machine.step(App.STEP_BUDGET);
+        this.machine.step(App.STEP_BUDGET);
       } catch (e) {
+        // The on-screen REPL loop (replLoop) catches and prints ordinary
+        // Forth errors itself and keeps running — reaching here means
+        // something escaped that, a real engine bug rather than a user
+        // mistake. Nothing left to drive the page with; surface it loudly.
         this.pumping = false;
-        this.zone.run(() => this.reportError(e));
+        console.error('Rebel-Sim REPL loop crashed', e);
         return;
       }
-      if (status === 'idle') {
-        this.pumping = false;
-        this.zone.run(() => this.stack.set(this.machine.stack.toArray()));
-        return;
+      const current = this.machine.stack.toArray();
+      if (!arraysEqual(current, this.lastStackSnapshot)) {
+        this.lastStackSnapshot = current;
+        this.zone.run(() => this.stack.set(current));
       }
-      // 'blocked' or 'more-to-run' — keep pumping. A frame spent
-      // 'blocked' is cheap (Channel.hasData() is an O(queue length)
-      // scan) and lets the browser's own event loop (keydown delivery,
-      // rendering, everything else) get a turn between checks.
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   }
+}
 
-  private reportError(e: unknown): void {
-    const message = e instanceof Error ? e.message : String(e);
-    this.log.update((prev) => prev + `! ${message}\n`);
-    this.stack.set(this.machine.stack.toArray());
-  }
+function arraysEqual(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }

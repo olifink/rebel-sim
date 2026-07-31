@@ -58,10 +58,10 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
 7. **M7 — Execution loop & channel binding** — **done**: generator/
    step-function outer loop, `Channel` abstraction (`FORTH-ARCHITECTURE.md`
    §7a, `CHANNELS-DESIGN.md`), real blocking `KEY`. Detailed below.
-8. **M7a — On-screen REPL** *(next, detailed below)*: `ACCEPT`/`QUERY`-
-   style line input read off `KeyboardChannel` and echoed through
-   `screen.emit()`, retiring the M1-era DOM `<input>` stand-in and the
-   focus-based input routing that went with it (`PORTING-WEB.md` §4).
+8. **M7a — On-screen REPL** — **done**: `ACCEPT`-based line input read
+   off the bound `Channel` and echoed through `screen.emit()`, retiring
+   the M1-era DOM `<input>` stand-in and the focus-based input routing
+   that went with it (`PORTING-WEB.md` §4). Detailed below.
 9. **M8 — Core vocabulary** *(detailed below)*: the primitive/control-flow/
    defining-word set a "passable" Forth needs before source screens can
    build anything portable on top of it — memory access, control flow,
@@ -787,7 +787,7 @@ view than the one `KEY`/`Channel` now present.
   then correctly emits that character to the screen; the REPL is fully
   usable again immediately after; zero console errors throughout.
 
-## M7a — On-Screen REPL — **planned**
+## M7a — On-Screen REPL — **done** (2026-07-31)
 
 **Goal:** typing at the keyboard reads and echoes directly through the
 screen — the last of M1's browser-presentation stand-ins retired.
@@ -814,6 +814,105 @@ it possible.
 **Deferred:** cursor/line editing beyond backspace (arrow-key recall,
 insert-in-middle) — not required to prove the goal, revisit only if it
 turns out to matter for actual day-to-day use.
+
+### What actually shipped, and one real design extension beyond the plan
+
+The design above held as written for `ACCEPT` and the prompt/interpret
+loop shape. One thing the plan didn't anticipate needing a decision on:
+**`ACCEPT` itself had to become a second special-cased, multi-step
+blocking operation in `inner.ts`, not a single `executePrimitive` case.**
+`KEY` (M7) blocks at exactly one point per dispatch — check the channel
+once, then run. `ACCEPT` needs to block *per character*, in a loop, with
+real state (how many chars typed, the buffer position) carried across
+however many suspend/resume cycles that takes. A plain synchronous
+`switch` case has no way to express that. Solved by giving `ACCEPT` its
+own generator method in `Inner` (`accept()`), built out of a small
+`readCharBlocking()` helper that's the same one-yield-per-char shape
+`KEY`'s dispatch already used, just factored out and called in a loop.
+This is a direct, unsurprising consequence of the M7 architecture
+(`StepSignal` yields compose naturally), not a redesign — worth noting
+mainly because "special-case it in `inner.ts` like `KEY`" underclaims
+how much more `ACCEPT` actually needs to do there.
+
+**What shipped:**
+- `rebel-opcodes.json` — new primitive token 31, `ACCEPT` ( `addr len --
+  len2` ), dictionary-registered but never reaching `primitives.ts`'s
+  switch (fully intercepted in `inner.ts`, same as `EXIT`/`LIT`, for a
+  different reason — see above).
+- `inner.ts` — `dispatch()` special-cases `ACCEPT_TOKEN` before the
+  general path; `accept()` reads chars via a new `readCharBlocking()`
+  helper, echoes non-control chars via `screen.emit()`, handles
+  Backspace (char 8: erase the last echoed char, wrapping back across a
+  screen row boundary via `screen.writeChar`+`setCursor` if the cursor
+  was at column 0 — the same wrap convention `Screen.advanceCursor`
+  already uses going forward) without ever going below the start of
+  *this* call's input (can't erase into whatever was on screen before
+  `ACCEPT` was invoked, e.g. the prompt), and Enter (char 10: terminates,
+  not stored/echoed).
+- `repl.ts` — a new `TIB` bank (128 bytes, tag `TIB`, own entry in
+  `rebel-opcodes.json`'s `bankTags`), `Machine.startRepl()` (draws `"> "`,
+  `ACCEPT`s a line into `TIB`, tokenizes/interprets it, catches Forth
+  errors and prints `? <message>` directly to the screen instead of
+  letting them escape, loops forever) sharing the *same* `session`/
+  `step()` machinery `beginLine()`/`interpret()` already used — the two
+  are mutually exclusive (CHANNELS-DESIGN.md §4's one-session model), not
+  a second parallel mechanism. `beginLine()`/`interpret()` themselves are
+  completely unchanged, still the right tool for feeding a line
+  programmatically (tests). Also fixed a small real formatting gap found
+  during browser verification, below: the REPL loop now emits a fresh-
+  line before the next prompt only when the cursor isn't already at
+  column 0 (i.e. only when something was actually printed) — avoids both
+  "printed output runs straight into the next `>` prompt with no
+  separation" and "a spurious blank row before every quiet line."
+- `packages/app`: `<input>`/`<form>`/`.log` all removed from
+  `app.html`/`.css`/`.ts`. `handleKeyEvent` lost its `document.
+  activeElement` focus check entirely — every keydown/keyup routes to
+  the simulated keyboard unconditionally now, since the DOM element that
+  check existed to protect no longer exists. `ngAfterViewInit` calls
+  `machine.startRepl()` then starts the `requestAnimationFrame` pump
+  immediately (no longer gated behind a user "submit" action) — the pump
+  now runs continuously from boot, for the page's whole lifetime, rather
+  than only while a submitted line is in flight.
+- **Real bug found and fixed during this milestone, not anticipated in
+  the plan:** the pump's original heuristic for when to cross back into
+  Angular's zone (`if (status !== 'blocked') update the stack signal`)
+  is wrong for a continuously-running REPL loop specifically. A whole
+  line can finish *and* the loop can re-block waiting on the next
+  prompt's `ACCEPT` within the same `step()` call (interpret, loop back,
+  draw `"> "`, block on the now-empty queue — all before that call
+  returns) — so the exact tick where the stack actually changed can
+  still report `'blocked'` as its final status, and the UI would never
+  update. Fixed by comparing an actual stack snapshot against the
+  previous one every tick (cheap — stack depth is small) and only
+  crossing into the zone when it genuinely differs, rather than trying
+  to infer "did anything change" from `step()`'s status code.
+- 12 new engine tests: `accept.test.ts` (5 — read-until-Enter with echo,
+  backspace erasing both the buffer slot and the screen cell, backspace-
+  at-start-of-input is a no-op, buffer-full silently stops storing/
+  echoing but keeps listening for Enter, backspace correctly wraps back
+  across a screen row boundary), `repl-loop.test.ts` (3 — prompt drawn +
+  blocks on `ACCEPT` + the single-session guard rejects a concurrent
+  `startRepl()`/`beginLine()`, a full typed-line-to-interpreted-result
+  cycle with the next prompt landing on the following row, a Forth error
+  printed to the screen without killing the loop) — 82 engine tests
+  total, all passing; 3 app tests rewritten to simulate typing via
+  `window`-dispatched `KeyboardEvent`s and assert on stack state instead
+  of driving a DOM `<input>`/`<form>`, still passing. One test bug found
+  and fixed along the way (not a real bug): an early version of the
+  backspace/row-wrap test pushed 40 keyboard events into the `Keyboard`
+  queue's real 31-event capacity before draining any of them, silently
+  losing the overflow — fixed by draining each keystroke immediately,
+  matching how actual typing (one event at a time, pump draining
+  continuously) never hits that ceiling.
+- Verified live in a headless browser: booted straight to a real on-
+  screen `>` prompt with zero DOM input elements anywhere on the page;
+  typed `5 5 + .` and watched `10` print on its own row with the next
+  prompt cleanly on the row after; typed `9`, Backspace, `8`, Enter and
+  confirmed the corrected `8` (not `98`) was what actually got
+  interpreted; typed an unrecognized word and confirmed `?
+  unrecognized word: ...` printed to the screen with the REPL still
+  alive and accepting further input immediately after; zero console
+  errors throughout.
 
 ## M8 — Core Vocabulary — **planned**
 

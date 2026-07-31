@@ -34,7 +34,8 @@
     { "id": 27, "name": "INK", "note": "( color -- ) M3: sets the SCREEN group's default foreground color sysvar used by CHAR!/EMIT/. when no override is given. Rebel-Sim stores this as a raw 24-bit 0xRRGGBB truecolor value (Rebel-ROM's TColor is likewise a raw pixel value, not a palette index — direct/truecolor mode is its likely default per docs/SCREEN-MODULE.md §4)" },
     { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" },
     { "id": 29, "name": "KEY?", "note": "( -- flag ) M4: CKeyboardModule::ReadEvent peeked non-destructively — TRUE if the event queue is non-empty, matching FORTH-ARCHITECTURE.md's hal_key_pressed? non-blocking-read requirement" },
-    { "id": 30, "name": "KEY", "note": "( -- char ) M7: blocks (FORTH-ARCHITECTURE.md §7a) — suspends the running session via inner.ts's generator-based step loop until the bound Channel (channel.ts, default KeyboardChannel) has a translated-char event, then pops and pushes it. M4's original throw-on-empty behavior is gone; KEY?/token 29 is unchanged (still a raw, unfiltered, non-blocking peek at the Keyboard queue)." }
+    { "id": 30, "name": "KEY", "note": "( -- char ) M7: blocks (FORTH-ARCHITECTURE.md §7a) — suspends the running session via inner.ts's generator-based step loop until the bound Channel (channel.ts, default KeyboardChannel) has a translated-char event, then pops and pushes it. M4's original throw-on-empty behavior is gone; KEY?/token 29 is unchanged (still a raw, unfiltered, non-blocking peek at the Keyboard queue)." },
+    { "id": 31, "name": "ACCEPT", "note": "( addr len -- len2 ) M7a: classic Forth line-input. Reads chars one at a time off the bound Channel (blocking, like KEY), echoing each via screen.emit() and storing into the arena at addr; Backspace (char 8) erases the last echoed char (wraps back across a screen row boundary if needed) without going below the start of this call's input; Enter (char 10) terminates without being stored. Fully special-cased in inner.ts's dispatch — never reaches primitives.ts's switch, since it needs many blocking points (one per character), not just one." }
   ],
 
   "bankTags": {
@@ -44,7 +45,8 @@
     "RSTK": "return stack, per-arena (in use since M2)",
     "CHAR": "character-code grid, per-arena, 1 byte per cell, write-through into the framebuffer via ScreenHal (in use since M3, matches Rebel-ROM's CHAR bank exactly — docs/SCREEN-MODULE.md §3)",
     "SCRN": "pixel framebuffer — NOT an arena bank in Rebel-Sim (matches Rebel-ROM: externally-backed, outside the arena's own memory accounting, excluded from the portable-dump claim per FORTH-ARCHITECTURE.md §8). Rebel-Sim's analog is the host-supplied ScreenHal implementation drawing to a <canvas>, never arena-resident memory.",
-    "KMAP": "raw-usage-code -> character translation table, u8[2][256] (unshifted/shifted planes), in use since M4 (docs/KEYBOARD.md §6). CLAUDE.md lists KMAP as shared/singular rather than per-arena like SCRN — Rebel-Sim only has one arena today (no multi-arena isolation yet), so it's allocated inside that arena like CHAR; the shared/singular distinction becomes visible once multi-arena support lands."
+    "KMAP": "raw-usage-code -> character translation table, u8[2][256] (unshifted/shifted planes), in use since M4 (docs/KEYBOARD.md §6). CLAUDE.md lists KMAP as shared/singular rather than per-arena like SCRN — Rebel-Sim only has one arena today (no multi-arena isolation yet), so it's allocated inside that arena like CHAR; the shared/singular distinction becomes visible once multi-arena support lands.",
+    "TIB": "Terminal Input Buffer, per-arena, in use since M7a — the resident scratch region ACCEPT reads a REPL line into. Not a Rebel-ROM-derived tag (no shipped Rebel-ROM Phase 11 yet, same status as Rebel-Sim-only DATA/FORTH group precedent) and not a persistable project-asset bank — Storage never touches it."
   },
 
   "sysvarGroups": {

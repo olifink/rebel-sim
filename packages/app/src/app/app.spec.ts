@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
 import { App } from './app';
 
-// M7: a submitted line is now driven by a requestAnimationFrame pump
-// rather than finishing synchronously inside submit() — poll for the
-// expected DOM state instead of asserting immediately after dispatch.
+// M7a: the outer loop is driven entirely by a requestAnimationFrame pump
+// now (no more synchronous submit()) — poll for the expected DOM state
+// instead of asserting immediately after dispatch.
 async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
   while (!check()) {
@@ -12,6 +12,14 @@ async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+// Simulates a physical key press/release, exactly as app.ts's
+// window-level keydown/keyup listeners expect (M4/M7a — there's no DOM
+// text field to type into anymore, the whole page is the keyboard).
+function press(code: string): void {
+  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
 }
 
 describe('App', () => {
@@ -27,38 +35,30 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('renders the REPL prompt and an empty stack', async () => {
+  it('renders the screen and an empty stack', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.log')?.textContent).toContain('Rebel-Sim');
+    expect(compiled.querySelector('canvas.screen')).toBeTruthy();
     expect(compiled.querySelector('.stack-values')?.textContent).toContain('(empty)');
   });
 
-  it('interprets a line typed into the input on submit', async () => {
+  it('typing a line on the keyboard and pressing Enter interprets it', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    const input = compiled.querySelector('input') as HTMLInputElement;
-    const form = compiled.querySelector('form') as HTMLFormElement;
 
-    // M3: printed output (from `.`) now lands on the canvas via the
-    // screen HAL, not in the log pane — leave a value on the stack
-    // instead of printing it, so this test can verify success without
-    // depending on canvas rendering (unavailable in jsdom).
-    input.value = '2 3 +';
-    input.dispatchEvent(new Event('input'));
-    form.dispatchEvent(new Event('submit'));
-    fixture.detectChanges();
-    await fixture.whenStable();
+    // "2 3 SWAP" - avoids needing a shifted key (e.g. '+'), and proves
+    // the line actually ran (not just that digits landed on the stack)
+    // since the final order only makes sense if SWAP executed.
+    for (const code of ['Digit2', 'Space', 'Digit3', 'Space', 'KeyS', 'KeyW', 'KeyA', 'KeyP', 'Enter']) {
+      press(code);
+    }
 
-    expect(compiled.querySelector('.log')?.textContent).toContain('> 2 3 +');
-
-    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('5'));
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('2 3'));
     fixture.detectChanges();
 
-    expect(compiled.querySelector('.log')?.textContent).not.toContain('!');
-    expect(compiled.querySelector('.stack-values')?.textContent).toContain('5');
+    expect(compiled.querySelector('.stack-values')?.textContent).toContain('2 3');
   });
 });

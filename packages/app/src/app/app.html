@@ -1,7 +1,5 @@
 <main class="repl">
-  <canvas #screen class="screen" width="320" height="240"></canvas>
-
-  <pre class="log">{{ log() }}</pre>
+  <canvas #screen class="screen" width="320" height="240" tabindex="0"></canvas>
 
   <div class="stack-bar">
     <span class="stack-label">stack (top→bottom):</span>
@@ -12,9 +10,4 @@
     <span class="stack-label">storage:</span>
     <span class="storage-status">{{ storageStatus() }}</span>
   </div>
-
-  <form class="input-row" (submit)="$event.preventDefault(); submit()">
-    <span class="prompt">&gt;</span>
-    <input #input type="text" autocomplete="off" spellcheck="false" />
-  </form>
 </main>

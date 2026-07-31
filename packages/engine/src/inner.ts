@@ -10,7 +10,13 @@
  * EXIT and LIT are primitive token IDs but are special-cased here rather
  * than in primitives.ts's switch, because both need to mutate IP — an
  * inner-interpreter register that a plain stack-effect primitive
- * (PrimitiveContext) has no access to.
+ * (PrimitiveContext) has no access to. ACCEPT (M7a) is special-cased for
+ * a different reason: it's not just IP-mutating, it's a *multi-step*
+ * blocking operation (one suspend point per character read) — something
+ * a single `executePrimitive` switch case, which runs to completion in
+ * one synchronous call, has no way to express. Its whole read-echo-
+ * backspace loop lives here instead, built out of the same `StepSignal`
+ * yields as everything else.
  *
  * M7 (FORTH-ARCHITECTURE.md §7a): `executeXT` is a generator rather than
  * a plain function, so execution can suspend mid-word-body and resume
@@ -35,10 +41,15 @@ const DOCOL = opcodes.docolTokenId;
 const EXIT_TOKEN = opcodes.primitives.find((p) => p.name === 'EXIT')!.id;
 const LIT_TOKEN = opcodes.primitives.find((p) => p.name === 'LIT')!.id;
 const KEY_TOKEN = opcodes.primitives.find((p) => p.name === 'KEY')!.id;
+const ACCEPT_TOKEN = opcodes.primitives.find((p) => p.name === 'ACCEPT')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
 const TOP_LEVEL_SENTINEL = -1;
+
+const CHAR_BACKSPACE = 8;
+const CHAR_ENTER = 10;
+const CHAR_SPACE = 32;
 
 export type StepSignal = 'progress' | 'blocked';
 
@@ -96,8 +107,14 @@ export class Inner {
    * suspend (FORTH-ARCHITECTURE.md §7a) — checked against the bound
    * Channel *before* `executePrimitive` ever runs, so the primitive
    * itself (primitives.ts case 30) only ever executes once data is
-   * actually available and never needs to know about suspension itself. */
+   * actually available and never needs to know about suspension itself.
+   * `ACCEPT` (M7a) suspends potentially many times within one dispatch —
+   * handled entirely by its own method rather than `executePrimitive`. */
   private *dispatch(token: number): Generator<StepSignal, void, void> {
+    if (token === ACCEPT_TOKEN) {
+      yield* this.accept();
+      return;
+    }
     if (token === KEY_TOKEN) {
       while (!this.ctx.channel.hasData()) {
         yield 'blocked';
@@ -105,5 +122,67 @@ export class Inner {
     }
     executePrimitive(this.ctx, token);
     yield 'progress';
+  }
+
+  /** Blocking single-character read off the bound Channel — the same
+   * suspend/resume shape `dispatch()` uses for `KEY`, factored out so
+   * `accept()`'s loop can call it once per character. */
+  private *readCharBlocking(): Generator<StepSignal, number, void> {
+    while (!this.ctx.channel.hasData()) {
+      yield 'blocked';
+    }
+    const char = this.ctx.channel.readByte();
+    yield 'progress';
+    return char;
+  }
+
+  /** `ACCEPT ( addr len -- len2 )` — classic Forth line input
+   * (FORTH-ARCHITECTURE.md §7a / M7a's on-screen REPL). Reads and echoes
+   * one character at a time until Enter; Backspace erases the last
+   * echoed character (wrapping back across a screen row if the cursor is
+   * at column 0 — the same wrap-only convention `Screen.advanceCursor`
+   * uses going forward, M3) but never below the start of *this* call's
+   * input — it can't reach back into whatever the screen already showed
+   * before ACCEPT was invoked (e.g. a prompt), since only characters
+   * actually read by this call count against `count`. */
+  private *accept(): Generator<StepSignal, void, void> {
+    const maxLen = this.ctx.stack.pop();
+    const addr = this.ctx.stack.pop();
+    const { screen } = this.ctx;
+    const { arena } = this;
+    let count = 0;
+
+    while (true) {
+      const char = yield* this.readCharBlocking();
+
+      if (char === CHAR_ENTER) {
+        break;
+      }
+
+      if (char === CHAR_BACKSPACE) {
+        if (count > 0) {
+          count--;
+          let col = screen.getCursorCol();
+          let row = screen.getCursorRow();
+          if (col === 0) {
+            col = screen.cols - 1;
+            row = row === 0 ? screen.rows - 1 : row - 1;
+          } else {
+            col--;
+          }
+          screen.writeChar(col, row, CHAR_SPACE);
+          screen.setCursor(col, row);
+        }
+        continue;
+      }
+
+      if (count < maxLen) {
+        arena.writeByte(addr + count, char);
+        count++;
+        screen.emit(char);
+      }
+    }
+
+    this.ctx.stack.push(count);
   }
 }

@@ -655,6 +655,55 @@ queue.
 `KeyboardChannel`. `Machine` holds one bound `Channel` (`MachineOptions.
 channel`, defaulting to a `KeyboardChannel` over its own `keyboard`).
 
+### 1.25 The on-screen REPL — `ACCEPT` and a self-driving prompt loop
+
+Through M7, "type Forth, see it run" happened via a browser text box: a
+real HTML `<input>` element, typed into with ordinary cooked keyboard
+input, submitted with a form. That was always a stand-in — a real
+machine doesn't have a second, separate text field bolted on next to its
+one screen. M7a replaces it with the real thing: the prompt, what you
+type, and any output all appear directly on the one canvas, exactly the
+way they would on the physical hardware.
+
+Two pieces make this possible, both building directly on M7's work
+rather than needing anything new at the suspend/resume level:
+
+- **`ACCEPT`** is a classic Forth word: give it a buffer address and a
+  maximum length, and it reads keyboard input one character at a time —
+  echoing each onto the screen as it's typed, handling Backspace by
+  erasing the last echoed character, and stopping (without storing or
+  echoing the key itself) the moment Enter is pressed. It's built the
+  same way blocking `KEY` (§1.23) is — suspend when there's nothing to
+  read, resume once there is — just looped, once per character, with a
+  running count of how much has been typed so far.
+- **The self-driving REPL loop** (`Machine.startRepl()`) is what used to
+  be `packages/app`'s job, moved into the engine: draw a prompt, `ACCEPT`
+  a line onto the screen, interpret it (printing `? <message>` directly
+  to the screen instead of crashing if it was bad Forth), and loop back
+  for another line — forever. This uses the exact same "session" a
+  single typed-and-driven line already used (§1.23) — there's still only
+  ever one thing running at a time, it's just that "one thing" is now an
+  infinite loop instead of a single line, and the host's job shrinks to
+  "keep calling `step()`" for the entire lifetime of the page, not just
+  while a submitted line is in flight.
+
+A small but real UX detail worth internalizing: `ACCEPT` erasing a
+character via Backspace can't just move the cursor left and blank a
+cell — if the line being typed is long enough to have already wrapped to
+a new screen row (§1.18), backspacing past the start of that row needs
+to walk back onto the *previous* row's last column, the same wrap
+convention output already uses going forward. And the loop is careful to
+only print a blank line before the next prompt when something was
+actually printed — otherwise every silent command (most of them; only a
+few words like `.`/`EMIT` produce visible output) would leave a stray
+empty row before the next `>` for no reason.
+
+*Implementation:* `inner.ts` — `Inner.accept()` (the character loop) and
+`readCharBlocking()` (the one-character suspend/resume primitive it's
+built from, factored out of `KEY`'s own dispatch logic). `repl.ts` —
+`Machine.startRepl()`/`replLoop()`, and the small `TIB` ("Terminal Input
+Buffer") bank `ACCEPT` reads each line into.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -742,6 +791,9 @@ exactly as it would be on the bare-metal target.
 | **`StepStatus`** | What `Machine.step()` returns to its caller: `'idle'` (nothing running), `'blocked'`, or `'more-to-run'` (budget ran out, call `step()` again). |
 | **`Channel`** | The abstraction blocking `KEY` waits on: `hasData()`/`readByte()`, deliberately input-only. `KeyboardChannel` is the only real implementation today; a future remote/network channel would implement the same two methods with zero changes to `KEY` or the interpreter (§1.24). |
 | **`beginLine()` / `step()` / `interpret()`** | Three layers over one mechanism: `beginLine(line)` starts a session without running it; `step(budget)` drives it incrementally, reporting a `StepStatus`; `interpret(line)` is `beginLine` + an effectively-unbounded `step()` call, preserving the pre-M7 "runs to completion synchronously" feel for any line that never blocks. |
+| **`ACCEPT`** | Primitive: `addr len -- len2` — classic Forth line input. Reads/echoes characters one at a time (blocking, like `KEY`) until Enter; Backspace erases the last echoed character. Built as its own multi-step blocking generator in `inner.ts`, not a plain `executePrimitive` case (§1.25). |
+| **`TIB`** | "Terminal Input Buffer" — the small resident bank `ACCEPT` reads each on-screen REPL line into before it's tokenized. |
+| **`startRepl()` / `replLoop()`** | The self-driving on-screen REPL (§1.25): draw a prompt, `ACCEPT` a line, interpret it (printing errors to the screen instead of throwing), repeat forever. Uses the same session `beginLine()`/`step()` drive — mutually exclusive with calling those directly. |
 
 ---
 
@@ -755,6 +807,7 @@ exactly as it would be on the bare-metal target.
 | **M4** | Keyboard: `KMAP` bank (§1.21), non-blocking event queue (§1.20), `KEY?`/`KEY` primitives, `KEYBOARD.MODIFIERS` sysvar. Browser `keydown`/`keyup` → raw usage codes → the queue, routed only when the REPL input box isn't focused. Blocking `KEY` deferred (no task-suspension model yet). | `keyboard.ts`, `browser-keymap.ts` |
 | **M5** | Storage: the real projects/carts model (§1.22) — `Storage` class, `StorageHal`, OPFS backing, bank identity retrofit (`name` vs. `tag`, §1.5), size classes, `runStorageSelfTest()`. Superseded `FORTH-ARCHITECTURE.md`'s original raw-block/`SCRS` framing, per that doc's own resolved divergence note. | `storage.ts`, `opfs-storage-hal.ts` |
 | **M6** | PWA packaging — `packages/app` only, no engine changes. Angular's own PWA schematic (manifest, service worker, precaching), an on-brand icon set generated from the real `font-zxspectrum.ts` 'R' glyph, `navigator.storage.persist()`. Verified offline-bootable against a real production build, not just unit tests. | `packages/app/public/manifest.webmanifest`, `ngsw-config.json`, `app.config.ts` |
-| **M7** | Execution loop & `Channel` binding (§1.23-§1.24) — `executeXT` became a resumable generator, blocking `KEY` suspends instead of throwing, `Machine.beginLine()`/`step()`/`interpret()`. Main-thread generator model chosen over a Web Worker (faithful to both hardware targets' cooperative execution). Sets up M8 (remote/WebMCP channel) to need zero interpreter changes. | `channel.ts`, `inner.ts` (rewritten), `repl.ts` (rewritten) |
+| **M7** | Execution loop & `Channel` binding (§1.23-§1.24) — `executeXT` became a resumable generator, blocking `KEY` suspends instead of throwing, `Machine.beginLine()`/`step()`/`interpret()`. Main-thread generator model chosen over a Web Worker (faithful to both hardware targets' cooperative execution). Sets up M9 (remote/WebMCP channel) to need zero interpreter changes. | `channel.ts`, `inner.ts` (rewritten), `repl.ts` (rewritten) |
+| **M7a** | On-screen REPL (§1.25) — `ACCEPT` (a second, multi-step blocking primitive built the same way as `KEY`), `TIB` bank, `Machine.startRepl()`/`replLoop()`. `packages/app`'s DOM `<input>`/`<form>`/`.log` retired entirely — the whole page is the terminal now, keyboard routing no longer gated on any element's focus. | `inner.ts` (`accept()`), `repl.ts` (`startRepl`) |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
