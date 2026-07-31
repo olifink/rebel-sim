@@ -1130,7 +1130,7 @@ line is *currently* being interpreted, correctly, even when called from
 deep inside another word's own execution — the mechanism the
 `CREATE...DOES>` pattern actually depends on.
 
-**Tests:** 34 new engine tests across nine dedicated files
+**Tests:** 57 new engine tests across eight dedicated files
 (`memory-access`, `return-stack`, `control-flow`, `do-loop`,
 `defining-words`, `strings`, `stack-arith`, plus the `WORDS`
 sufficiency check) — 139 engine tests total, all passing; 8 app tests

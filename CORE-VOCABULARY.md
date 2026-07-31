@@ -154,8 +154,8 @@ glossing over.
 | `CREATE` | `( "name" -- )` creates a bare dictionary entry whose parameter field starts empty; executing the word (before any `DOES>`) pushes its own parameter-field address. |
 | `DOES>` | changes the *behavior* of the most recent `CREATE`d word — see mechanism below. |
 
-**`CREATE`/`DOES>` mechanism — [OPEN, needs confirmation before
-building]:** the standard technique needs two more reserved sentinel
+**`CREATE`/`DOES>` mechanism — [RESOLVED in M8, see `IMPLEMENTATION.md`
+§1.26-§1.29]:** the standard technique needs two more reserved sentinel
 tokens beyond `DOCOL`/`BRANCH`/`0BRANCH`:
 
 - **`DOVAR`** — a plain `CREATE`d word's Code Field, before any `DOES>`:
@@ -188,7 +188,7 @@ note is the precedent for "diverge deliberately, document why").
 
 | Word | Effect | Notes |
 |---|---|---|
-| `S"` | `( "string" -- addr len )` (compile-time: compiles the string inline in the parameter field, followed by code that pushes its addr/len when executed) | Needs the string bytes stored inline and skipped over at runtime — same general shape as `LIT`'s inline-literal mechanism (§5 of `FORTH-ARCHITECTURE.md`), generalized to a byte run rather than one cell. **[OPEN]** exact mechanism (a third inline-data convention, or reuse/extend `LIT`'s) needs a design pass, not assumed here. |
+| `S"` | `( "string" -- addr len )` (compile-time: compiles the string inline in the parameter field, followed by code that pushes its addr/len when executed) | Needs the string bytes stored inline and skipped over at runtime — same general shape as `LIT`'s inline-literal mechanism (§5 of `FORTH-ARCHITECTURE.md`), generalized to a byte run rather than one cell. **[RESOLVED in M8]** as `(SLIT)`, a length-prefixed cell-aligned byte run (see `IMPLEMENTATION.md`); scoped to single-token strings only, since the line-tokenizer can't do char-level scanning for embedded spaces yet. |
 | `TYPE` | `( addr len -- )` | print `len` chars starting at `addr` through the current output (`EMIT`, looped). |
 | `."` | `( "string" -- )` (compile-time: print the string when the compiled word runs) | sugar for `S" ... TYPE`, immediate. |
 
