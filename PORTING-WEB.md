@@ -265,6 +265,17 @@ pace. Reproducing that shape in a browser has a few real gotchas:
   with `Atomics.wait`, which is a legitimate option (with `SharedArrayBuffer`
   and the cross-origin-isolation headers it requires) but a real one to
   evaluate deliberately, not stumble into.
+- **[Decided, M7]** Rebel-Sim went with generator/step-function on the
+  main thread, not a Web Worker — it's the model actually faithful to
+  both hardware targets' cooperative, single-core execution loops, where
+  a Worker's real preemption and message-passing wall has no analog.
+  Blocking I/O (starting with `KEY`) binds through the `Channel`
+  abstraction (`FORTH-ARCHITECTURE.md` §7a, `CHANNELS-DESIGN.md`) rather
+  than directly against the keyboard — that's the part that actually
+  buys easy WebMCP integration later (a `RemoteChannel` binds the same
+  way `KeyboardChannel` does, no interpreter changes), independent of
+  the threading decision. See `PLAN.md`'s M7 section for the
+  implementation plan.
 
 ## 7. PWA: instant-on is the point, not a checkbox
 

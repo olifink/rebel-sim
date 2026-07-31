@@ -55,7 +55,14 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
    `hal_block_read`/`write` (§7, `PORTING-WEB.md` §5).
 6. **M6 — PWA packaging**: manifest, service worker precache,
    `navigator.storage.persist()` (`PORTING-WEB.md` §7).
-7. Later/open: multi-arena isolation, `hal_error`/exception model,
+7. **M7 — Execution loop & channel binding** *(next, detailed below)*:
+   generator/step-function outer loop, `Channel` abstraction
+   (`FORTH-ARCHITECTURE.md` §7a, `CHANNELS-DESIGN.md`), real blocking
+   `KEY`.
+8. **M8 — Remote channel (WebMCP)**: `RemoteChannel` binding the outer
+   loop to a WebMCP-driven input source, per §7a's "zero interpreter
+   changes" design goal. Not detailed yet — scoped once M7 ships.
+9. Later/open: multi-arena isolation, `hal_error`/exception model,
    Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
    `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -558,3 +565,112 @@ real command" lesson as the `@angular/pwa` resolution issue above.
   app booted, ran `2 3 + .` correctly, and the M5 storage self-test still
   reported `OK` (OPFS is a local API, unaffected by network state), all
   with zero console errors online or offline.
+
+## M7 — Execution Loop & Channel Binding — **planned**
+
+**Goal:** `: WAIT-KEY BEGIN KEY DUP 0<> UNTIL ;`-style blocking `KEY`
+actually suspends and resumes instead of throwing (M4's current
+behavior) or running the interpreter to completion. Prove this by typing
+a word that blocks on `KEY`, having the page stay responsive while it
+waits, then having a keystroke unblock it — the same shape
+`FORTH-ARCHITECTURE.md` §5 already anticipated ("the Forth executor is a
+task... blocking on the input queue") and §7a now makes concrete.
+
+**Design decisions locked in (2026-07-31, with Oliver):**
+- **Execution model: generator/step-function on the main thread**, not a
+  Web Worker. Rationale: this is the model that's actually faithful to
+  both hardware targets — Rebel-ROM's Circle `CScheduler`/`CTask` is
+  cooperative and single-core, and Rebel-Board (bare-metal RISC-V, no
+  Circle, no OS) will need the same hand-rolled cooperative shape by
+  necessity. A Web Worker's real preemption and message-passing wall
+  doesn't exist on either target — building it into Rebel-Sim now would
+  mean simulating a machine this project doesn't have. Web Worker
+  migration remains available later (M1's original note, still
+  unchanged) if a real need for preemption surfaces.
+- **I/O binds through the `Channel` abstraction from `CHANNELS-DESIGN.md`
+  / `FORTH-ARCHITECTURE.md` §7a**, not directly against `Keyboard`. This
+  is what actually buys future WebMCP integration ease (M8) — the
+  interpreter and blocking `KEY` word don't change when a `RemoteChannel`
+  is added later; only a new `Channel` implementation is bound.
+- **Channel scope is input-only.** `EMIT`/`TYPE` continue to call
+  `screen.emit()` directly, unchanged from M3 — per §7a's reconciliation,
+  output was never meant to be channel-routed.
+
+### 1. Engine core (`packages/engine`)
+
+- **`channel.ts`** — the `Channel` interface (`hasData(): boolean`,
+  `readByte(): number`, per §7a) and `KeyboardChannel`, a thin wrapper
+  around the existing `Keyboard` class: `hasData()` peeks for the next
+  event with a non-zero translated char (skipping/discarding
+  char-0 events, same filter rule as §7a), `readByte()` pops and returns
+  it. No changes needed to `keyboard.ts` itself — M4's `hasEvent()`/
+  `readEvent()` already have the right shape underneath.
+- **`inner.ts`** — the real change. Rework `executeXT`'s loop into a
+  resumable step function: either (a) a generator (`function*`) that
+  `yield`s at defined points (start of each outer-loop iteration, and
+  whenever a blocking primitive's channel has no data), or (b) an
+  explicit saved-continuation object (IP, IS-BLOCKED flag, which channel
+  it's waiting on) that a driving loop re-enters. Prefer (a) — generators
+  give resumable-suspend for free without hand-rolling continuation
+  state, and TypeScript's generator support is mature enough not to be a
+  risk here.
+- **`primitives.ts`** — new primitive: blocking `KEY` ( `-- char` ).
+  Distinct from M4's non-blocking `KEY`/`KEY?`, which stay as-is for
+  programs that want polling (`FORTH-ARCHITECTURE.md` §7's "blocking is
+  layered on top, not a HAL-level choice" rule). Blocking `KEY` checks
+  the bound channel's `hasData()`; if false, the generator yields a
+  "blocked, waiting on channel X" signal instead of a normal step;
+  `Machine` won't resume that point until the driving loop observes
+  `hasData()` true again.
+- **`machine.ts`** — `Machine` gains a bound `Channel` reference (default
+  `KeyboardChannel` wrapping its own `keyboard`), and `interpret()`
+  becomes step-driven rather than run-to-completion: a `step(budget:
+  number)` method that runs up to `budget` primitives (or fewer if it
+  hits a yield/block point) and returns a status (`'idle' | 'blocked' |
+  'more-to-run'`). This is what the outer driving loop (below) calls
+  repeatedly.
+- Tests: a synthetic `Channel` test double that starts empty and gets
+  fed data after N `step()` calls, proving blocking `KEY` actually
+  suspends (doesn't throw, doesn't busy-loop past the block point) and
+  resumes with the right value once data arrives; a step-budget test
+  (long-running colon-definition split across multiple `step()` calls,
+  confirming intermediate stack state is consistent between them);
+  endianness/regression suite from M1-M6 unaffected.
+
+### 2. Angular shell (`packages/app`)
+
+- **Driving loop**: installed via `NgZone.runOutsideAngular()` (per
+  `PORTING-WEB.md` §6, already the pattern since M1), calling
+  `machine.step(budget)` repeatedly via `setTimeout(0)` or
+  `queueMicrotask` between calls so the browser's own event loop (and
+  keyboard event delivery) gets a turn between steps — this is the
+  "yield periodically" half of the cooperative model.
+- **Render cadence**: `requestAnimationFrame`-driven, independent of
+  `step()`'s own pace — matches `PORTING-WEB.md` §6's "timer-tick-drives-
+  render, independent of interpreter pace" analog to Rebel-ROM's
+  `CKernel::Run()` tick. Only cross back into the Angular zone when a
+  frame actually needs to render or the status line needs updating.
+- REPL `<input>` submission now calls `machine.step()` in a loop until
+  `'idle'` rather than a single synchronous `interpret()` call — the
+  visible behavior (type `2 3 + .`, see `5`) is unchanged; what changes is
+  that a blocking `KEY` inside a compiled word no longer throws.
+
+### 3. Explicitly deferred out of M7
+
+`RemoteChannel`/WebMCP itself (M8 — the `Channel` interface is designed
+for it now, but the actual binding isn't built this milestone), Web
+Worker migration (unchanged open decision, revisit only if main-thread
+performance genuinely becomes a problem), `hal_error`/exception model
+(§9, still genuinely open on every target), multi-arena/independent
+sessions (§7a's open question — only one `Channel` binding exists until
+a second one is actually needed).
+
+### Verification
+
+- Engine unit tests per above, all passing alongside the existing M1-M6
+  suite.
+- Live browser check: run a blocking-`KEY`-based word, confirm the page
+  stays responsive (can still interact with other UI, scrollback still
+  renders) while it waits, confirm a keystroke unblocks it and the word
+  completes correctly, no console errors — same "test the golden path in
+  a browser" bar M1 set.

@@ -1,4 +1,11 @@
-## The "Rebel-ROM" Forth Architecture Specification (v4)
+## The "Rebel-ROM" Forth Architecture Specification (v5)
+
+**v5 change:** pulls in `CHANNELS-DESIGN.md` (previously an unreferenced
+sibling doc) as new §7a, reconciled against the shipped `CScreenModule`/
+`CKeyboardModule` and Rebel-Sim's M1-M6 engine — this is the mechanism
+that resolves §5's outer-loop-as-task anticipation and §7's
+blocking-`KEY`-layered-on-non-blocking-primitive rule into an actual
+binding target.
 
 The Forth system targets three environments that must share **identical Forth source** at the word-definition level, differing only at the HAL/sysvars boundary:
 
@@ -415,6 +422,61 @@ Every dictionary entry, identical layout across all languages:
 
 ---
 
+### 7a. Channel Abstraction: Binding the Outer Loop to I/O **[NEW, v5 — pulled in from `CHANNELS-DESIGN.md`]**
+
+* **The Rule:** the outer loop's *input* side — critically, blocking `KEY`
+  — binds to a `Channel` reference rather than calling a specific I/O
+  source directly. A `Channel` exposes exactly two operations: `has_data()`
+  (poll) and `read_byte()` (non-blocking pop, returning the *translated*
+  character). Full detail, concrete implementations, and the daemon design
+  for a future remote channel live in `CHANNELS-DESIGN.md`; this section
+  states the rule and how it resolves two things already anticipated
+  elsewhere in this document.
+* **This is what §5's outer-loop-as-task cross-check was pointing at.**
+  §5 already established that the outer loop runs as a task that yields/
+  blocks on the input queue "exactly like any cooperative task waiting on
+  a synchronization primitive." `Channel::has_data()` is that queue.
+  Blocking `KEY` (§7's own "layered on top of the non-blocking primitive"
+  rule) is implemented as: suspend the task when `has_data()` is false,
+  resume it once true. Whether "suspend" means a Circle `CSynchronizationEvent`
+  (Rebel-ROM), a JS generator yield (Rebel-Sim), or a board-appropriate
+  wait primitive (Rebel-Board) is a target-specific mechanism — the
+  `Channel` interface and the suspend/resume rule are the shared part.
+* **Scope: input only, not output.** `EMIT`/`TYPE` do **not** route
+  through a `Channel` — they call the existing `hal_emit`/`hal_plot_char`
+  screen HAL (§7) directly, unchanged. This was a real correction made
+  while reconciling `CHANNELS-DESIGN.md`'s original draft, which had
+  bundled both directions into one abstraction — see that document's §8
+  for the full reasoning. Two sessions bound to different input channels
+  (e.g. keyboard-bound and remote-bound) already share the one screen
+  surface today, by construction, since screen was never channel-shaped
+  to begin with.
+* **Keyboard debounce is not a separate layer to wrap.** `CKeyboardModule`
+  (Rebel-ROM) and `Keyboard` (Rebel-Sim) both do their own edge-detection
+  inline; `KeyboardChannel` wraps their event read/poll directly, filtered
+  to events carrying a non-zero translated char — an unmapped key has no
+  byte-stream representation and stays invisible to `Channel`, same as it
+  already is to `KEY`/`KEY?`.
+* **This is the mechanism that makes a future remote/MCP input source a
+  non-event.** A `RemoteChannel` (Rebel-ROM: a local daemon over a Unix
+  domain socket; Rebel-Sim: a WebMCP-driven channel) implements the same
+  two-method interface as `KeyboardChannel`. Binding it to the outer loop
+  requires zero changes to the interpreter or to blocking `KEY` — that's
+  the entire point of introducing `Channel` now rather than wiring
+  `KEY`/`KEY?` directly to whichever input source happens to exist today.
+* **Session model:** one outer-loop instance bound to one input channel.
+  Multiple simultaneous sessions (e.g. keyboard-bound and remote-bound)
+  share memory banks/sysvars/device state and the one screen surface;
+  whether that ever needs explicit arbitration is an open question
+  (`CHANNELS-DESIGN.md` §6) — not built now, revisit if a real need
+  surfaces.
+* **Status:** design-only on every target as of this writing. Rebel-ROM's
+  Phase 8 shipped `CKeyboardModule` without ever wrapping it in a
+  `Channel`; this becomes real starting with Phase 11 there and M7 on
+  Rebel-Sim (`PLAN.md`).
+
+---
+
 ### 8. State Portability Claim — Scope Clarification **[NEW]**
 
 v1 states you can "pause the simulator, dump the ArrayBuffer to a file, and boot the exact same state on the physical Raspberry Pi." This is achievable, but only within a defined scope — worth stating precisely so it doesn't become a false promise:
@@ -493,6 +555,13 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
 9. Exact on-flash layout for Rebel-Board's `hal_block_read`/`write`
    backing (§7's porting note) — the addressing *contract* is settled,
    the concrete flash layout isn't.
+10. **[v5]** Independent-session vs. shared-session arbitration once a
+    second `Channel` binding actually exists on any target (§7a,
+    `CHANNELS-DESIGN.md` §6) — deliberately not built ahead of a real need.
+11. **[v5]** Remote channel transport: Unix domain socket vs. TCP
+    (Rebel-ROM daemon) and the WebMCP transport shape (Rebel-Sim) — both
+    deferred to when that channel is actually built (Rebel-ROM's daemon
+    phase; Rebel-Sim's M8).
 
 ---
 
@@ -538,3 +607,10 @@ genuinely open.
   Rebel-Sim analog) is never part of the portable dump, by construction;
   once arenas land, portability is per-arena, not one flat machine-wide
   blob.
+* **Channel abstraction (§7a, v5):** firm rule — `Channel` is input-only
+  (`has_data()`/`read_byte()`), binds the outer loop's blocking `KEY` to
+  whatever input source is currently attached; `EMIT`/`TYPE` stay on the
+  existing §7 screen HAL, never channel-routed. Keyboard debounce lives
+  inside the keyboard module itself, not a separate device-services stage
+  — corrects `CHANNELS-DESIGN.md`'s original assumption. Session
+  arbitration and remote-channel transport remain open (§9, items 10-11).
