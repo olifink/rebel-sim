@@ -992,7 +992,7 @@ zoomed into a screenshot pixel-for-pixel, both `l` characters render as
 identical, uniform blocks with no stroke-width discrepancy. No console
 errors at any tested DPR.
 
-## M8 — Core Vocabulary — **planned**
+## M8 — Core Vocabulary — **done** (2026-07-31)
 
 **Goal:** the primitive/control-flow/defining-word set a "passable"
 Forth needs before source screens can build anything portable on top of
@@ -1025,3 +1025,126 @@ Forth source, per `FORTH-ARCHITECTURE.md` §7's storage-model note) is
 not in this milestone's scope; M8 is what a screen's *contents* would be
 written in, not the loader that reads them in. Revisit once M8's
 vocabulary makes writing something worth loading realistic.
+
+### What actually shipped, and where the plan/spec got refined
+
+The word tables in `CORE-VOCABULARY.md` held up exactly as written —
+every word landed with the stack effect the doc specifies. What the doc
+left as sketches (the two sections it flagged `[OPEN]`) needed real
+design decisions during implementation, and two genuine bugs surfaced
+along the way that are worth recording precisely, since a future reader
+implementing the same spec on Rebel-ROM or Rebel-Board will hit exactly
+the same design points.
+
+**Real bug #1, found by writing tests before assuming the design was
+right: `IF`/`DO`/etc. were never actually marked `IMMEDIATE`.** The
+initial pass added their `executePrimitive` cases and assumed marking
+them immediate was someone else's problem — it wasn't; boot registration
+(`repl.ts`) had always passed `extraFlags = 0` for every primitive,
+uniformly, since M1. Without the fix, compiling `: TEST -1 IF 111 THEN
+;` would have compiled `IF`'s own XT as an ordinary call into `TEST`'s
+body — meaning `IF` would only ever run *later*, when `TEST` itself is
+executed, silently corrupting `HERE` instead of building `TEST`'s
+control-flow structure at compile time. Fixed by making `writeHeader`'s
+`extraFlags` data-driven from `rebel-opcodes.json` (new optional
+`"immediate"`/`"compileOnly"` fields per primitive) rather than
+hardcoded, and — since this was the first time any *real* compile-only
+words existed — actually wiring up `FLAG_COMPILE_ONLY`
+(`FORTH-ARCHITECTURE.md` §6's reserved header bit 5, present since M2 but
+never once checked anywhere): `interpretExecuting` now rejects a
+compile-only word found while interpreting, with a clear
+`X is compile-only` error, instead of silently letting it run and
+corrupt dictionary state. `DictionaryEntry` gained a `compileOnly` field
+alongside `immediate` to carry this through `findWord`.
+
+**Real bug #2, only found because the CREATE...DOES> test actually
+asserted a value instead of just "doesn't throw": `CREATE` never
+reserved the leading does-pointer cell `DODOES`'s dispatch logic
+assumed already existed.** `,`  and `(DOES>)` were both writing to the
+*same* cell (`xt + CELL`) — one storing the user's data, the other later
+overwriting it with the does-pointer — so `: CONST CREATE , DOES> @ ;`
+`5 CONST FIVE` `FIVE` pushed `0`, not `5`. Resolved the way real Forth
+systems resolve it (and the way `CORE-VOCABULARY.md` §7 was already
+gesturing at without spelling out): every `dovarTokenId`-coded word
+unconditionally reserves one leading cell (the does-pointer slot, inert
+until/unless `DOES>` is ever applied to that specific word) — `CREATE`
+reserves just that one cell; `VARIABLE` is `CREATE` plus a second,
+initialized data cell, matching how `VARIABLE` is often literally
+defined in terms of `CREATE` in real Forth systems. `dovarTokenId`'s
+dispatch (both in `executeXT`'s top-level check and the slot-loop's
+inline-call case) now uniformly pushes `xt + CELL + CELL`, past the
+reserved slot, for both `CREATE`- and `VARIABLE`-made words.
+
+**§7's other `[OPEN]` flag — the `CREATE`/`DOES>`/`DOVAR`/`DODOES`
+mechanism itself — resolved exactly as sketched**, once the reserved-
+cell bug above was fixed: `DOVAR`/`DOCON`/`DODOES` are three more
+reserved Code Field sentinels (negative values, `-2`/`-3`/`-4`, distinct
+from `DOCOL`'s `0` and the positive primitive-token space) checked once
+at the top of `executeXT`, exactly like `DOCOL` already was. `(DOES>)`
+(what `DOES>` compiles a call to) is IP-mutating and return-stack-
+unwinding, so it lives in `inner.ts` alongside `BRANCH`/`0BRANCH`, not
+`primitives.ts` — `executeXT`'s `DOCOL` branch and its new `DODOES`
+branch now share one `threadFrom()` method (extracted from what used to
+be `executeXT`'s own inline while-loop) since both need the identical
+ip+rstack threading logic, just starting from a different `ip` and
+pushing a different initial data-stack value.
+
+**§8's `[OPEN]` flag — `S"`'s exact inline-storage mechanism — resolved
+as a real, documented scope cut, not silently.** Multi-word strings
+(`S" hello world"`) need a char-level input cursor (classic Forth's
+`WORD`/`>IN` scanning a raw buffer for a closing delimiter) that this
+project's line-tokenizer (`split(/\s+/)`) structurally can't provide —
+`S"`/`."` only support a single token with no embedded spaces for now,
+throwing a clear error if the next token doesn't end with `"` rather
+than silently mis-parsing. (A real bug caught here too, before any test
+ran: the first draft never stripped the trailing `"` from the consumed
+token at all — `S" hello"` would have compiled the 6-character string
+`hello"`, quote included.) `(SLIT)` — a new reserved token generalizing
+`LIT`'s "inline literal cell, `ip` skips over it" mechanism to a length-
+prefixed, cell-aligned byte run — is `inner.ts`'s fourth IP-mutating
+special case.
+
+**One more real thing found live-testing in the browser, not by unit
+tests:** `DO...LOOP` with `limit = index` runs the loop body once, not
+zero times. This isn't a bug — `DO` never pre-checks anything;  `LOOP`
+is what tests, and only *after* the body has already run — a genuine,
+well-known classic-Forth behavior `CORE-VOCABULARY.md` §6's terse
+description doesn't call out explicitly but doesn't contradict either. A
+test written assuming a check-before-first-iteration semantic caught its
+own wrong assumption; fixed the test, documented the real behavior in
+`rebel-opcodes.json`'s `DO` entry instead of adding an unrequested pre-
+check.
+
+**What shipped:** every word in `CORE-VOCABULARY.md` §4-§9 (~60 new
+primitive tokens/sentinels, IDs 32-92 plus the three negative Code Field
+sentinels) — memory access, return stack, full control flow including
+nested `DO`/`LOOP` with correct `I`/`J`, `CREATE`/`VARIABLE`/`CONSTANT`/
+`DOES>`, single-token `S"`/`TYPE`/`."`, and the §9 stack/arithmetic
+rounding-out. `dictionary.ts` gained `compileOnly` tracking; `repl.ts`'s
+boot loop reads `immediate`/`compileOnly` per-primitive from
+`rebel-opcodes.json` instead of hardcoding flags; `Machine.
+nextInputToken()` (shared with `:`'s own name-parsing, refactored from a
+`tokenizeAndRun`-local variable into instance state) is what lets
+`CREATE`/`VARIABLE`/`CONSTANT`/`S"` consume a name/string from whatever
+line is *currently* being interpreted, correctly, even when called from
+deep inside another word's own execution — the mechanism the
+`CREATE...DOES>` pattern actually depends on.
+
+**Tests:** 34 new engine tests across nine dedicated files
+(`memory-access`, `return-stack`, `control-flow`, `do-loop`,
+`defining-words`, `strings`, `stack-arith`, plus the `WORDS`
+sufficiency check) — 139 engine tests total, all passing; 8 app tests
+unaffected. The sufficiency check (`words-sufficiency.test.ts`) compiles
+`CORE-VOCABULARY.md` §12's exact `WORDS` definition — adapted only for
+`\` comments (out of scope, never a real word) and one hex literal
+(`1F` → `31`, no `HEX`/`DECIMAL` word is scoped to switch `BASE`) — and
+confirms it correctly lists both boot-registered primitives and
+user-defined words, stack-neutral, terminating cleanly.
+
+**Verified live in a headless browser, on the real on-screen REPL
+(M7a), not just engine unit tests:** typed a `DUP *` squaring word, an
+`IF`/`THEN` absolute-value word, a `BEGIN`/`UNTIL` countdown, a `DO`/
+`LOOP` sum using `I`, a `CREATE...DOES>`-defined constant, an `S"`/
+`TYPE` greeting, and a `VARIABLE`/`@`/`!` round-trip — every one printed
+the correct result directly on the canvas, stack left clean after each,
+zero console errors throughout.

@@ -715,6 +715,146 @@ built from, factored out of `KEY`'s own dispatch logic). `repl.ts` —
 `Machine.startRepl()`/`replLoop()`, and the small `TIB` ("Terminal Input
 Buffer") bank `ACCEPT` reads each line into.
 
+### 1.26 Control flow — `BRANCH`/`0BRANCH` and the IMMEDIATE compiler words
+
+Every Forth control-flow word (`IF`, `BEGIN`, `DO`, ...) compiles down to
+the same two primitives: `BRANCH` (unconditional jump — read the next
+compiled cell as a target `ip`, jump there) and `0BRANCH` (pop a flag;
+`FALSE` jumps like `BRANCH`, anything else falls through to the cell
+*after* the target). Both are `ip`-mutating, so — like `LIT`/`EXIT`
+before them — they're special-cased directly in `threadFrom`'s slot loop
+(§1.13), never reaching `primitives.ts`'s switch.
+
+`IF`/`ELSE`/`THEN`/`BEGIN`/`UNTIL`/`WHILE`/`REPEAT`/`RECURSE` are
+themselves ordinary dictionary entries, but flagged both `IMMEDIATE`
+(§1.14 — they run *while compiling*, not get compiled as calls) and, new
+in M8, `COMPILE_ONLY`: a dictionary flag reserved in the header layout
+since M2 but never actually checked until now. The outer interpreter
+rejects a compile-only word found while interpreting (`STATE = 0`)
+instead of letting it silently start corrupting `HERE`.
+
+Each of these words' *entire* job is emitting `BRANCH`/`0BRANCH` plus a
+target cell, and tracking backpatch addresses — on the data stack, the
+same stack everything else uses, since compilation and interpretation
+never run concurrently. `IF` compiles `0BRANCH` + a placeholder cell and
+pushes the placeholder's own address; `THEN` patches whatever address is
+on top of the stack (from `IF` or `ELSE`) to `HERE`. `BEGIN` needs no
+placeholder at all — it just pushes `HERE` itself, a backward target
+already known. `RECURSE` compiles a direct call to the *current*,
+still-`HIDDEN` definition's own CFA, computed straight from `LATEST`
+(bypassing `findWord`'s HIDDEN skip) — resolving the self-reference gap
+M2's dictionary design left open.
+
+*Implementation:* `inner.ts` (`BRANCH`/`0BRANCH` in `threadFrom`),
+`primitives.ts` (the IMMEDIATE compiler-word cases), `dictionary.ts`
+(`FLAG_COMPILE_ONLY` now read back off `DictionaryEntry`).
+
+### 1.27 Counted loops — `DO`/`LOOP`/`+LOOP`
+
+`DO`/`LOOP` need something `IF`/`BEGIN` don't: real state that outlives
+one iteration (the loop's index and limit), carried across however many
+times the loop body runs. Classic Forth's answer — and this project's —
+is to keep that state on the *return stack*, pushed just above the
+current return address, where `EXIT`-style unwinding never has to know
+it's there.
+
+`DO` (`immediate`, `compileOnly`) compiles a call to `(DO)` — a plain
+runtime primitive that pops `limit`/`index` off the data stack and
+pushes them onto `RSTK` — then pushes `HERE` (the loop-back target) for
+`LOOP` to consume. `LOOP` compiles a call to `(LOOP)` (increments the
+`RSTK`-resident index, compares to the limit, pushes a data-stack flag,
+and on completion drops the loop-control cells off `RSTK`) followed by
+`0BRANCH` back to `DO`'s target. `+LOOP` is identical except `(+LOOP)`
+pops a caller-supplied increment instead of using 1, and terminates via
+a simple directional boundary check (continue while `next < limit` for
+a non-negative increment, `next > limit` for a negative one) rather than
+the full ANS "unsigned crossing" algorithm — correct for ordinary
+counting-up/counting-down `+LOOP`s, not exhaustively specified any more
+precisely than this by `CORE-VOCABULARY.md` §6 either. `I`/`J` just peek
+`RSTK` at depth 0 / depth 2 — the innermost
+loop's index sits right above the return address; the next-outer loop's
+sits two loop-control-cell-pairs further down.
+
+Nothing here is `ip`-mutating in a way `LIT`/`BRANCH` aren't already, so
+`(DO)`/`(LOOP)`/`(+LOOP)` are ordinary `primitives.ts` cases (given
+direct `rstack` access via `PrimitiveContext`, §1.8) — only `DO`/`LOOP`/
+`+LOOP` themselves are IMMEDIATE/compile-only, same tier as `IF`/`BEGIN`.
+
+*Implementation:* `primitives.ts` (`DO`/`LOOP`/`+LOOP` compiling; `(DO)`/
+`(LOOP)`/`(+LOOP)`/`I`/`J` running).
+
+### 1.28 `CREATE`/`DOES>` — defining new defining words
+
+`VARIABLE`/`CONSTANT` are themselves just two more dictionary entries —
+but `CREATE`...`DOES>` is what lets *Forth code* define new words like
+them, rather than only ever getting the ones already built in. This
+needed two more Code Field sentinels, same tier as `DOCOL` (checked once
+at the top of `executeXT`, never inside the slot loop):
+
+- **`DOVAR`** — a plain `CREATE`d word's Code Field: executing it pushes
+  its own parameter field's start address and returns. `VARIABLE` is
+  built directly on this.
+- **`DODOES`** — what `DOES>` rewrites a word's Code Field *to*.
+  Executing a `DODOES` word pushes its parameter field's start address,
+  then threads into a stored "does-pointer" exactly the way `DOCOL`
+  threads into a Parameter Field — pushing a return address and jumping
+  `ip`, unwinding on `EXIT` like anything else.
+
+The one real design decision M8 had to settle (flagged `[OPEN]` in
+`CORE-VOCABULARY.md` §7 before implementation): **every `CREATE`d word
+reserves one leading parameter-field cell**, initialized to 0, whether or
+not `DOES>` ever gets applied to it. That cell is where `DOES>` later
+writes the does-pointer if it's used — and because it's *always* there,
+`DOVAR`'s and `DODOES`'s "push the parameter field start" both skip
+exactly the same one cell, so a word's own PFA never changes based on
+whether `DOES>` was applied before or after it was first executed.
+`VARIABLE` reserves that same leading cell (permanently unused, since
+`VARIABLE`-made words never get `DOES>`'d in practice) plus one more for
+its actual storage — the classic `: VARIABLE CREATE 0 , ;` relationship,
+just spelled out directly rather than composed.
+
+`DOES>` itself compiles a single call to `(DOES>)` — an `ip`-mutating
+runtime primitive, special-cased in `threadFrom` like `BRANCH`: it
+rewrites `LATEST`'s Code Field to `DODOES`, stores the *current* `ip`
+(exactly the code following `DOES>` in the *defining* word, since this
+dispatch already advanced past its own slot) into `LATEST`'s reserved
+leading cell, then unwinds the return stack exactly like `EXIT`. The
+defining word's own execution (e.g. `CREATE , DOES> @`, run once per
+`CONST`-alike word created) ends there — the `DOES>`-clause only runs
+*later*, whenever the newly-made word itself is executed.
+
+*Implementation:* `inner.ts` (`DOVAR`/`DODOES` sentinel dispatch in both
+`executeXT` and `threadFrom`; `(DOES>)`'s runtime). `primitives.ts`
+(`CREATE`/`VARIABLE`/`CONSTANT`/`DOES>`'s compile-time halves).
+`rebel-opcodes.json` (`dovarTokenId`/`doconTokenId`/`dodoesTokenId`:
+negative, distinct from `docolTokenId` (0), the positive primitive token
+space, and `inner.ts`'s own `-1` return-stack sentinel).
+
+### 1.29 Strings — inline literals and a deliberate tokenizer scope cut
+
+`S"`/`."` compile a length-prefixed byte run directly into the compiled
+word's body — `(SLIT)`, `LIT` generalized from one cell to a byte run:
+reads the next cell as a length, pushes `(ip, length)` as the string's
+addr/len pair, then advances `ip` past the bytes (cell-aligned) instead
+of past one fixed cell. `TYPE` prints `len` bytes from `addr`; `."` is
+plain sugar for `S" ... TYPE`.
+
+The real open question flagged while planning M8 wasn't the runtime
+mechanism above — it was the *outer interpreter*. `tokenizeAndRun`
+splits a line on whitespace before any word ever sees it (`repl.ts`), so
+`S" hello world"` would already be two tokens (`hello` and `world"`) by
+the time `S"`'s own logic runs — no amount of cleverness inside `S"`
+fixes that; it needs a genuinely different, character-level parser (the
+classic Forth `WORD`/`>IN` pattern reading a raw buffer, not an
+array-of-tokens). **Deliberate scope cut, not a silent gap:** M8 ships
+`S"`/`."` supporting only a single token with no embedded spaces, and
+`S"` used while interpreting (rather than compiling) throws a clear
+error rather than pretending to support it. A real multi-word string
+parser is real, scoped-out follow-up work, not a bug.
+
+*Implementation:* `inner.ts` (`(SLIT)`'s `ip`-mutating runtime).
+`primitives.ts` (`compileInlineString`, shared by `S"`/`."`).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -805,6 +945,15 @@ exactly as it would be on the bare-metal target.
 | **`ACCEPT`** | Primitive: `addr len -- len2` — classic Forth line input. Reads/echoes characters one at a time (blocking, like `KEY`) until Enter; Backspace erases the last echoed character. Built as its own multi-step blocking generator in `inner.ts`, not a plain `executePrimitive` case (§1.25). |
 | **`TIB`** | "Terminal Input Buffer" — the small resident bank `ACCEPT` reads each on-screen REPL line into before it's tokenized. |
 | **`startRepl()` / `replLoop()`** | The self-driving on-screen REPL (§1.25): draw a prompt, `ACCEPT` a line, interpret it (printing errors to the screen instead of throwing), repeat forever. Uses the same session `beginLine()`/`step()` drive — mutually exclusive with calling those directly. |
+| **`BRANCH` / `0BRANCH`** | Primitives: unconditional / conditional (pop-a-flag) jump, reading the next compiled cell as an `ip` target. `ip`-mutating, special-cased in `threadFrom` like `LIT`/`EXIT` (§1.26). |
+| **`COMPILE_ONLY`** | Dictionary flag: this word errors if found while interpreting (`STATE = 0`) rather than while compiling. Reserved since M2, first enforced in M8 for the control-flow/defining words. |
+| **`DOVAR`** | Reserved Code Field sentinel (same tier as `DOCOL`): a plain `CREATE`d/`VARIABLE`d word — executing it just pushes its parameter field's start address (§1.28). |
+| **`DOCON`** | Reserved Code Field sentinel: a `CONSTANT`-made word — executing it pushes the value stored in its one parameter cell. |
+| **`DODOES`** | Reserved Code Field sentinel: what `DOES>` rewrites a word's Code Field to — executing it pushes the parameter field start, then threads into a stored does-pointer (§1.28). |
+| **Does-pointer** | The address `DOES>` stores — where the "what this word does now" code begins. Lives in one leading parameter-field cell every `CREATE`d word reserves, whether or not `DOES>` is ever applied (§1.28). |
+| **`(DO)` / `(LOOP)` / `(+LOOP)`** | Runtime primitives `DO`/`LOOP`/`+LOOP` compile calls to: push loop index/limit onto `RSTK` above the return address, then increment/test/pop on each iteration (§1.27). Parenthesized by convention — not meant to be typed directly. |
+| **`(DOES>)`** | Runtime primitive `DOES>` compiles a call to: rewrites `LATEST`'s Code Field to `DODOES` and stores the current `ip` as its does-pointer, then unwinds like `EXIT` (§1.28). |
+| **`(SLIT)`** | Runtime primitive `S"`/`."` compile a call to: `LIT` generalized to a length-prefixed byte run instead of one cell (§1.29). |
 
 ---
 
@@ -820,5 +969,6 @@ exactly as it would be on the bare-metal target.
 | **M6** | PWA packaging — `packages/app` only, no engine changes. Angular's own PWA schematic (manifest, service worker, precaching), an on-brand icon set generated from the real `font-zxspectrum.ts` 'R' glyph, `navigator.storage.persist()`. Verified offline-bootable against a real production build, not just unit tests. | `packages/app/public/manifest.webmanifest`, `ngsw-config.json`, `app.config.ts` |
 | **M7** | Execution loop & `Channel` binding (§1.23-§1.24) — `executeXT` became a resumable generator, blocking `KEY` suspends instead of throwing, `Machine.beginLine()`/`step()`/`interpret()`. Main-thread generator model chosen over a Web Worker (faithful to both hardware targets' cooperative execution). Sets up M9 (remote/WebMCP channel) to need zero interpreter changes. | `channel.ts`, `inner.ts` (rewritten), `repl.ts` (rewritten) |
 | **M7a** | On-screen REPL (§1.25) — `ACCEPT` (a second, multi-step blocking primitive built the same way as `KEY`), `TIB` bank, `Machine.startRepl()`/`replLoop()`. `packages/app`'s DOM `<input>`/`<form>`/`.log` retired entirely — the whole page is the terminal now, keyboard routing no longer gated on any element's focus. | `inner.ts` (`accept()`), `repl.ts` (`startRepl`) |
+| **M8** | Core vocabulary (§1.26-§1.29, 61 new primitives, tokens 32-92): memory access, return-stack words, control flow (`BRANCH`/`0BRANCH` + the `IF`/`BEGIN`/`DO`/... IMMEDIATE compiler words), `CREATE`/`DOES>` (two more Code Field sentinels, `DOVAR`/`DODOES`), strings (`S"`/`."`, scoped to single-token literals — a real tokenizer limitation, documented not hidden), and the remaining stack/arithmetic fillers. `FLAG_COMPILE_ONLY` (reserved since M2) finally enforced. `WORDS`/`VLIST` (`CORE-VOCABULARY.md` §12's own sufficiency check) runs correctly on nothing but this vocabulary, proving it's actually enough. | `primitives.ts`, `inner.ts`, `dictionary.ts`, `rebel-opcodes.json` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

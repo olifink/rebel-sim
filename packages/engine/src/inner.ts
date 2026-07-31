@@ -18,6 +18,28 @@
  * backspace loop lives here instead, built out of the same `StepSignal`
  * yields as everything else.
  *
+ * M8 (CORE-VOCABULARY.md) adds four more IP-level concerns, all for the
+ * same underlying reason as LIT/EXIT — a plain primitive can't touch
+ * `ip` or the return stack:
+ * - `BRANCH`/`0BRANCH` (§6): read the next cell as a jump target.
+ * - `(DOES>)` (§7): rewrites LATEST's own Code Field to `dodoesTokenId`
+ *   and stores the *current* `ip` (which, since this dispatch already
+ *   advanced past its own slot, is exactly the address of the code
+ *   `DOES>` was followed by) as that word's does-pointer, then unwinds
+ *   the return stack exactly like EXIT — "run once, at compile-target-
+ *   definition time, to wire up a does-pointer, then bail out."
+ * - `(SLIT)` (§8): LIT generalized from one cell to a length-prefixed
+ *   byte run — pushes (ip, length) as a string's addr/len, then skips
+ *   `ip` past the bytes (cell-aligned) instead of past one fixed cell.
+ * - `dovarTokenId`/`doconTokenId`/`dodoesTokenId` themselves are Code
+ *   Field *sentinels* (same tier as `DOCOL`, checked once at the top of
+ *   `executeXT`, never inside the slot loop) — what a `CREATE`d,
+ *   `CONSTANT`d, or `DOES>`'d word's own entry actually holds.
+ *   `DODOES` threads into compiled code exactly like `DOCOL` (shares
+ *   `threadFrom()` below), just starting from a stored does-pointer
+ *   instead of `xt + CELL`, and pushing a parameter-field address onto
+ *   the data stack first.
+ *
  * M7 (FORTH-ARCHITECTURE.md §7a): `executeXT` is a generator rather than
  * a plain function, so execution can suspend mid-word-body and resume
  * later — the mechanism blocking `KEY` needs. This was a natural
@@ -32,16 +54,25 @@
  * resume; nothing about it re-executes until data is actually available.
  */
 
-import { Arena, CELL_SIZE as CELL } from './arena.js';
+import { Arena, alignCell, CELL_SIZE as CELL } from './arena.js';
 import { DataStack } from './stack.js';
+import { NAME_LEN_MASK } from './dictionary.js';
 import { executePrimitive, PrimitiveContext } from './primitives.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 const DOCOL = opcodes.docolTokenId;
+const DOVAR_TOKEN = opcodes.dovarTokenId;
+const DOCON_TOKEN = opcodes.doconTokenId;
+const DODOES_TOKEN = opcodes.dodoesTokenId;
+
 const EXIT_TOKEN = opcodes.primitives.find((p) => p.name === 'EXIT')!.id;
 const LIT_TOKEN = opcodes.primitives.find((p) => p.name === 'LIT')!.id;
 const KEY_TOKEN = opcodes.primitives.find((p) => p.name === 'KEY')!.id;
 const ACCEPT_TOKEN = opcodes.primitives.find((p) => p.name === 'ACCEPT')!.id;
+const BRANCH_TOKEN = opcodes.primitives.find((p) => p.name === 'BRANCH')!.id;
+const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
+const DOES_TOKEN = opcodes.primitives.find((p) => p.name === '(DOES>)')!.id;
+const SLIT_TOKEN = opcodes.primitives.find((p) => p.name === '(SLIT)')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
@@ -50,6 +81,7 @@ const TOP_LEVEL_SENTINEL = -1;
 const CHAR_BACKSPACE = 8;
 const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
+const FALSE_VALUE = 0;
 
 export type StepSignal = 'progress' | 'blocked';
 
@@ -73,13 +105,54 @@ export class Inner {
     if (codeField === EXIT_TOKEN) {
       throw new Error('EXIT used outside a compiled word body');
     }
+    if (codeField === BRANCH_TOKEN || codeField === ZBRANCH_TOKEN) {
+      throw new Error('BRANCH/0BRANCH used outside a compiled word body');
+    }
+    if (codeField === DOES_TOKEN) {
+      throw new Error('DOES> used outside a compiled word body');
+    }
+    if (codeField === SLIT_TOKEN) {
+      throw new Error('S"/." used outside a compiled word body');
+    }
+
+    if (codeField === DOVAR_TOKEN) {
+      // CREATE/VARIABLE, before any DOES> — push the address *past* the
+      // leading does-pointer cell every DOVAR-coded word reserves
+      // (primitives.ts's CREATE/VARIABLE cases), no threading. This is
+      // "the parameter field" as CREATE's own contract describes it —
+      // the does-pointer slot is bookkeeping, not part of it.
+      this.ctx.stack.push(xt + CELL + CELL);
+      return;
+    }
+    if (codeField === DOCON_TOKEN) {
+      // CONSTANT — push the value stored in the one parameter cell.
+      this.ctx.stack.push(this.arena.readCell(xt + CELL));
+      return;
+    }
+    if (codeField === DODOES_TOKEN) {
+      // A CREATE...DOES> word: push the address *past* the leading
+      // does-pointer cell (the word's own data, e.g. what `,` stored),
+      // then thread into the code the does-pointer points at, same as
+      // DOCOL threading into a parameter field.
+      this.ctx.stack.push(xt + CELL + CELL);
+      yield* this.threadFrom(this.arena.readCell(xt + CELL));
+      return;
+    }
     if (codeField !== DOCOL) {
       yield* this.dispatch(codeField);
       return;
     }
 
+    yield* this.threadFrom(xt + CELL);
+  }
+
+  /** The shared DOCOL/DODOES threading loop: walk compiled XT slots
+   * starting at `startIp` via an explicit ip + rstack (never JS
+   * recursion — M2's original design note, still why M7/M8's IP-mutating
+   * words could all be built as generators with no further rework). */
+  private *threadFrom(startIp: number): Generator<StepSignal, void, void> {
     this.rstack.push(TOP_LEVEL_SENTINEL);
-    let ip = xt + CELL;
+    let ip = startIp;
 
     while (ip !== TOP_LEVEL_SENTINEL) {
       const slotXt = this.arena.readCell(ip);
@@ -93,9 +166,46 @@ export class Inner {
       } else if (slotCode === EXIT_TOKEN) {
         ip = this.rstack.pop();
         yield 'progress';
+      } else if (slotCode === BRANCH_TOKEN) {
+        ip = this.arena.readCell(ip);
+        yield 'progress';
+      } else if (slotCode === ZBRANCH_TOKEN) {
+        const flag = this.ctx.stack.pop();
+        ip = flag === FALSE_VALUE ? this.arena.readCell(ip) : ip + CELL;
+        yield 'progress';
+      } else if (slotCode === SLIT_TOKEN) {
+        const len = this.arena.readCell(ip);
+        ip += CELL;
+        this.ctx.stack.push(ip); // string bytes start right here
+        this.ctx.stack.push(len);
+        ip = alignCell(ip + len);
+        yield 'progress';
+      } else if (slotCode === DOES_TOKEN) {
+        // Rewrite LATEST's Code Field to DODOES and store the current ip
+        // (already past this slot — exactly the code following DOES> in
+        // the *defining* word) as its does-pointer, then unwind like EXIT.
+        const latestAddr = this.ctx.sysvars.getLatest();
+        const flagsByte = this.arena.readByte(latestAddr + 4);
+        const nameLen = flagsByte & NAME_LEN_MASK;
+        const latestCfa = alignCell(latestAddr + 5 + nameLen);
+        this.arena.writeCell(latestCfa, DODOES_TOKEN);
+        this.arena.writeCell(latestCfa + CELL, ip);
+        ip = this.rstack.pop();
+        yield 'progress';
       } else if (slotCode === DOCOL) {
         this.rstack.push(ip);
         ip = slotXt + CELL;
+        yield 'progress';
+      } else if (slotCode === DODOES_TOKEN) {
+        this.ctx.stack.push(slotXt + CELL + CELL);
+        this.rstack.push(ip);
+        ip = this.arena.readCell(slotXt + CELL);
+        yield 'progress';
+      } else if (slotCode === DOVAR_TOKEN) {
+        this.ctx.stack.push(slotXt + CELL + CELL); // past the reserved does-pointer cell, see executeXT's DOVAR branch
+        yield 'progress';
+      } else if (slotCode === DOCON_TOKEN) {
+        this.ctx.stack.push(this.arena.readCell(slotXt + CELL));
         yield 'progress';
       } else {
         yield* this.dispatch(slotCode);

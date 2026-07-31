@@ -46,6 +46,8 @@ import {
   DictionaryContext,
   endDefinition,
   findWord,
+  FLAG_COMPILE_ONLY,
+  FLAG_IMMEDIATE,
   markLatestImmediate,
   writeHeader,
 } from './dictionary.js';
@@ -111,6 +113,19 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   private readonly acceptCfa: number;
   private session: Generator<StepSignal, void, void> | undefined;
 
+  // The outer interpreter's own parse position — M8, CORE-VOCABULARY.md
+  // §7: CREATE/VARIABLE/CONSTANT/S" all need to consume the *next* word
+  // directly from whatever line is currently being interpreted, even
+  // when called from deep inside another word's execution (the
+  // `: CONST CREATE , DOES> @ ;` pattern — CREATE, running as part of
+  // CONST's own execution, must grab its name from CONST's *caller's*
+  // line, e.g. `5 CONST FIVE`, not from CONST's own compiled body).
+  // Sharing one mutable cursor via instance fields (rather than a local
+  // variable private to tokenizeAndRun) is what makes that possible —
+  // the same role classic Forth's >IN plays over a raw input buffer.
+  private currentTokens: string[] = [];
+  private currentTokenIndex = 0;
+
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
     this.banks = new BankTable(this.arena);
@@ -154,7 +169,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.inner = new Inner(this.arena, this.rstack, this);
 
     for (const p of opcodes.primitives) {
-      writeHeader(this, p.name, 0, p.id);
+      // M8: some primitives (IF/DO/DOES>/S"/...) must run at compile
+      // time (IMMEDIATE) and/or only make sense while compiling
+      // (COMPILE_ONLY, docs/FORTH-ARCHITECTURE.md §6's reserved bit 5,
+      // unused until now) — flagged per-primitive in rebel-opcodes.json
+      // rather than hardcoded here, same source-of-truth discipline as
+      // token IDs themselves.
+      let flags = 0;
+      if ('immediate' in p && p.immediate) flags |= FLAG_IMMEDIATE;
+      if ('compileOnly' in p && p.compileOnly) flags |= FLAG_COMPILE_ONLY;
+      writeHeader(this, p.name, flags, p.id);
     }
 
     this.tibBank = this.banks.createBank('TIB', TIB_BANK_SIZE, 'TIB');
@@ -163,6 +187,18 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
   getBase(): number {
     return this.sysvars.getBase();
+  }
+
+  /** Consumes and returns the next word from whatever line is currently
+   * being interpreted (§7's shared-cursor mechanism, above). Throws if
+   * the input is exhausted — matching how `:` already fails loudly
+   * (`beginDefinition`) when a name is missing, rather than silently
+   * returning something meaningless. */
+  nextInputToken(): string {
+    if (this.currentTokenIndex >= this.currentTokens.length) {
+      throw new Error('expected a name, but the input ended');
+    }
+    return this.currentTokens[this.currentTokenIndex++];
   }
 
   /** Starts a new session for one line of Forth source, without running
@@ -303,17 +339,17 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   }
 
   private *tokenizeAndRun(line: string): Generator<StepSignal, void, void> {
-    const tokens = line.trim().split(/\s+/).filter(Boolean);
-    let i = 0;
-    while (i < tokens.length) {
-      const token = tokens[i++];
+    this.currentTokens = line.trim().split(/\s+/).filter(Boolean);
+    this.currentTokenIndex = 0;
+    while (this.currentTokenIndex < this.currentTokens.length) {
+      const token = this.nextInputToken();
       const upper = token.toUpperCase();
 
       if (this.sysvars.getState() === -1) {
         yield* this.interpretCompiling(upper, token);
       } else {
         if (upper === ':') {
-          beginDefinition(this, tokens[i++], DOCOL);
+          beginDefinition(this, this.nextInputToken(), DOCOL);
           yield 'progress';
           continue;
         }
@@ -333,6 +369,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
     const found = findWord(this, upper);
     if (found) {
+      if (found.compileOnly) {
+        throw new Error(`${upper} is compile-only — used outside a colon-definition`);
+      }
       yield* this.inner.executeXT(found.cfa);
       return;
     }

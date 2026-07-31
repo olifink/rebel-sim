@@ -23,7 +23,7 @@ import { Sysvars } from './sysvars.js';
 export const FLAG_IMMEDIATE = 0x80;
 export const FLAG_HIDDEN = 0x40;
 export const FLAG_COMPILE_ONLY = 0x20;
-const NAME_LEN_MASK = 0x1f;
+export const NAME_LEN_MASK = 0x1f;
 const MAX_NAME_LENGTH = 31;
 
 export interface DictionaryContext {
@@ -36,6 +36,13 @@ export interface DictionaryEntry {
   readonly entryAddr: number;
   readonly cfa: number;
   readonly immediate: boolean;
+  /** M8: FLAG_COMPILE_ONLY was reserved in the header layout from the
+   * start but never actually checked anywhere until control-flow words
+   * (IF/DO/etc.) needed it — using one outside a definition wouldn't
+   * error, it would just start corrupting HERE. Now wired up: the outer
+   * interpreter (repl.ts) rejects a compile-only word found while
+   * interpreting (STATE=0). */
+  readonly compileOnly: boolean;
 }
 
 export class DictionaryOverflowError extends Error {}
@@ -77,7 +84,12 @@ export function writeHeader(
   ctx.sysvars.setHere(entryEnd);
   ctx.sysvars.setLatest(entryAddr);
 
-  return { entryAddr, cfa, immediate: (extraFlags & FLAG_IMMEDIATE) !== 0 };
+  return {
+    entryAddr,
+    cfa,
+    immediate: (extraFlags & FLAG_IMMEDIATE) !== 0,
+    compileOnly: (extraFlags & FLAG_COMPILE_ONLY) !== 0,
+  };
 }
 
 /** Walks the LATEST chain via link pointers, skipping HIDDEN entries,
@@ -102,7 +114,12 @@ export function findWord(ctx: DictionaryContext, name: string): DictionaryEntry 
       }
       if (match) {
         const cfa = alignCell(addr + 5 + len);
-        return { entryAddr: addr, cfa, immediate: (flagsByte & FLAG_IMMEDIATE) !== 0 };
+        return {
+          entryAddr: addr,
+          cfa,
+          immediate: (flagsByte & FLAG_IMMEDIATE) !== 0,
+          compileOnly: (flagsByte & FLAG_COMPILE_ONLY) !== 0,
+        };
       }
     }
 

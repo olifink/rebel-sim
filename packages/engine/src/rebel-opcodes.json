@@ -3,6 +3,10 @@
 
   "cellSize": 4,
   "docolTokenId": 0,
+  "_dovarDoconDodoesNote": "M8, CORE-VOCABULARY.md §7: three more reserved Code Field sentinel values, same tier as docolTokenId (checked once at the START of executeXT, never iterated over in the slot-processing loop the way primitive token IDs are). Negative so they're visually and numerically distinct from both DOCOL (0) and the positive 1..N primitive token space, and from -1 (inner.ts's own TOP_LEVEL_SENTINEL, a return-stack VALUE, not a code-field value, so no real collision risk either way).",
+  "dovarTokenId": -2,
+  "doconTokenId": -3,
+  "dodoesTokenId": -4,
 
   "primitives": [
     { "id": 1, "name": "DUP" },
@@ -35,7 +39,76 @@
     { "id": 28, "name": "PAPER", "note": "( color -- ) M3: same as INK but for the background color" },
     { "id": 29, "name": "KEY?", "note": "( -- flag ) M4: CKeyboardModule::ReadEvent peeked non-destructively — TRUE if the event queue is non-empty, matching FORTH-ARCHITECTURE.md's hal_key_pressed? non-blocking-read requirement" },
     { "id": 30, "name": "KEY", "note": "( -- char ) M7: blocks (FORTH-ARCHITECTURE.md §7a) — suspends the running session via inner.ts's generator-based step loop until the bound Channel (channel.ts, default KeyboardChannel) has a translated-char event, then pops and pushes it. M4's original throw-on-empty behavior is gone; KEY?/token 29 is unchanged (still a raw, unfiltered, non-blocking peek at the Keyboard queue)." },
-    { "id": 31, "name": "ACCEPT", "note": "( addr len -- len2 ) M7a: classic Forth line-input. Reads chars one at a time off the bound Channel (blocking, like KEY), echoing each via screen.emit() and storing into the arena at addr; Backspace (char 8) erases the last echoed char (wraps back across a screen row boundary if needed) without going below the start of this call's input; Enter (char 10) terminates without being stored. Fully special-cased in inner.ts's dispatch — never reaches primitives.ts's switch, since it needs many blocking points (one per character), not just one." }
+    { "id": 31, "name": "ACCEPT", "note": "( addr len -- len2 ) M7a: classic Forth line-input. Reads chars one at a time off the bound Channel (blocking, like KEY), echoing each via screen.emit() and storing into the arena at addr; Backspace (char 8) erases the last echoed char (wraps back across a screen row boundary if needed) without going below the start of this call's input; Enter (char 10) terminates without being stored. Fully special-cased in inner.ts's dispatch — never reaches primitives.ts's switch, since it needs many blocking points (one per character), not just one." },
+
+    { "id": 32, "name": "@", "note": "( addr -- x ) M8, CORE-VOCABULARY.md §4: cell fetch. addr must be cell-aligned — no defined behavior for misaligned reads, matching the cell model." },
+    { "id": 33, "name": "!", "note": "( x addr -- ) cell store, same alignment requirement." },
+    { "id": 34, "name": "C@", "note": "( addr -- x ) byte fetch, zero-extended, no alignment requirement." },
+    { "id": 35, "name": "C!", "note": "( x addr -- ) byte store (low 8 bits of x)." },
+    { "id": 36, "name": "+!", "note": "( n addr -- ) add n to the cell at addr. STANDARD-for-now per §3 (DUP @ ROT + SWAP ! once LOAD exists) but shipped as a primitive today, same reasoning as everything in §9." },
+
+    { "id": 37, "name": ">R", "note": "( x -- ) ( R: -- x ) M8, CORE-VOCABULARY.md §5: move top of data stack to return stack. Unbalanced against R>/EXIT corrupts the return address — a real, documented footgun this spec doesn't guard against, not an oversight." },
+    { "id": 38, "name": "R>", "note": "( -- x ) ( R: x -- ) move top of return stack to data stack." },
+    { "id": 39, "name": "R@", "note": "( -- x ) ( R: x -- x ) copy top of return stack without removing it." },
+
+    { "id": 40, "name": "BRANCH", "note": "M8, CORE-VOCABULARY.md §6: unconditional jump — reads the next cell as a target ip value and jumps there. Only meaningful inside a compiled word body; special-cased by the inner interpreter exactly like LIT/EXIT (M2), not a primitives.ts case. Never dictionary-called directly." },
+    { "id": 41, "name": "0BRANCH", "note": "conditional jump — pops a flag; FALSE behaves like BRANCH, TRUE skips the target cell and continues. Same inner-interpreter special-casing as BRANCH." },
+
+    { "id": 42, "name": "IF", "immediate": true, "compileOnly": true, "note": "( flag -- ) IMMEDIATE, compile-time only: compiles 0BRANCH + a placeholder cell, pushes the placeholder's address (for ELSE/THEN to patch) onto the data stack — safe since IMMEDIATE words run even while compiling (same DOCOL-note mechanism ':'/';' already use)." },
+    { "id": 43, "name": "ELSE", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: compiles BRANCH + a placeholder (jumps past the else-branch); patches IF's placeholder to just past this cell; pushes its own placeholder address." },
+    { "id": 44, "name": "THEN", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: patches the address on top of the stack (from IF or ELSE) to point at HERE." },
+    { "id": 45, "name": "BEGIN", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: pushes HERE (a backward-branch target) — emits nothing." },
+    { "id": 46, "name": "UNTIL", "immediate": true, "compileOnly": true, "note": "( flag -- ) IMMEDIATE: compiles 0BRANCH + BEGIN's address (known immediately, backward, no patching needed)." },
+    { "id": 47, "name": "WHILE", "immediate": true, "compileOnly": true, "note": "( flag -- ) IMMEDIATE: compiles 0BRANCH + a placeholder (forward exit target), leaving BEGIN's address underneath on the stack for REPEAT." },
+    { "id": 48, "name": "REPEAT", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: compiles BRANCH + BEGIN's address (backward); patches WHILE's placeholder to HERE." },
+    { "id": 49, "name": "RECURSE", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: compiles a direct call to the *current*, still-HIDDEN definition's own cfa — computed straight from LATEST, bypassing findWord's HIDDEN skip (the same skip that made M2 leave this unsupported). Resolves M2's documented cut." },
+
+    { "id": 50, "name": "DO", "immediate": true, "compileOnly": true, "note": "( limit index -- ) IMMEDIATE: compiles a call to (DO), pushes HERE as the loop-back target. DO never pre-checks limit vs. index — classic Forth behavior, not a bug: LOOP is what tests, and only after the body has already run once, so `limit index DO ... LOOP` with limit=index still runs one iteration before terminating." },
+    { "id": 51, "name": "LOOP", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: compiles a call to (LOOP), then 0BRANCH back to DO's target (popped from the data stack)." },
+    { "id": 52, "name": "+LOOP", "immediate": true, "compileOnly": true, "note": "( n -- ) IMMEDIATE: as LOOP, but compiles a call to (+LOOP) instead — increments by a value popped from the data stack at runtime rather than by 1." },
+    { "id": 53, "name": "(DO)", "note": "Runtime helper LOOP-family words compile calls to — not meant to be typed directly (parenthesized, classic-Forth convention for 'internal'). Pops limit then index off the data stack, pushes them onto RSTK above the current return address (docs §5's >R/R> warning applies to this pairing too)." },
+    { "id": 54, "name": "(LOOP)", "note": "Runtime helper: increments RSTK's loop index by 1, compares to the limit; pushes FALSE (continue — LOOP's compiled 0BRANCH will jump back) or TRUE (done) onto the data stack; on done, also drops the loop-control cells off RSTK." },
+    { "id": 55, "name": "(+LOOP)", "note": "Runtime helper: as (LOOP), but pops the increment off the data stack instead of using 1." },
+    { "id": 56, "name": "I", "note": "( -- n ) pushes the innermost DO loop's current index (peeks RSTK depth 0, doesn't pop)." },
+    { "id": 57, "name": "J", "note": "( -- n ) pushes the next-innermost DO loop's index (peeks RSTK depth 2 — past the innermost loop's own index+limit)." },
+
+    { "id": 58, "name": "(DOES>)", "note": "M8, CORE-VOCABULARY.md §7: what DOES> compiles a call to. Only meaningful inside a compiled word body; special-cased by the inner interpreter (needs the live ip register and performs an EXIT-like return-stack unwind), never dictionary-called directly. At runtime: rewrites LATEST's own Code Field to dodoesTokenId, stores the current ip (which — since this dispatch already advanced past its own slot — is exactly the address of the code following DOES> in the *defining* word) into LATEST's leading parameter-field cell (the does-pointer DODOES reads), then ip = rstack.pop() (unwinds back to whatever called the defining word)." },
+    { "id": 59, "name": "HERE", "note": "( -- addr ) current dictionary-growth pointer — already tracked internally since M2, just not callable from Forth until now." },
+    { "id": 60, "name": "LATEST", "note": "( -- addr ) address of the most recently defined dictionary entry — same situation as HERE. Needed by any dictionary-walking word (WORDS, §12)." },
+    { "id": 61, "name": ",", "note": "( x -- ) compiles x as the next cell at HERE, advancing HERE — the same primitive compileCell() (dictionary.ts) already does internally, now exposed to Forth source." },
+    { "id": 62, "name": "ALLOT", "note": "( n -- ) advances HERE by n bytes without writing anything — reserves raw space." },
+    { "id": 63, "name": "VARIABLE", "note": "( \"name\" -- ) NOT immediate (matches real ANS Forth) — at runtime, consumes the next word directly from whatever input is currently being interpreted (Machine.nextInputToken(), the same shared cursor ':' uses — works correctly even when VARIABLE is itself called from deep inside another word's execution, not just typed directly), creates a dovarTokenId-coded entry, and compiles *two* cells: a leading does-pointer slot every dovarTokenId word reserves (same as CREATE, inert until/unless DOES> is ever applied) initialized to 0, then the variable's actual storage, also initialized to 0. Executing the new word pushes the second cell's address — dovarTokenId's dispatch always skips the reserved leading cell, for both VARIABLE- and CREATE-made words." },
+    { "id": 64, "name": "CONSTANT", "note": "( x \"name\" -- ) pops x, consumes the next input word as the name (same mechanism as VARIABLE), creates a doconTokenId-coded entry storing x in its one parameter cell. Executing the new word pushes x — the value, not an address, which is the whole reason doconTokenId exists as a separate sentinel from dovarTokenId." },
+    { "id": 65, "name": "CREATE", "note": "( \"name\" -- ) consumes the next input word as the name (same mechanism as VARIABLE), creates a dovarTokenId-coded entry and compiles one leading cell (initialized to 0) — the does-pointer slot DODOES reads *if* DOES> is later applied to this word; permanently unused otherwise, the one fixed cost of not knowing in advance whether DOES> is coming. Executing the new word (before any DOES>) pushes the address *past* that reserved cell — wherever HERE happens to be right after CREATE returns, exactly where a following `,`/ALLOT starts writing." },
+    { "id": 66, "name": "DOES>", "immediate": true, "compileOnly": true, "note": "IMMEDIATE: compiles a single call to (DOES>). Everything else about the CREATE...DOES> mechanism lives in (DOES>)'s own runtime behavior and dodoesTokenId's dispatch, not here." },
+
+    { "id": 67, "name": "(SLIT)", "note": "M8, CORE-VOCABULARY.md §8: string-literal runtime helper, generalizing LIT's inline-literal mechanism (FORTH-ARCHITECTURE.md §5) to a byte run instead of one cell. Only meaningful inside a compiled word body; special-cased by the inner interpreter: reads the next cell as a byte length, pushes (ip, length) as the string's addr/len, then advances ip past the string bytes rounded up to the next cell boundary (alignCell) — never dictionary-called directly." },
+    { "id": 68, "name": "S\"", "immediate": true, "compileOnly": true, "note": "( \"string\" -- addr len ) IMMEDIATE, compile-time only for now: compiles (SLIT) + the string's byte length + the raw string bytes inline. **Scope cut, documented, not silently broken:** only supports a single token with no embedded spaces — real multi-word string parsing needs a char-level input cursor (classic Forth's WORD/>IN over a raw buffer) our token-array-based tokenizer doesn't have yet; deferred to a follow-up, flagged here rather than assumed. Throws if used while interpreting (STATE=0) rather than pretending to support it." },
+    { "id": 69, "name": "TYPE", "note": "( addr len -- ) prints len characters starting at addr through screen.emit(), looped." },
+    { "id": 70, "name": ".\"", "immediate": true, "compileOnly": true, "note": "( \"string\" -- ) IMMEDIATE: sugar for S\" ... TYPE — same scope cut as S\" (single token, no embedded spaces)." },
+
+    { "id": 71, "name": "2DUP", "note": "( a b -- a b a b ) M8, CORE-VOCABULARY.md §9: STANDARD-for-now, shipped as a primitive since there's no loader yet (§3)." },
+    { "id": 72, "name": "2DROP", "note": "( a b -- )" },
+    { "id": 73, "name": "-ROT", "note": "( a b c -- c a b )" },
+    { "id": 74, "name": "TUCK", "note": "( a b -- b a b )" },
+    { "id": 75, "name": "NIP", "note": "( a b -- b )" },
+    { "id": 76, "name": "?DUP", "note": "( x -- x x ) if x is nonzero, ( x -- x ) otherwise." },
+    { "id": 77, "name": "DEPTH", "note": "( -- n ) current data stack depth." },
+    { "id": 78, "name": "/MOD", "note": "( a b -- rem quot )" },
+    { "id": 79, "name": "NEGATE", "note": "( n -- -n )" },
+    { "id": 80, "name": "ABS", "note": "( n -- |n| )" },
+    { "id": 81, "name": "MIN", "note": "( a b -- min )" },
+    { "id": 82, "name": "MAX", "note": "( a b -- max )" },
+    { "id": 83, "name": "1+", "note": "( n -- n+1 )" },
+    { "id": 84, "name": "1-", "note": "( n -- n-1 )" },
+    { "id": 85, "name": "2+", "note": "( n -- n+2 )" },
+    { "id": 86, "name": "2-", "note": "( n -- n-2 )" },
+    { "id": 87, "name": "2*", "note": "( n -- n*2 )" },
+    { "id": 88, "name": "2/", "note": "( n -- n/2 ) arithmetic shift right by 1." },
+    { "id": 89, "name": "<>", "note": "( a b -- flag ) M1 shipped = but not its negation." },
+    { "id": 90, "name": "0<", "note": "( n -- flag )" },
+    { "id": 91, "name": "0>", "note": "( n -- flag )" },
+    { "id": 92, "name": "U<", "note": "( a b -- flag ) unsigned comparison." }
   ],
 
   "bankTags": {
