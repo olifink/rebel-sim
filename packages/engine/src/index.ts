@@ -1,5 +1,5 @@
 export { Arena, MAX_ARENA_SIZE } from './arena.js';
-export { BankTable } from './banks.js';
+export { BankTable, roundToSizeClass, BankSizeXS, BankSizeS, BankSizeM, BankSizeL, BankSizeXL, BankSizeXXL } from './banks.js';
 export type { Bank } from './banks.js';
 export { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 export { Sysvars } from './sysvars.js';
@@ -9,5 +9,7 @@ export { Screen, NULL_SCREEN_HAL } from './screen.js';
 export type { ScreenHal } from './screen.js';
 export { Keyboard } from './keyboard.js';
 export type { KeyEvent } from './keyboard.js';
+export { Storage, NULL_STORAGE_HAL, runStorageSelfTest } from './storage.js';
+export type { StorageHal } from './storage.js';
 export { Machine } from './repl.js';
 export type { MachineOptions } from './repl.js';

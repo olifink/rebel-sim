@@ -384,3 +384,102 @@ overwrite or block).
   `rm -rf` actually ran, don't trust a non-error exit code alone), then
   restart. Worth remembering for M5/M6 too if a dev-server session ever
   seems to be ignoring fresh engine changes.
+
+## M5 — Storage — **done** (2026-07-31)
+
+**Goal:** a storage layer that round-trips (`PORTING-WEB.md` §0's own bar
+for this milestone) — save/load a bank as a project asset file, backed by
+OPFS.
+
+**Built against the real Rebel-ROM reference** (`docs/STORAGE.md`,
+`src/storagemodule.h/.cpp`, `src/membank.h`) — and this milestone is the
+clearest example yet of why that matters: `FORTH-ARCHITECTURE.md` §7's
+own porting note for `hal_block_read`/`write` originally pointed at a
+classic-Forth raw-numbered-block model (an `SCRS` "screens" bank, still
+referenced in `CLAUDE.md`'s summary). The *actual* Rebel-ROM Phase 9
+implementation superseded that with something different: a
+**projects/carts** model — named, typed asset files
+(`/PROJECTS/<name>/asset.ext`, `/CARTS/<name>.CRT`) loaded whole into
+banks sized from the file's own length — which `FORTH-ARCHITECTURE.md`
+§7 itself already documents as "the single biggest divergence from the
+original spec, now resolved in favor of the shipped `docs/STORAGE.md`
+design." Built the real thing, not the superseded one: extension-based
+bank-tag tagging (`.DAT`↔`DATA`, `.SCR`↔`SCRN`, etc.), the 6-byte `RA`+tag
+asset header (short/missing read aborts a file's load; a magic/tag
+mismatch is a diagnostic hook only, not a load failure), file-size →
+size-class bank allocation (XS/S/M/L/XL/XXL, each 4x the previous), and
+`CBankTable`'s Phase 9 identity change — bank uniqueness keyed on `name`
+(distinct from `tag`) rather than `tag` alone, so multiple same-tag
+project-asset banks coexist, each individually addressable and each
+doubling as its own file's basename on save.
+
+**Retrofit to `banks.ts`, needed to support the above faithfully:**
+`Bank`'s `name` field (already present since M1, but previously required
+and checked for uniqueness *together* with `tag`) is now optional at
+`createBank()` — omit it and get an auto-generated 8-digit zero-padded
+serial, exactly like `CBankTable::GenerateSerialName` — and uniqueness is
+enforced on `name` alone, matching the real Phase 9 change. The six
+existing M1-M4 bank-creation calls (`SYSV`, `DSTK`, `RSTK`, `DICT`,
+`CHAR`, `KMAP`) all dropped their now-redundant explicit `'main'` name in
+favor of an auto-generated serial — they never needed a *stable* name,
+only M5's project assets do. Added `findBankByName` (the real
+"the-one-bank" lookup once tags repeat) and `roundToSizeClass()`.
+
+**Deliberate simplifications, each documented in `storage.ts`'s header
+comment:**
+- **No automatic DIRTY-flag tracking.** Real Rebel-ROM's "close only
+  writes back dirty banks" needs a write path to hook; Rebel-Sim has no
+  Phase-11-equivalent Forth words that write into a generic project asset
+  bank yet, so there's nothing to track. `saveAsset()` always persists
+  whatever bank you hand it — same deferral shape as M3's `hal_draw_*`.
+- **No `TStorageSysVars`-equivalent sysvar group populated.** Its real
+  fields (`nMounted`, `nDeviceSeen`) describe USB mass-storage
+  enumeration/mount polling, which has no honest browser equivalent — OPFS
+  is just available or not, no polling loop involved. Same reasoning as
+  M4 omitting `nKeyboardCount`. `STORAGE` stays reserved/empty, like
+  `FONT` since M3.
+- **Storage operations are plain `async` TypeScript methods on `Storage`,
+  never Forth primitives.** `FORTH-ARCHITECTURE.md` §7's porting note is
+  explicit that persistence happens "at project open/close time... not a
+  storage-device call on every read/write" — Forth only ever touches a
+  resident bank directly. This sidesteps a real architectural tension
+  cleanly: OPFS's synchronous access API only exists inside a Web Worker,
+  unavailable to Rebel-Sim's current main-thread interpreter (M1's
+  decision) — but since no Forth primitive needs to *be* async in this
+  design, that limitation never actually bites.
+
+**What shipped:**
+- `banks.ts` (retrofit, above) — `roundToSizeClass()`, `BankSizeXS`
+  through `BankSizeXXL`, optional `name`/serial auto-generation,
+  `findBankByName`.
+- `storage.ts` — `Storage` class: `openProject`/`saveAsset` (the
+  project-asset pipeline) and `loadCart`/`saveCart` (opaque flat-file
+  cart I/O). Takes a host-supplied `StorageHal` (`ensureDir`/`listFiles`/
+  `readFile`/`writeFile`) — same dependency-injection shape as
+  `ScreenHal` — defaulting to `NULL_STORAGE_HAL` so engine tests need no
+  real filesystem. Also exports `runStorageSelfTest()`, a standalone
+  function porting `CKernel::RunStorageSelfTest`'s real proof (write a
+  byte-pattern `DATA` bank, save it, reopen fresh, compare) almost
+  verbatim — using two throwaway internal arena/bank-tables (simulating
+  two separate "boots") rather than the caller's live `Machine` state, to
+  sidestep the same same-process bank-name-collision case
+  `docs/STORAGE.md` §8 already flags on real hardware.
+- `packages/app`: `opfs-storage-hal.ts` (`OpfsStorageHal` — translates
+  `Storage`'s POSIX-style absolute paths into `getDirectoryHandle`/
+  `getFileHandle`/`createWritable` calls against
+  `navigator.storage.getDirectory()`; `createOpfsStorageHalIfSupported()`
+  feature-detects and falls back to `undefined`, same null-guard pattern
+  as M3's canvas-context check). `app.ts` runs `runStorageSelfTest()`
+  once at startup and surfaces `PASS`/`FAILED`/`unavailable` in a small
+  status line — the live, visible proof mirroring `CKernel`'s own
+  serial-logged self-test, not just an engine unit test.
+- 17 new engine tests (`banks.test.ts`: size-class rounding, serial
+  auto-generation, name-only uniqueness across tags, multi-bank-per-tag
+  lookup; `storage.test.ts`: full round-trip via an in-memory `StorageHal`
+  fake, unrecognized-extension skip, short-file-abort skip, missing-project
+  returns empty, asset header bytes, unknown-tag save error, cart
+  round-trip, `runStorageSelfTest` pass/fail) — 61 engine tests total, all
+  passing; 3 app tests unaffected. Verified live in a headless browser:
+  `storage: OK` status after the real self-test round-trips through actual
+  OPFS, still `OK` after a full page reload with the prior run's file
+  already on disk, no console errors, REPL/keyboard regressions checked.

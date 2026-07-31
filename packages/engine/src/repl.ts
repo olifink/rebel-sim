@@ -15,6 +15,7 @@ import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
+import { Storage, StorageHal } from './storage.js';
 import { Inner } from './inner.js';
 import {
   abortDefinition,
@@ -53,6 +54,10 @@ export interface MachineOptions {
    * the CHAR bank / sysvar state is fully correct without one, which is
    * all engine-level tests need. */
   screenHal?: ScreenHal;
+  /** Host-supplied project/cart file I/O (OPFS, etc). Defaults to a
+   * no-op — openProject()/saveAsset() calls just do nothing useful,
+   * which is fine for engine-level tests that don't exercise storage. */
+  storageHal?: StorageHal;
 }
 
 export class Machine implements PrimitiveContext, DictionaryContext {
@@ -64,15 +69,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly dictBank: Bank;
   readonly screen: Screen;
   readonly keyboard: Keyboard;
+  readonly storage: Storage;
   private readonly inner: Inner;
 
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
     this.banks = new BankTable(this.arena);
-    const sysvBank = this.banks.createBank('SYSV', 'main', SYSV_BANK_SIZE);
-    const dstkBank = this.banks.createBank('DSTK', 'main', DSTK_BANK_SIZE);
-    const rstkBank = this.banks.createBank('RSTK', 'main', RSTK_BANK_SIZE);
-    this.dictBank = this.banks.createBank('DICT', 'main', DICT_BANK_SIZE);
+    const sysvBank = this.banks.createBank('SYSV', SYSV_BANK_SIZE);
+    const dstkBank = this.banks.createBank('DSTK', DSTK_BANK_SIZE);
+    const rstkBank = this.banks.createBank('RSTK', RSTK_BANK_SIZE);
+    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE);
 
     this.sysvars = new Sysvars(this.arena, sysvBank);
     this.sysvars.initHeader();
@@ -94,12 +100,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.sysvars.set('CORE', 'CURSOR-X', 0);
     this.sysvars.set('CORE', 'CURSOR-Y', 0);
 
-    const charBank = this.banks.createBank('CHAR', 'main', charCols * charRows);
+    const charBank = this.banks.createBank('CHAR', charCols * charRows);
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
     this.screen.cls();
 
-    const kmapBank = this.banks.createBank('KMAP', 'main', KMAP_BANK_SIZE);
+    const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE);
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
+
+    this.storage = new Storage(this.arena, this.banks, options.storageHal);
 
     this.stack = new DataStack(this.arena, dstkBank);
     this.rstack = new DataStack(this.arena, rstkBank);

@@ -8,6 +8,11 @@
     <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
   </div>
 
+  <div class="storage-bar">
+    <span class="stack-label">storage:</span>
+    <span class="storage-status">{{ storageStatus() }}</span>
+  </div>
+
   <form class="input-row" (submit)="$event.preventDefault(); submit()">
     <span class="prompt">&gt;</span>
     <input #input type="text" autocomplete="off" spellcheck="false" />

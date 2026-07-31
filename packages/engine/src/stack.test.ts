@@ -6,7 +6,7 @@ import { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 function makeStack(bankSize = 16) {
   const arena = new Arena(64);
   const banks = new BankTable(arena);
-  const bank = banks.createBank('DSTK', 'main', bankSize);
+  const bank = banks.createBank('DSTK', bankSize);
   return new DataStack(arena, bank);
 }
 

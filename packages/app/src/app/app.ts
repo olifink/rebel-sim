@@ -1,7 +1,8 @@
 import { Component, NgZone, signal, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
-import { Machine } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
+import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
 
 @Component({
   selector: 'app-root',
@@ -15,6 +16,7 @@ export class App implements AfterViewInit, OnDestroy {
 
   protected readonly log = signal<string>('Rebel-Sim\n');
   protected readonly stack = signal<number[]>([]);
+  protected readonly storageStatus = signal<string>('checking…');
 
   // Constructed in ngAfterViewInit — the engine's Screen.cls() (M3) runs
   // during Machine's own constructor and paints through the HAL
@@ -32,8 +34,28 @@ export class App implements AfterViewInit, OnDestroy {
     // backing (e.g. jsdom in unit tests) — degrade to the engine's
     // default no-op HAL rather than crashing; a real browser always has one.
     const ctx = this.screenRef.nativeElement.getContext('2d');
-    this.machine = new Machine({ screenHal: ctx ? new CanvasScreenHal(ctx) : undefined });
+    const storageHal = createOpfsStorageHalIfSupported();
+    this.machine = new Machine({
+      screenHal: ctx ? new CanvasScreenHal(ctx) : undefined,
+      storageHal,
+    });
     this.inputRef.nativeElement.focus();
+
+    // M5's end-to-end proof, mirroring CKernel::RunStorageSelfTest
+    // (docs/STORAGE.md §8): round-trip a synthetic asset through the real
+    // save/open path once at startup and surface PASS/FAIL, rather than
+    // only ever finding out storage is broken the first time a real
+    // project tries to use it.
+    if (storageHal) {
+      runStorageSelfTest(storageHal)
+        .then((passed) => this.zone.run(() => this.storageStatus.set(passed ? 'OK' : 'FAILED')))
+        .catch((err: unknown) => {
+          this.zone.run(() => this.storageStatus.set('ERROR'));
+          console.error('storage self-test threw', err);
+        });
+    } else {
+      this.storageStatus.set('unavailable (no OPFS)');
+    }
 
     // Raw keydown/keyup -> the engine's keyboard event queue (M4,
     // PORTING-WEB.md §4) — a separate channel from the REPL <input> below,

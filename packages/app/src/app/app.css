@@ -48,6 +48,13 @@
   margin-right: 8px;
 }
 
+.storage-bar {
+  width: 100%;
+  max-width: 640px;
+  opacity: 0.8;
+  font-size: 14px;
+}
+
 .input-row {
   width: 100%;
   max-width: 640px;

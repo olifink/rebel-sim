@@ -96,9 +96,31 @@ that points into a bank ever needs to be "fixed up" later). Think of it
 like partitioning a hard drive: the data stack lives in one partition,
 the dictionary in another, sysvars in a third, and so on.
 
-*Implementation:* `BankTable` (`banks.ts`) — `createBank(tag, name,
-size)` / `findBank(tag, name)`. Current banks (in creation order):
-`SYSV`, `DSTK`, `RSTK`, `DICT`, `CHAR` (§1.16). `SCRN` — the pixel
+Every bank has two separate identifiers, easy to conflate but serving
+different jobs: **`tag`** says *what kind* of bank this is (`DSTK`,
+`DICT`, `DATA`, ...) — tags repeat, e.g. a project can have several
+`DATA`-tagged banks at once. **`name`** says *which one* — always
+unique, auto-generated as an 8-digit zero-padded serial
+(`"00000000"`, `"00000001"`, ...) unless a caller supplies one
+explicitly. M1-M4's banks (`SYSV`, `DSTK`, ...) never needed a stable
+name, so they all use auto-generated serials; M5's project-asset banks
+(§1.22) *do* need one, since a bank's `name` doubles directly as its
+saved file's basename — no separate mapping between "what a bank is
+called" and "what file represents it."
+
+Bank sizes are drawn from a small fixed ladder of **size classes** — XS
+(4 KiB) through XXL (4 MiB), each 4x the previous — rather than
+arbitrary byte counts. Most banks (`SYSV`, `DSTK`, ...) just happen to
+be sized in code to match a class already; the ladder's real payoff is
+loading a file of unknown length (§1.22): round its size up to the
+smallest class that fits, and that's the bank's size — a lookup, not a
+calculation.
+
+*Implementation:* `BankTable` (`banks.ts`) — `createBank(tag, size,
+name?)` / `findBank(tag, name?)` / `findBankByName(name)` /
+`roundToSizeClass(bytes)`. Current banks (in creation order): `SYSV`,
+`DSTK`, `RSTK`, `DICT`, `CHAR` (§1.16), `KMAP` (§1.21), plus whatever a
+project's `openProject()` call creates (§1.22). `SCRN` — the pixel
 framebuffer — is deliberately **not** one of these; see §1.17.
 
 ### 1.6 Sysvars — the machine's "control panel"
@@ -495,6 +517,58 @@ same portable arena memory as everything else — swapping to a different
 physical layout (a non-US keyboard, say) is only ever a matter of
 loading different bytes into this bank, never a code change.
 
+### 1.22 Storage — projects, carts, and why there's no "read block N"
+
+Classic Forth systems store source code as fixed-size numbered "blocks"
+on disk, read/written by primitives like `BLOCK`/`UPDATE`. Rebel doesn't
+do this. Instead, storage is organized around two concrete, named
+things:
+
+- A **project** is a folder of *asset files* — one file per bank, each
+  file's contents an exact byte-for-byte dump of that bank. A project is
+  editable, in-progress material.
+- A **cart** is a single flat baked binary, meant only to be run, never
+  edited — the "insert a cartridge" experience. (Baking — how a cart's
+  contents actually get produced from an open project — isn't built yet;
+  it needs a compiler/assembler pass over the project that doesn't exist
+  until Forth itself can express it.)
+
+The key idea that makes this simpler than it sounds: **a bank's on-disk
+identity is just its own `name`+`tag`** (§1.5) — the file's basename is
+literally the bank's `name`, and its extension is looked up from the
+bank's `tag` (`DATA`→`.DAT`, `SCRN`→`.SCR`, ...). There's no separate
+"filename for this bank" concept to keep in sync; saving a bank and
+naming a bank are the same act.
+
+Loading a project means: list its folder, and for every file whose
+extension is recognized, create a new bank (sized by rounding the file's
+byte length up to the nearest size class, §1.5) named after the file's
+own basename, and copy the bytes in. An unrecognized extension, or a
+file too large for even the biggest size class, is skipped — not an
+error, just "not something this loads." Saving a bank writes the
+opposite direction: the bank's raw bytes, preceded by a small 6-byte
+sanity header (a two-byte magic plus the bank's own tag — a cheap,
+optional cross-check, not something a load actually depends on).
+
+**Why storage operations are plain async functions, not Forth
+primitives:** every other subsystem (screen, keyboard) is driven by
+synchronous primitives dispatched through the same `switch` as `DUP`/
+`+`. Storage deliberately isn't — persistence only ever happens at
+*project open/close* time, as an explicit, host-triggered operation, not
+on every individual memory read/write a Forth program makes. Once a
+project's banks are loaded, Forth code just reads and writes them
+directly, the same as any other bank — no storage-device call hides
+behind an ordinary `@`/`!`.
+
+*Implementation:* `storage.ts` — the `Storage` class (`openProject`,
+`saveAsset`, `loadCart`, `saveCart`), all `async`. Talks to a
+host-supplied `StorageHal` (`ensureDir`/`listFiles`/`readFile`/
+`writeFile`) rather than any browser API directly — in
+`packages/app`, `OpfsStorageHal` backs this with the Origin Private File
+System. `runStorageSelfTest()` is a standalone round-trip proof (write a
+byte-pattern bank, save it, reload it fresh, compare) that `app.ts` runs
+once at startup, surfaced as a small `storage: OK`/`FAILED` status line.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -572,6 +646,11 @@ exactly as it would be on the bare-metal target.
 | **Keyboard event queue** | A small, fixed-size, non-blocking ring buffer of `{usageCode, modifiers, char, pressed}` events. Drops new events when full rather than overwriting or blocking. Not arena/bank memory — host/module-owned, like the framebuffer. |
 | **`KEY?`** | Primitive: `-- flag` — TRUE if the keyboard queue has at least one event, without consuming it. |
 | **`KEY`** | Primitive: `-- char` — pops the oldest queued event's translated character. Non-blocking; errors if the queue is empty (blocking `KEY` is deferred — see §1.20). |
+| **Project** | A folder of asset files — one file per bank, each an exact byte dump. Editable, in-progress material (as opposed to a cart). |
+| **Cart** | A single flat baked binary, meant only to be run, not edited. Baking (producing one from a project) isn't built yet. |
+| **Asset file** | One project file, always `<bank-name>.<extension>` — the extension maps to the bank's `tag` (`DATA`↔`.DAT`, etc.), preceded by a small 6-byte sanity header. |
+| **Size class** | One of a fixed ladder of bank sizes (XS 4 KiB through XXL 4 MiB, each 4x the previous). A loaded file's bank size is looked up (round up to the smallest class that fits), not calculated. |
+| **`StorageHal`** | Rebel-Sim's HAL interface for project/cart file I/O: `ensureDir`/`listFiles`/`readFile`/`writeFile`. Backed by OPFS in `packages/app`; defaults to a no-op (`NULL_STORAGE_HAL`) so engine tests don't need a real filesystem. |
 
 ---
 
@@ -583,7 +662,7 @@ exactly as it would be on the bare-metal target.
 | **M2** | Real dictionary (§1.9), colon-definitions (§1.11), the DOCOL-threaded inner interpreter with a real return stack (§1.13), `IMMEDIATE` (§1.14). Primitives became real dictionary entries. | `dictionary.ts`, `inner.ts`, `repl.ts` (rewritten) |
 | **M3** | Screen: `CHAR` bank, the `ScreenHal` HAL boundary (§1.17), cursor/wrap-only output (§1.18), bitmap-font blitting (§1.19) — a real canvas-backed `CHAR!`/`CHAR@`/`EMIT`/`CR`/`CLS`/`AT-XY`/`INK`/`PAPER`. Sysvars grew `CORE`/`SCREEN` groups matching Rebel-ROM's real layout; M1's plain-text output buffer retired. Raw pixel drawing (`hal_draw_*`) deferred — nothing needs it yet. | `screen.ts`, `canvas-screen-hal.ts`, `font-zxspectrum.ts` |
 | **M4** | Keyboard: `KMAP` bank (§1.21), non-blocking event queue (§1.20), `KEY?`/`KEY` primitives, `KEYBOARD.MODIFIERS` sysvar. Browser `keydown`/`keyup` → raw usage codes → the queue, routed only when the REPL input box isn't focused. Blocking `KEY` deferred (no task-suspension model yet). | `keyboard.ts`, `browser-keymap.ts` |
-| M5 (planned) | Storage: OPFS-backed projects/carts. | — |
+| **M5** | Storage: the real projects/carts model (§1.22) — `Storage` class, `StorageHal`, OPFS backing, bank identity retrofit (`name` vs. `tag`, §1.5), size classes, `runStorageSelfTest()`. Superseded `FORTH-ARCHITECTURE.md`'s original raw-block/`SCRS` framing, per that doc's own resolved divergence note. | `storage.ts`, `opfs-storage-hal.ts` |
 | M6 (planned) | PWA packaging. | — |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
