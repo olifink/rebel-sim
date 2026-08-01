@@ -45,6 +45,18 @@ describe('Strings (M8, CORE-VOCABULARY.md §8)', () => {
     expect(() => m.interpret('S" oops"')).toThrow(/compile-only/);
   });
 
+  it('S"/." now support multi-word strings (DEVELOPING.md §2.4 fixed the old single-token-only limitation)', () => {
+    const m = new Machine();
+    m.interpret(': GREET S" hello world" TYPE ;');
+    m.interpret('GREET');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('hello world');
+
+    const m2 = new Machine();
+    m2.interpret(': HI ." hi there friend" ;');
+    m2.interpret('HI');
+    expect(m2.screen.readRowText(0).trimEnd()).toBe('hi there friend');
+  });
+
   it('a word compiled with S" can be called more than once, correctly, each time', () => {
     const m = new Machine();
     m.interpret(': GREET S" hi" TYPE ;');

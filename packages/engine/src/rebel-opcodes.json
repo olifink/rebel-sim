@@ -108,7 +108,9 @@
     { "id": 89, "name": "<>", "note": "( a b -- flag ) M1 shipped = but not its negation." },
     { "id": 90, "name": "0<", "note": "( n -- flag )" },
     { "id": 91, "name": "0>", "note": "( n -- flag )" },
-    { "id": 92, "name": "U<", "note": "( a b -- flag ) unsigned comparison." }
+    { "id": 92, "name": "U<", "note": "( a b -- flag ) unsigned comparison." },
+
+    { "id": 93, "name": "(", "immediate": true, "note": "DEVELOPING.md §2: comment. ( -- ) IMMEDIATE, not compile-only — while compiling, consumes input up to the matching ')' and retains it as compiled (SLIT)+2DROP inline data (a genuine no-op at runtime, Jupiter-Ace style, not discarded like classic Forth); while interpreting at the top level, consumes and discards it since there's no HERE to compile into." }
   ],
 
   "bankTags": {

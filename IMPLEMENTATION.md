@@ -996,6 +996,54 @@ fire for.
 
 ---
 
+### 1.32 Comments as compiled data (M11, `DEVELOPING.md` §2)
+
+Comments didn't exist at all before this — not "discarded," genuinely
+absent; `Machine.tokenizeAndRun` was (and still is) plain whitespace
+tokenization with no comment-awareness of its own. `(` is a new
+`IMMEDIATE` primitive (token 93) rather than special compiler syntax
+like `:`/`;` — it needs nothing `PrimitiveContext` doesn't already
+expose (`nextInputToken()`, `sysvars`, `arena`), so it's dispatched
+exactly like `IF`/`S"` already are: found via the ordinary dictionary
+lookup, and — because it's `immediate` — run immediately even while
+compiling (`repl.ts`'s `interpretCompiling`: `if (found.immediate) {
+yield* this.inner.executeXT(found.cfa); }`), the same mechanism every
+other compile-time word already relies on. Zero `inner.ts`/
+`dictionary.ts`/`repl.ts` changes as a result — this only grows the
+primitive table by one entry, it doesn't touch the threading model.
+
+`primitives.ts`'s old `compileInlineString` (`S"`/`."`'s helper) was
+split into `consumeQuotedText(ctx, closingChar)` — a real loop over
+`nextInputToken()` rather than the old single-token grab, rejoining
+with single spaces until a token ends with the closing delimiter — and
+`compileSlit(ctx, text)`, the unchanged `(SLIT)`-compiling step.
+`S"`/`."`'s call sites didn't change; multi-word string support
+(`S" hello world"`, previously broken) fell out for free. `(`'s new
+case: consume the text, and only if compiling (`STATE === -1`) compile
+`(SLIT)` + the text followed by a compiled `2DROP` call — a genuine
+runtime no-op (push, immediately drop) rather than a special
+"comment" instruction; while interpreting at the top level, the text
+is just consumed and discarded (nothing to compile into). Chosen over
+a dedicated `(COMMENT)` token specifically to avoid a new Code Field
+sentinel (`FORTH-ARCHITECTURE.md` §9 item 13) — reversible if `SEE`
+(§1.31's future companion, not yet built) ever finds the `(SLIT)`+
+`2DROP` pattern genuinely ambiguous against a real string a program
+discards on purpose.
+
+One real bug the tests caught: `( a note )`'s conventional spacing
+(unlike `S" ..."`'s glued closing quote) puts `)` as its own standalone
+token — the first cut of `consumeQuotedText` always added a separator
+space before appending that token's (now-empty) stripped remainder,
+producing a spurious trailing space. Caught by a test reading the
+compiled `(SLIT)` length cell directly rather than only checking the
+word still ran; fixed by skipping the separator when the remainder is
+empty.
+
+*Implementation:* `rebel-opcodes.json` (token 93, `(`), `primitives.ts`
+(`consumeQuotedText`, `compileSlit`, case 93).
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -1111,5 +1159,6 @@ exactly as it would be on the bare-metal target.
 | **M8** | Core vocabulary (§1.26-§1.29, 61 new primitives, tokens 32-92): memory access, return-stack words, control flow (`BRANCH`/`0BRANCH` + the `IF`/`BEGIN`/`DO`/... IMMEDIATE compiler words), `CREATE`/`DOES>` (two more Code Field sentinels, `DOVAR`/`DODOES`), strings (`S"`/`."`, scoped to single-token literals — a real tokenizer limitation, documented not hidden), and the remaining stack/arithmetic fillers. `FLAG_COMPILE_ONLY` (reserved since M2) finally enforced. `WORDS`/`VLIST` (`CORE-VOCABULARY.md` §12's own sufficiency check) runs correctly on nothing but this vocabulary, proving it's actually enough. | `primitives.ts`, `inner.ts`, `dictionary.ts`, `rebel-opcodes.json` |
 | **M9** | Remote channel / WebMCP (§1.30): `RemoteChannel`/`CompositeChannel` merge remote input with the keyboard into one shared session — no interpreter changes, exactly as M7's `Channel` design intended. No server: the page registers tools via the real WebMCP browser API (`document.modelContext`, Angular's `declareExperimentalWebMcpTool`) — `type` plus five reads over the M8 inspector panel's existing introspection. Initial design assumed a bespoke bridge server; corrected after review, see `PLAN.md`. | `channel.ts`, `repl.ts`, `app.ts` |
 | **M10** | Word-level breakpoints (§1.31): a third `StepSignal`/`StepStatus` value, `'breakpoint'`, reusing M7's exact suspend/resume shape — checked at the four "about to thread into a compiled word's body" sites in `inner.ts`. Breakpoints are a session-local `Set` on `Machine`, not a dictionary header flag (that byte's fully packed). Five new WebMCP tools; the one required app-side change was `App.startPump`'s `tick()`, which previously ignored `step()`'s return value entirely. | `inner.ts`, `repl.ts`, `app.ts` |
+| **M11** | Comments as compiled data (§1.32): a new `IMMEDIATE` primitive, `(` (token 93), reusing `S"`'s `(SLIT)` mechanism via a `consumeQuotedText`/`compileSlit` refactor that also fixed `S"`/`."`'s previously-undocumented single-word-only bug. Compiles to `(SLIT)`+`2DROP` (a genuine no-op) while compiling, discards while interpreting. Zero `inner.ts`/`dictionary.ts`/`repl.ts` changes — dispatched through the same `IMMEDIATE`-primitive path `IF`/`S"` already use. | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

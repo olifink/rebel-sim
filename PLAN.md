@@ -84,16 +84,22 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     value entirely, so without an explicit "stop pumping while paused"
     flag a breakpoint would resume on the very next animation frame
     rather than actually holding.
-12. **M11 — Comments compiled as retained data** *(planned, not yet
-    built)*: `DEVELOPING.md` §2 — `(` compiles a Jupiter-Ace-style inline
-    comment string instead of discarding it (comments don't exist at
-    all yet, confirmed by reading `tokenizeAndRun`'s plain whitespace
-    tokenizer), reusing `S"`'s existing `(SLIT)` compile mechanism
-    (generalized to a proper multi-token loop, fixing `S"`'s own
-    single-token limitation along the way) rather than adding a new
-    primitive — pure bootstrap Forth source, no `packages/engine`
-    changes. Prerequisite for the `SEE`/screen-editor work sketched
-    (not scoped) in `DEVELOPING.md` §3-§5.
+12. **M11 — Comments compiled as retained data** — **done**
+    (`DEVELOPING.md` §2.4): a new `IMMEDIATE` primitive, `(` (token 93
+    — every current word, including every `IMMEDIATE` one, is a native
+    primitive; there's no bootstrap-Forth-source loader yet, correcting
+    this entry's earlier framing), compiling a Jupiter-Ace-style inline
+    comment string instead of discarding it (comments didn't exist at
+    all before this, confirmed by reading `tokenizeAndRun`'s plain
+    whitespace tokenizer). Reuses `S"`'s existing `(SLIT)` compile
+    mechanism via a shared `consumeQuotedText`/`compileSlit` refactor
+    (fixing `S"`'s own single-token limitation for free — `S" hello
+    world"` didn't actually work before) followed by a compiled
+    `2DROP` call, making the comment a genuine no-op at runtime — zero
+    `inner.ts`/`dictionary.ts`/`repl.ts` changes, dispatched through
+    the same `IMMEDIATE`-primitive path `IF`/`S"` already use.
+    Prerequisite for the `SEE`/screen-editor work sketched (not scoped)
+    in `DEVELOPING.md` §3-§5. Detailed below.
 13. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
@@ -1416,3 +1422,68 @@ against the dev server via Chrome DevTools MCP, driving actual DOM
 clicks (`evaluate_script` + `.click()`) rather than only WebMCP tool
 calls — confirmed the click-to-arm/clear flow, the pause banner, and
 that clicking a non-breakable word (`DUP`) correctly does nothing.
+
+---
+
+## M11 — Comments compiled as retained data
+
+Built exactly per `DEVELOPING.md` §2.4 — zero deviation once the
+scoping pass had already corrected the original "pure bootstrap Forth
+source" framing (there is no bootstrap loader; `(` had to become a
+primitive like every other word).
+
+**Engine (`packages/engine/src`):** `rebel-opcodes.json` gained one new
+primitive, token 93, `(`, marked `immediate` (not `compileOnly` — it
+must also work loose at the prompt). `primitives.ts`'s
+`compileInlineString` (previously `S"`/`."`'s single-token-only
+helper) was split into two pieces: `consumeQuotedText(ctx,
+closingChar)` — a real loop over `nextInputToken()` accumulating text
+until a token ends with the closing delimiter, rejoining with single
+spaces — and `compileSlit(ctx, text)`, the unchanged `(SLIT)`-compiling
+step. `S"`/`."`'s call sites (`compileInlineString`) didn't change at
+all; multi-word support fell out of the refactor for free. New case
+93 for `(`: consume the text, and only if `STATE === -1` (compiling)
+compile `(SLIT)` + the text, followed by a compiled call to `2DROP` —
+making the comment a genuine no-op at runtime (push, immediately
+drop). While interpreting at the top level, the text is consumed and
+discarded, matching classic Forth's `( ... )` there (nothing to
+compile into). No `inner.ts`/`dictionary.ts`/`repl.ts` changes at all
+— confirmed directly by reading `interpretCompiling`
+(`if (found.immediate) { yield* this.inner.executeXT(found.cfa); }`,
+`repl.ts:478`), the exact mechanism `IF`/`BEGIN`/`S"` already use to
+run compile-time logic from inside a primitive.
+
+**A real bug caught while writing the tests, not just theorized:** the
+first `consumeQuotedText` cut had a trailing-space bug specific to
+`(`'s own conventional spacing — `S" hello"` glues its closing `"`
+directly onto the last content word (no space before it), but
+`( a note )` idiomatically has a space before the closing `)`, making
+`)` its own standalone token. The original loop unconditionally added
+a separator space before appending the (now-empty) stripped remainder
+of that standalone token, producing `"a note "` (7 chars) instead of
+`"a note"` (6) — caught by a test that reads the compiled `(SLIT)`
+length cell directly rather than only checking the word still ran.
+Fixed by only adding the separator when the stripped remainder is
+actually non-empty.
+
+**Tests:** `comments.test.ts` (new): zero runtime stack effect for a
+comment inside a definition; retention verified by reading the
+compiled `(SLIT)` cell/length/bytes directly (not just "it runs
+harmlessly" — the whole point is the text is genuinely still there);
+a multi-word comment; a comment immediately before `;`; a comment
+typed loose at the prompt (discarded, no stack/dictionary change); an
+unterminated comment throwing the same `nextInputToken()`
+input-exhausted error as any other case; a commented word called more
+than once. `strings.test.ts` gained a case confirming `S"`/`."` now
+support multi-word strings — 172 engine tests total, all passing (164
+before). No app changes needed; 10 app tests unaffected.
+
+**Verified live** via the Chrome DevTools MCP path proven out for
+M9/M10, against the local dev server: defined
+`: SQUARE ( n -- n*n ) DUP * ;`, ran `5 SQUARE .` → `25` with an empty
+stack after (comment genuinely zero-cost); typed a loose top-level
+comment and confirmed it was silently accepted with no `? unrecognized
+word` error; defined `: GREET S" hello world" TYPE ;` and confirmed
+`GREET` printed `hello world` — the multi-word `S"` fix working live,
+not just in tests; confirmed `(` shows up correctly in
+`read_dictionary`'s output alongside the other 92 boot primitives.

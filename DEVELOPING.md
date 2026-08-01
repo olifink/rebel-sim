@@ -3,11 +3,11 @@
 Status: **Living/exploratory document.** Unlike `DEBUGGING.md` (a single
 fully-scoped milestone), this tracks a connected set of ideas around
 *how source gets written, kept, and refined* — starting from one
-concrete, buildable-now piece (§2, comment retention) and opening
-outward into things that are real but genuinely not designed yet (§3-§5).
-Expect this to grow across several sessions as the screen editor and
-cart/baking infrastructure actually get built, rather than being
-written once and left alone.
+concrete, buildable-now piece (§2, comment retention — **done, M11**,
+see `PLAN.md`) and opening outward into things that are real but
+genuinely not designed yet (§3-§5). Expect this to grow across several
+sessions as the screen editor and cart/baking infrastructure actually
+get built, rather than being written once and left alone.
 
 ## 1. Motivation
 
@@ -108,15 +108,148 @@ build and immediately discard a string for its own unrelated reasons
 as a side effect). Option B has no such ambiguity: the token itself
 says "comment."
 
-Leaning towards **A now, B later if `SEE` output ever turns out
-ambiguous in practice** — consistent with this project's "build the
-minimum real mechanism, revisit once an actual need shows up"
-discipline (`CLAUDE.md`), and it means this ships with literally zero
-`packages/engine` primitive/opcode changes, only new bootstrap Forth
-source. Recorded here as a real, reversible decision, not a
-foreclosed one.
+**Decided for this pass: A** — consistent with this project's "build
+the minimum real mechanism, revisit once an actual need shows up"
+discipline (`CLAUDE.md`). Reversible (§2.3's B is still there if `SEE`
+output ever proves ambiguous in practice), recorded here as the
+concrete plan §2.4 implements, not a permanently closed question.
 
-### 2.4 `\` (rest-of-line comments) — open question, not decided
+**Correction to this section's earlier framing:** "zero `packages/engine`
+changes, only bootstrap Forth source" was imprecise once actually
+checked against the code. This repo has no bootstrap-Forth-source
+loading mechanism at all yet — `WORDS` (M8) was explicitly "type it in
+once M8 ships, no loader dependency," and *every* current word,
+including every `IMMEDIATE` one (`IF`/`BEGIN`/`S"`/`.`"`), is a native
+primitive in `primitives.ts` with a token id in `rebel-opcodes.json` —
+there's no other way for a word to exist yet. `(` will need to become
+one more such primitive. What *is* still accurate, and is the part
+that actually matters for "no engine change": Option A needs no new
+Code Field sentinel and no `inner.ts`/`threadFrom` special-casing —
+`(` compiles into ordinary `(SLIT)` + `2DROP` calls, dispatched exactly
+like any other compiled word, so the *threading model* genuinely
+doesn't change, only the primitive table grows by one entry (same
+tier of change M8's `S"`/`IF`/etc. already were, not a new mechanism).
+
+### 2.4 Concrete implementation plan
+
+Verified directly against `interpretExecuting`/`interpretCompiling`
+(`repl.ts`): an `IMMEDIATE` primitive found while compiling runs
+*right now* (`if (found.immediate) { yield* this.inner.executeXT(found.cfa); }`,
+`repl.ts:478`) — the exact mechanism `IF`/`BEGIN`/`S"` already use to
+manipulate compiler state (`HERE`/`STATE`) directly from inside a
+`primitives.ts` case via `PrimitiveContext`. `(` needs nothing
+different, so this is genuinely additive: one new token id, one new
+`primitives.ts` case, and — since `S"`/`."` already have the exact
+single-token bug §2.2 describes — a small refactor of the existing
+`compileInlineString` helper that fixes it for both as a side effect,
+not a second mechanism built alongside a first.
+
+**`rebel-opcodes.json`:** one new entry, next available id (currently
+92 primitives, so `93`):
+```json
+{ "id": 93, "name": "(", "immediate": true, "note": "comment: ( ... ) — retained as compiled (SLIT)+2DROP inline data while compiling (DEVELOPING.md §2), discarded (consumed and ignored) while interpreting at the top level" }
+```
+Not `compileOnly` — unlike `IF`/`BEGIN` (meaningless outside a
+definition), `(` must also work loose at the prompt (discard-only,
+§2.3's Option A already covers why).
+
+**`primitives.ts`:** split `compileInlineString` (`primitives.ts:74`)
+into two pieces — the token-consuming loop (§2.2's generalization,
+shared by `S"`/`."`/`(`) and the actual `(SLIT)`-compiling step (shared
+by all three, unchanged from today):
+```ts
+/** Consumes input tokens (nextInputToken) until one ends with
+ * closingChar, rejoining with single spaces — §2.2's known limitation:
+ * doesn't preserve original whitespace exactly, fine for now. Shared
+ * by S"/./( so all three get (and keep) the same multi-word support. */
+function consumeQuotedText(ctx: PrimitiveContext, closingChar: string): string {
+  let text = '';
+  while (true) {
+    const rawToken = ctx.nextInputToken();
+    if (rawToken.endsWith(closingChar)) {
+      return text + (text ? ' ' : '') + rawToken.slice(0, -1);
+    }
+    text += (text ? ' ' : '') + rawToken;
+  }
+}
+
+/** Compiles (SLIT) + length + text's bytes inline — the "LIT followed
+ * by inline data" convention LIT itself uses, generalized to a byte run. */
+function compileSlit(ctx: PrimitiveContext, text: string): void {
+  compileCell(ctx, findWord(ctx, '(SLIT)')!.cfa);
+  compileCell(ctx, text.length);
+  const start = ctx.sysvars.getHere();
+  for (let i = 0; i < text.length; i++) {
+    ctx.arena.writeByte(start + i, text.charCodeAt(i));
+  }
+  ctx.sysvars.setHere(alignCell(start + text.length));
+}
+
+function compileInlineString(ctx: PrimitiveContext): void {
+  if (ctx.sysvars.getState() !== -1) {
+    throw new Error('S"/." only work inside a colon-definition for now');
+  }
+  compileSlit(ctx, consumeQuotedText(ctx, '"'));
+}
+```
+`S"`/`."`'s existing cases (68/70) call `compileInlineString(ctx)`
+exactly as today — genuinely unchanged at the call site, multi-word
+support falls out of the refactor for free. New case for `(`:
+```ts
+case 93: { // ( ( -- ) IMMEDIATE: comment
+  const text = consumeQuotedText(ctx, ')');
+  if (ctx.sysvars.getState() === -1) {
+    compileSlit(ctx, text);
+    compileCell(ctx, findWord(ctx, '2DROP')!.cfa);
+  }
+  // else: interpreting at the top level — consumed and discarded,
+  // nothing to compile into, matches classic Forth's ( ... ) here.
+  break;
+}
+```
+
+**`inner.ts`/`dictionary.ts`/`repl.ts`: no changes.** `(` is discovered
+via the same `findWord`/dictionary-entry path every primitive already
+uses; nothing about tokenization, the outer loop, or the threading
+model needs to know `(` exists.
+
+### 2.5 Verification plan
+
+- A comment inside a definition compiles without corrupting what
+  follows it, and has zero runtime stack effect when the word is
+  called (`(SLIT)` pushes, `2DROP` immediately un-pushes).
+- A multi-word comment (spaces preserved via the token-rejoin) parses
+  and stores correctly — and, as a direct check on §2.4's refactor, a
+  multi-word `S"`/`."` string now works too (`S" hello world"`, a case
+  that threw/misparsed before this).
+- A comment immediately before `;` doesn't interfere with `;` correctly
+  closing the definition.
+- A comment typed loose at the prompt (interpreting, `STATE = 0`) is
+  silently discarded — no stack effect, no dictionary change, no error.
+- An unterminated comment (`(` with no matching `)` before input ends)
+  throws the same "expected a name, but the input ended" error
+  `nextInputToken()` already raises for any other exhausted-input case
+  — not a new error path to build.
+- Explicitly *not* tested (out of scope, see §2.6): nested `(` inside a
+  comment — classic Forth's `(` doesn't nest either, and this isn't a
+  new limitation being introduced.
+
+### 2.6 Explicit scope cuts for this pass
+
+- **No `\` (rest-of-line comments)** — still open, §2.7 (renumbered
+  from the previous §2.4) is unchanged by this plan.
+- **No nested `(`** — matches standard Forth; a `)` inside a comment's
+  text has no special meaning, the first `)` always closes it.
+- **No byte-exact whitespace preservation** — §2.2's already-documented
+  limitation, unchanged.
+- **No WebMCP/UI changes.** Comments aren't independently queryable by
+  anything yet (no `SEE`) — this pass only makes them *survive*
+  compilation, §3's `SEE` is the next milestone that would ever surface
+  them to a caller.
+- **No `SEE` itself** — §3 remains sketched, not designed, exactly as
+  before.
+
+### 2.7 `\` (rest-of-line comments) — open question, not decided
 
 Classic Forth's `\` comments out everything to the end of the current
 line — typically used for source-file bookkeeping (a screen's header

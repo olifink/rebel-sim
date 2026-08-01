@@ -66,20 +66,34 @@ function compileBranch(ctx: PrimitiveContext, name: string): number {
   return placeholderAddr;
 }
 
-/** Shared by S"/." (§8): consumes the next input token as a (no-
- * embedded-spaces) string, compiles (SLIT) + its byte length + the raw
- * bytes inline, padded to the next cell boundary — the same "LIT
- * followed by inline data" convention LIT itself uses, generalized from
- * one cell to a byte run. */
-function compileInlineString(ctx: PrimitiveContext): void {
-  if (ctx.sysvars.getState() !== -1) {
-    throw new Error('S"/." only work inside a colon-definition for now');
+/** Shared by S"/./( (§8, DEVELOPING.md §2.4): consumes input tokens via
+ * `nextInputToken()` until one ends with `closingChar`, rejoining with
+ * single spaces — a real multi-word string/comment, not just the
+ * single no-embedded-spaces token this used to be limited to. Doesn't
+ * preserve the original line's exact whitespace (tabs, doubled spaces)
+ * since tokenization already collapsed it before this ever runs —
+ * documented, not hidden (DEVELOPING.md §2.2). */
+function consumeQuotedText(ctx: PrimitiveContext, closingChar: string): string {
+  let text = '';
+  while (true) {
+    const rawToken = ctx.nextInputToken();
+    if (rawToken.endsWith(closingChar)) {
+      const last = rawToken.slice(0, -1);
+      // A standalone closing token (whitespace before it, e.g. Forth's
+      // conventional "( comment )" spacing) leaves `last` empty — don't
+      // add a spurious trailing separator space for it.
+      return text + (text && last ? ' ' : '') + last;
+    }
+    text += (text ? ' ' : '') + rawToken;
   }
-  const rawToken = ctx.nextInputToken();
-  if (!rawToken.endsWith('"')) {
-    throw new Error('S"/." expected the next word to end with a closing "');
-  }
-  const text = rawToken.slice(0, -1);
+}
+
+/** Compiles (SLIT) + `text`'s byte length + its raw bytes inline,
+ * padded to the next cell boundary — the same "LIT followed by inline
+ * data" convention LIT itself uses, generalized from one cell to a
+ * byte run. Shared by S"/./( (consumeQuotedText builds the text each
+ * one hands this). */
+function compileSlit(ctx: PrimitiveContext, text: string): void {
   compileCell(ctx, findWord(ctx, '(SLIT)')!.cfa);
   compileCell(ctx, text.length);
   const start = ctx.sysvars.getHere();
@@ -87,6 +101,16 @@ function compileInlineString(ctx: PrimitiveContext): void {
     ctx.arena.writeByte(start + i, text.charCodeAt(i));
   }
   ctx.sysvars.setHere(alignCell(start + text.length));
+}
+
+/** Shared by S"/." (§8): both are compile-time only (unlike `(`, which
+ * also has a discard-only interpreted-mode behavior — its own case
+ * below, not built on this). */
+function compileInlineString(ctx: PrimitiveContext): void {
+  if (ctx.sysvars.getState() !== -1) {
+    throw new Error('S"/." only work inside a colon-definition for now');
+  }
+  compileSlit(ctx, consumeQuotedText(ctx, '"'));
 }
 
 export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
@@ -576,6 +600,20 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const b = s.pop() >>> 0;
       const a = s.pop() >>> 0;
       s.push(a < b ? TRUE : FALSE);
+      break;
+    }
+
+    // --- DEVELOPING.md §2.4: comments, retained rather than discarded ---
+    case 93: { // ( ( -- ) IMMEDIATE
+      const text = consumeQuotedText(ctx, ')');
+      if (ctx.sysvars.getState() === -1) {
+        // Compiling: retain as compiled (SLIT)+2DROP inline data — a
+        // genuine runtime no-op (push, then immediately drop).
+        compileSlit(ctx, text);
+        compileCell(ctx, findWord(ctx, '2DROP')!.cfa);
+      }
+      // Interpreting at the top level: consumed and discarded above —
+      // there's no HERE to compile into, matches classic Forth here.
       break;
     }
 

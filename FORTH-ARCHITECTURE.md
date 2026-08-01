@@ -591,19 +591,19 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     already has. Rebel-ROM's own equivalent remains genuinely open
     until its real source is read for this specifically; not assumed to
     already have an answer.
-13. **[NEW]** Comment storage encoding (`DEVELOPING.md` §2.3) — open
-    between reusing `S"`'s existing `(SLIT)` compile mechanism plus a
-    trailing `2DROP` (zero new primitives, but a decompiler can't
+13. **[NEW]** Comment storage encoding (`DEVELOPING.md` §2.3-§2.4) —
+    **decided and shipped for Rebel-Sim, M11**: reuse `S"`'s existing
+    `(SLIT)` compile mechanism plus a trailing `2DROP`, via a new
+    `IMMEDIATE` primitive `(` (token 93) — not a dedicated `(COMMENT)`
+    token, since that plus the header's already-fully-packed flags byte
+    both point at "grow the primitive table by one ordinary entry," not
+    "add a new cross-target opcode." Reversible: a decompiler can't
     unambiguously tell "this is a comment" from "this program discards
-    a string for its own reasons" by pattern alone) vs. a dedicated
-    `(COMMENT)` primitive (unambiguous, costs a real opcode addition).
-    Leaning towards the reuse option first per this project's
-    minimum-mechanism-first discipline (`CLAUDE.md`); revisit if `SEE`
-    (`DEVELOPING.md` §3) output ever proves genuinely ambiguous in
-    practice. This is a Rebel-Sim/bootstrap-Forth-source decision, not
-    a cross-target opcode-table one, unless Option B is chosen — a new
-    primitive would need the same canonical-source-of-truth treatment
-    (§0) as any other token id.
+    a string for its own reasons" by pattern alone, so a dedicated
+    token remains the fallback if `SEE` (`DEVELOPING.md` §3) output
+    ever proves genuinely ambiguous in practice — same
+    canonical-source-of-truth treatment (§0) any new token id needs, if
+    it comes to that.
 
 ---
 
