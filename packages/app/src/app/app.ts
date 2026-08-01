@@ -92,7 +92,7 @@ export class App implements AfterViewInit, OnDestroy {
     private readonly injector: Injector,
   ) {}
 
-  ngAfterViewInit(): void {
+  async ngAfterViewInit(): Promise<void> {
     this.offscreen.width = FRAMEBUFFER_WIDTH;
     this.offscreen.height = FRAMEBUFFER_HEIGHT;
     // getContext('2d') can be null in environments with no real canvas
@@ -154,12 +154,45 @@ export class App implements AfterViewInit, OnDestroy {
       window.addEventListener('keyup', this.onKeyUp);
     });
 
+    // DEVELOPING.md §6: the system vocabulary (WORDS, SEE, ...) is
+    // plain Forth source, not native primitives — loaded once here,
+    // before the REPL starts accepting input, so it's available from
+    // the very first prompt. An interim host-text-file step, not the
+    // eventual portable-screens answer (§4).
+    await this.loadSystemVocabulary();
+
     // M7a: the outer loop lives entirely in the engine now — prompt,
     // ACCEPT a line onto the screen, interpret, repeat, forever. The app
     // shell's only job is to keep calling step() so it can make progress.
     this.zone.runOutsideAngular(() => {
       this.machine.startRepl();
       this.startPump();
+    });
+  }
+
+  // Fetched relative to <base href> — public/system.fth is copied to
+  // the build root by angular.json's assets glob, same as
+  // manifest.webmanifest/favicon.ico already are, so this resolves
+  // correctly under both local dev (base "/") and the GitHub Pages
+  // deployment (base "/rebel-sim/", set via --base-href at build
+  // time) — and is already offline-precached by the service worker
+  // for free, alongside those same assets. A colon-definition can span
+  // multiple interpret() calls just fine (STATE persists as a sysvar
+  // across them), so feeding one line at a time needs no special
+  // multi-line handling. Deliberately NOT wrapped in a try/catch the
+  // way registerWebMcpTools() is — a broken system vocabulary is a bug
+  // in *our* source, not a missing browser feature, and should fail
+  // loudly rather than silently boot without WORDS/SEE.
+  private async loadSystemVocabulary(): Promise<void> {
+    const response = await fetch('system.fth');
+    if (!response.ok) {
+      throw new Error(`failed to fetch system.fth: ${response.status} ${response.statusText}`);
+    }
+    const text = await response.text();
+    this.zone.runOutsideAngular(() => {
+      for (const line of text.split('\n')) {
+        this.machine.interpret(line);
+      }
     });
   }
 

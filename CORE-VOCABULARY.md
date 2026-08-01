@@ -262,6 +262,15 @@ listing) needs nothing beyond what's already scoped above, plus
 ;
 ```
 
+**Correction, M12** (`DEVELOPING.md` §6): `1F` above is a hex literal,
+but `BASE` defaults to 10 (decimal), where `1F` isn't a valid number at
+all — this was never actually run against a fresh Machine before now.
+The shipped version (`packages/app/public/system.fth`) uses `31` (`1F`'s
+decimal value) instead — same mask, same five low bits, no `BASE`
+juggling needed. Worth remembering generally: a worked example with a
+hex literal is only actually verified once it's run somewhere `BASE`
+is known, not just read.
+
 Note what *didn't* need adding: no `0<>`/comparison word (`WHILE` tests
 zero/nonzero directly, per §6), no dedicated `SPACE`/`BL` word (a literal
 `32` + `EMIT`, both already shipped, covers it — though those two are
@@ -270,12 +279,13 @@ elsewhere to be worth naming). And since `:`/`;` already work standalone
 at the prompt — M2's `SQUARE` example didn't need `LOAD` — `WORDS`
 doesn't either; type it in once M8 ships, no loader dependency.
 
-**Natural next step, not scoped here:** `SEE <word>` (decompile a
-definition back to source-ish form, `.see` in REI's own convention) is a
-bigger lift — it needs the reverse of what `WORDS` does: given a word's
-Parameter Field, look up which dictionary entry each stored XT belongs to
-(another chain walk per XT found), not just print a name. Worth doing
-once `WORDS` proves the chain-walk mechanics work, not before.
+**`SEE <word>` — done, M12** (`DEVELOPING.md` §3/§6): built exactly as
+anticipated here — the reverse of what `WORDS` does, given a word's
+Parameter Field, resolving each stored XT back to a dictionary entry
+name (`>CFA`/`XT-NAME` in `system.fth`). Scoped to `DOCOL`-coded
+(colon-definition) words for this pass; `CONSTANT`/`VARIABLE`/`DOES>`'d
+words and reconstructing `IF`/`THEN` structure from raw `BRANCH`/
+`0BRANCH` targets are explicitly deferred, not attempted.
 
 ## 13. Cross-Target Notes
 

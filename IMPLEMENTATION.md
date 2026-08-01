@@ -1044,6 +1044,75 @@ empty.
 
 ---
 
+### 1.33 System vocabulary: `WORDS`/`SEE` from `system.fth` (M12, `DEVELOPING.md` §6)
+
+The next phase past core (native primitives): words genuinely worth
+writing *in* Forth, kept in a plain host text file
+(`packages/app/public/system.fth`) loaded once at boot — an interim
+step before real portable screens/carts exist (`DEVELOPING.md` §4/§5).
+Loading is App-layer (`App.loadSystemVocabulary()`, `app.ts`), not
+engine-layer, per the framework-agnostic-engine rule — `fetch()`es the
+file relative to `<base href>` (same mechanism already serving the PWA
+manifest/icons, so it's offline-precached for free) and feeds it
+through `machine.interpret()` once per line before `startRepl()`. A
+colon-definition spanning multiple lines works with no special
+handling — `STATE` is a persistent sysvar, so a `:` left open at one
+`interpret()` call's end is picked up correctly by the next. Errors
+are deliberately not caught the way `registerWebMcpTools()` degrades
+gracefully — a broken system vocabulary is a bug in this repo's own
+source, not a missing browser feature.
+
+One new primitive, `'` (tick, token 94): `( -- xt )`, not `IMMEDIATE`
+— runs at *execution* time like `CREATE`, so `: SEE ' ... ;` correctly
+consumes *its caller's* next input word (`SEE FOO`) rather than its
+own compile-time input. Added because nothing in the existing
+vocabulary let Forth-level source resolve a typed name to an `xt` at
+runtime.
+
+`system.fth` itself: `WORDS` (`CORE-VOCABULARY.md` §12's own worked
+example, fixed — `1F AND` is a hex literal but `BASE` defaults to
+decimal, so `31` is used instead, a bug that had apparently never
+actually been run before now); `>CFA`/`XT-NAME` (the reverse of
+`WORDS`' own chain-walk — given an entry address, compute its Code
+Field address, or given a Code Field address, find the entry whose
+own `>CFA` matches it — one uniform walk covers primitives and
+user-defined words alike, since primitives are boot-installed
+dictionary entries too); five named constants for `LIT`/`EXIT`/
+`BRANCH`/`0BRANCH`/`(SLIT)`'s own `xt`s, captured once via `'` at load
+time; and `SEE` itself — a real decompiler walking a word's Parameter
+Field, printing each call by name or special-casing `LIT`/`(SLIT)`/
+`BRANCH`/`0BRANCH`, stopping at `EXIT`. Only `DOCOL`-coded words are
+supported; `CONSTANT`/`VARIABLE`/`DOES>`'d words print
+`(not supported)` rather than guessing wrong, and `BRANCH`/`0BRANCH`
+print a bare `<branch>` placeholder rather than reconstructing
+`IF`/`THEN` structure.
+
+**Two real bugs, found by running the code and checking `read_stack`,
+not by reading it:** `XT-NAME`'s first cut left the matched entry's
+own `entry-addr` on the stack before `EXIT` (a missing `DROP`) —
+silently corrupting every subsequent call, manifesting as an apparent
+infinite loop in `SEE` rather than an obvious stack error, diagnosed
+by isolating `XT-NAME` against an independent reference (`'`'s own
+`cfa` computation) rather than debugging the composed failure
+directly. And `." : "`/`." <branch> "` both silently lost their
+leading/trailing spaces entirely — a bare delimiter token carries no
+content for the string-rejoin logic (§1.32) to preserve — fixed by
+moving those spaces to explicit `32 EMIT` calls instead.
+
+**Confirms, live, a tradeoff `FORTH-ARCHITECTURE.md` §9 item 13 only
+predicted:** `SEE` on a word containing a `( comment )` shows
+`"this is a comment" 2DROP`, not clean `( ... )` syntax — the
+`(SLIT)`+`2DROP` comment encoding really is ambiguous against a
+genuine discarded string, exactly as anticipated when that encoding
+was chosen. Not fixed — first real evidence for a previously-only-
+theoretical tradeoff.
+
+*Implementation:* `packages/app/public/system.fth` (`WORDS`, `>CFA`,
+`XT-NAME`, `SEE`), `app.ts` (`loadSystemVocabulary`),
+`primitives.ts`/`rebel-opcodes.json` (token 94, `'`).
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -1160,5 +1229,6 @@ exactly as it would be on the bare-metal target.
 | **M9** | Remote channel / WebMCP (§1.30): `RemoteChannel`/`CompositeChannel` merge remote input with the keyboard into one shared session — no interpreter changes, exactly as M7's `Channel` design intended. No server: the page registers tools via the real WebMCP browser API (`document.modelContext`, Angular's `declareExperimentalWebMcpTool`) — `type` plus five reads over the M8 inspector panel's existing introspection. Initial design assumed a bespoke bridge server; corrected after review, see `PLAN.md`. | `channel.ts`, `repl.ts`, `app.ts` |
 | **M10** | Word-level breakpoints (§1.31): a third `StepSignal`/`StepStatus` value, `'breakpoint'`, reusing M7's exact suspend/resume shape — checked at the four "about to thread into a compiled word's body" sites in `inner.ts`. Breakpoints are a session-local `Set` on `Machine`, not a dictionary header flag (that byte's fully packed). Five new WebMCP tools; the one required app-side change was `App.startPump`'s `tick()`, which previously ignored `step()`'s return value entirely. | `inner.ts`, `repl.ts`, `app.ts` |
 | **M11** | Comments as compiled data (§1.32): a new `IMMEDIATE` primitive, `(` (token 93), reusing `S"`'s `(SLIT)` mechanism via a `consumeQuotedText`/`compileSlit` refactor that also fixed `S"`/`."`'s previously-undocumented single-word-only bug. Compiles to `(SLIT)`+`2DROP` (a genuine no-op) while compiling, discards while interpreting. Zero `inner.ts`/`dictionary.ts`/`repl.ts` changes — dispatched through the same `IMMEDIATE`-primitive path `IF`/`S"` already use. | `rebel-opcodes.json`, `primitives.ts` |
+| **M12** | System vocabulary (§1.33): `WORDS`/`SEE` loaded as genuine Forth source from `packages/app/public/system.fth` at boot, not native primitives — an interim step before real portable screens/carts exist. One new primitive, `'` (tick, token 94), needed since nothing let Forth-level code resolve a name to an `xt` at runtime before this. `SEE` is a real decompiler (`>CFA`/`XT-NAME` reverse-walk the dictionary); confirms live a tradeoff §1.32 only predicted (the comment encoding is ambiguous against a genuine discarded string). | `system.fth`, `app.ts`, `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

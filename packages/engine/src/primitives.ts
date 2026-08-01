@@ -617,6 +617,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    case 94: { // ' ( -- xt ) — DEVELOPING.md §6, see rebel-opcodes.json's note
+      const name = ctx.nextInputToken();
+      const found = findWord(ctx, name);
+      if (!found) {
+        throw new Error(`? unrecognized word: ${name}`);
+      }
+      s.push(found.cfa);
+      break;
+    }
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

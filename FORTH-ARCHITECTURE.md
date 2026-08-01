@@ -603,7 +603,11 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     token remains the fallback if `SEE` (`DEVELOPING.md` §3) output
     ever proves genuinely ambiguous in practice — same
     canonical-source-of-truth treatment (§0) any new token id needs, if
-    it comes to that.
+    it comes to that. **Confirmed, not just predicted, M12**: `SEE`
+    (shipped) on a word containing a comment shows
+    `"comment text" 2DROP`, not `( comment text )` — the predicted
+    ambiguity is real and now directly observable, though not yet
+    judged worth the dedicated-token fallback.
 
 ---
 

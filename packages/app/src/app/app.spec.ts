@@ -1,5 +1,17 @@
 import { TestBed } from '@angular/core/testing';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { App } from './app';
+
+// DEVELOPING.md §6: App.loadSystemVocabulary() fetches public/system.fth
+// at startup — jsdom/vitest has no real dev server behind it (a bare
+// relative fetch('system.fth') throws "Invalid URL" with no document
+// base to resolve against), so every test needs a stubbed fetch. Reads
+// the real file from disk rather than a canned string, so a test
+// failure here means the actual shipped file broke, not a stale fixture.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const systemFthText = readFileSync(join(__dirname, '../../public/system.fth'), 'utf-8');
 
 // M7a: the outer loop is driven entirely by a requestAnimationFrame pump
 // now (no more synchronous submit()) — poll for the expected DOM state
@@ -24,9 +36,17 @@ function press(code: string): void {
 
 describe('App', () => {
   beforeEach(async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(systemFthText, { status: 200 })),
+    );
     await TestBed.configureTestingModule({
       imports: [App],
     }).compileComponents();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('should create the app', () => {

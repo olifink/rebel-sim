@@ -100,7 +100,22 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     the same `IMMEDIATE`-primitive path `IF`/`S"` already use.
     Prerequisite for the `SEE`/screen-editor work sketched (not scoped)
     in `DEVELOPING.md` §3-§5. Detailed below.
-13. Later/open: multi-arena isolation, `hal_error`/exception model,
+13. **M12 — System vocabulary: `WORDS`/`SEE`, loaded from
+    `system.fth`** — **done** (`DEVELOPING.md` §3/§6): the app now
+    fetches `packages/app/public/system.fth` and feeds it through
+    `machine.interpret()` line by line before `startRepl()` — the
+    interim host-text-file step `DEVELOPING.md` §1 always meant to
+    reach before screens exist. `WORDS` (`CORE-VOCABULARY.md` §12's
+    own worked example, with one real fix — `1F AND` is a hex literal
+    but `BASE` defaults to decimal, so `31` is used instead) and `SEE`
+    (a real decompiler: `>CFA`/`XT-NAME` reverse-walk the dictionary,
+    `LIT`/`BRANCH`/`0BRANCH`/`(SLIT)` special-cased via named
+    constants captured at load time) both ship as genuine Forth
+    source, not native primitives. One new primitive was still needed
+    — `'` (tick, token 94) — since nothing let Forth-level code
+    resolve a typed name to an `xt` at runtime before this. Detailed
+    below.
+14. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -1487,3 +1502,139 @@ word` error; defined `: GREET S" hello world" TYPE ;` and confirmed
 `GREET` printed `hello world` — the multi-word `S"` fix working live,
 not just in tests; confirmed `(` shows up correctly in
 `read_dictionary`'s output alongside the other 92 boot primitives.
+
+---
+
+## M12 — System vocabulary: `WORDS`/`SEE`, loaded from `system.fth`
+
+The next phase after M11's comment retention, per direct discussion:
+as the vocabulary grows from core (native primitives) into system
+words genuinely worth writing *in* Forth, keep them a plain host text
+file loaded at boot — faster iteration than building the screen
+editor first, with a clear, named path to migrate onto real portable
+screens/cart saves later (`DEVELOPING.md` §4/§5) once that
+infrastructure exists.
+
+**Loading (`app.ts`):** `loadSystemVocabulary()` fetches
+`packages/app/public/system.fth` relative to `<base href>` — the same
+mechanism already serving the PWA manifest/icons, so this resolves
+correctly under both local dev and the GitHub Pages
+`--base-href /rebel-sim/` deploy, and is offline-precached by the
+service worker for free. Feeds the file through `machine.interpret()`
+once per line, before `startRepl()`. Deliberately **not**
+try/caught the way `registerWebMcpTools()` degrades gracefully — a
+broken system vocabulary is a bug in this repo's own source, not a
+missing browser feature, and should fail loudly. `async
+ngAfterViewInit()` — Angular accepts an async lifecycle hook natively.
+
+**`'` (tick, token 94, `rebel-opcodes.json`/`primitives.ts`):** a
+small but genuinely necessary primitive addition, discovered while
+designing `SEE` — nothing in the existing vocabulary let Forth-level
+source resolve a typed name to an `xt` at runtime (the closest thing,
+`CREATE`'s `nextInputToken()` usage, is baked into that one primitive
+specifically). `( -- xt )`, not `IMMEDIATE` — runs at *execution* time
+like `CREATE` does, so `: SEE ' ... ;` correctly consumes *its
+caller's* next input word (`SEE FOO`) rather than its own compile-time
+input, the same shared-cursor mechanism `CREATE` already relies on.
+
+**`system.fth` contents, all genuine Forth source, zero further
+engine changes:**
+- `WORDS` — `CORE-VOCABULARY.md` §12's own worked example, ported
+  in verbatim except one real, previously-undiscovered bug: that
+  doc's `1F AND` is a hex literal, but `BASE` defaults to 10
+  (decimal), where `1F` isn't a valid number at all — that worked
+  example was apparently never actually run against a fresh Machine
+  before now. Fixed with `31` (`1F`'s decimal value) instead.
+- `>CFA`/`XT-NAME` — the reverse of `WORDS`' own chain-walk: given a
+  dictionary entry address, compute its Code Field address
+  (`>CFA`); given a Code Field address (an `xt`), find and print the
+  entry whose own `>CFA` matches it (`XT-NAME`). No separate
+  primitive-vs-user-defined-word special case needed — primitives are
+  boot-installed as real dictionary entries too, so one uniform walk
+  covers both.
+- Five named constants (`LIT-XT`, `EXIT-XT`, `BRANCH-XT`,
+  `0BRANCH-XT`, `SLIT-XT`), captured once via `'` at load time —
+  `SEE`'s way of recognizing inline-data tokens without needing a
+  second dereference the way `inner.ts`'s own `threadFrom` does (a
+  plain call cell's value already *is* the target's `cfa`).
+- `SEE` — a real decompiler. Walks a word's Parameter Field, printing
+  each call by name (`XT-NAME`) or special-casing `LIT` (prints the
+  literal), `(SLIT)` (prints a quoted string), `BRANCH`/`0BRANCH`
+  (prints a bare `<branch>` placeholder — not full `IF`/`THEN`
+  reconstruction, out of scope for this pass), stopping at `EXIT`.
+  Only `DOCOL`-coded words are supported — `CONSTANT`/`VARIABLE`/
+  `DOES>`'d words print `(not supported)` rather than guessing wrong.
+
+**Two real bugs caught building this, both empirically — not by
+reading the code, by running it and checking `read_stack`, not just
+whether the printed output looked right:**
+1. `XT-NAME`'s first cut leaked the matched entry's own `entry-addr`
+   onto the data stack in its found-path (a missing `DROP` before
+   `EXIT`) — silently corrupting every subsequent call, which
+   manifested as an apparent infinite loop in `SEE` (`pfa` tracking
+   corrupted, endless `?` "not found" output) rather than an obvious
+   stack-depth error. Diagnosed by isolating `XT-NAME` alone against
+   an independent reference (`'`'s own native `cfa` computation),
+   not by debugging the composed failure directly.
+2. `." : "` and `." <branch> "` both silently lost their leading/
+   trailing spaces entirely, not just imprecisely — a bare delimiter
+   token (a lone `"` with nothing but whitespace around it) carries
+   no content for the string-rejoin logic to preserve. Fixed by
+   moving those spaces to explicit `32 EMIT` calls instead of
+   embedding them in the quoted string — `DEVELOPING.md` §2.2 now
+   documents this precisely for the next person writing
+   system-vocabulary source.
+
+**A real, previously-undocumented constraint surfaced along the
+way:** `Machine.interpret()` (used for loading `system.fth`) has no
+line-length limit, but the *interactive* path (typed at the on-screen
+REPL or via a WebMCP `type` call) goes through `ACCEPT`, capped at
+`TIB_BANK_SIZE` (128 bytes) — a longer line typed interactively gets
+silently truncated mid-token. Not a bug (`abortDefinition` correctly
+rolled back the resulting broken definition attempt, same recovery
+path an ordinary unrecognized-word error already uses) — just
+something to know when iterating on system-vocabulary words directly
+at the REPL before committing them to the file. `SEE`/`XT-NAME`'s
+definitions were built and tested in shorter chunks for exactly this
+reason.
+
+**Confirmed, not just predicted:** `FORTH-ARCHITECTURE.md` §9 item 13
+flagged that reusing `(SLIT)`+`2DROP` for M11's comments is ambiguous
+against a real string a program discards on purpose — `SEE` now
+demonstrates that concretely: `: ANNOTATED ( this is a comment ) 5 ;`
+decompiles as `: ANNOTATED "this is a comment" 2DROP 5 ;`, not clean
+`( ... )` syntax. Not fixed — recorded as the first real evidence for
+a tradeoff that was, until now, only theoretical.
+
+**Tests:** `app.spec.ts` mocks `fetch` to serve `system.fth`'s real
+content read straight off disk (`node:fs`), not a fabricated fixture
+— a test failure here means the actual shipped file broke. Needed
+`@types/node` as a devDependency, scoped to `tsconfig.spec.json` only
+(not the app's own build). No dedicated engine-level tests for
+`WORDS`/`SEE`'s own correctness — deliberately deferred; there's no
+established pattern yet in this repo for testing pure-Forth-source
+content, and forcing one into existence for two words wasn't judged
+worth it this pass. All 10 existing app tests continue to pass
+(`system.fth` loading successfully is already an implicit
+precondition of every one of them); 172 engine tests unaffected (no
+engine changes beyond the `'` primitive, which got its own coverage
+implicitly through nothing — genuinely untested at the engine level,
+consistent with the "defer Forth-level test patterns" call above,
+though `'`'s own primitive-level behavior is simple enough that this
+was a deliberate, considered gap, not an oversight).
+
+**Verified live**, entirely via the Chrome DevTools MCP path,
+redefining and re-testing each helper word in isolation
+(`>CFA`, then `XT-NAME`, then the five constants, then `SEE` itself)
+against the running REPL before composing the full thing — exactly
+how both real bugs above were actually found, not by reading the
+source and hoping. Final confirmation from a genuinely clean boot (no
+interactive typing, page reload only): `WORDS`/`SEE`/`>CFA`/
+`XT-NAME` all present in `read_dictionary`'s output straight from
+`system.fth`; `SEE SQUARE` → `: SQUARE DUP * ;`; `SEE FIVE` (a `LIT`
+case) → `: FIVE 5 ;`; `SEE GREET` (a `(SLIT)` case, `S" hi" TYPE`) →
+`: GREET "hi" TYPE ;`; `SEE ABSISH` (a `BRANCH` case, `IF`/`THEN`) →
+`: ABSISH DUP 0< <branch> NEGATE ;`; `SEE DUP` (a primitive) →
+`(not supported)`; `SEE >CFA` (self-consistency, a real 9-primitive
+word with a negative literal) → an exact match against its own
+source. Stack empty after every single one.

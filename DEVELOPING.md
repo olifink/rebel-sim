@@ -3,11 +3,14 @@
 Status: **Living/exploratory document.** Unlike `DEBUGGING.md` (a single
 fully-scoped milestone), this tracks a connected set of ideas around
 *how source gets written, kept, and refined* — starting from one
-concrete, buildable-now piece (§2, comment retention — **done, M11**,
-see `PLAN.md`) and opening outward into things that are real but
-genuinely not designed yet (§3-§5). Expect this to grow across several
-sessions as the screen editor and cart/baking infrastructure actually
-get built, rather than being written once and left alone.
+concrete, buildable-now piece (§2, comment retention — **done, M11**)
+and opening outward into things that are real but genuinely not
+designed yet. §3 (`SEE`) and §6 (the system-vocabulary loading
+mechanism it shipped alongside) are also **done, M12** — see `PLAN.md`
+for both. §4/§5 (screens, baking) remain future, blocked on
+infrastructure that doesn't exist yet. Expect this to grow across
+several sessions as that infrastructure actually gets built, rather
+than being written once and left alone.
 
 ## 1. Motivation
 
@@ -72,6 +75,20 @@ preserve the original whitespace (tabs, double spaces, etc.) inside a
 comment. Fine for now — nothing downstream (§3's `SEE`) needs
 byte-exact whitespace — but worth stating rather than silently
 discovering later.
+
+**Sharper than "imprecise," confirmed while building `SEE` (M12):**
+leading/trailing whitespace that isn't glued to a real content
+character isn't just normalized, it's lost entirely. `." : "` (meant
+to print a leading and trailing space around a colon) tokenizes to
+`:` and a bare `"` — the "content" of that closing token, once its
+delimiter is stripped, is empty, so there's nothing for the rejoin
+logic to preserve. The practical fix used throughout `system.fth`:
+don't put a space adjacent to the opening/closing delimiter inside a
+`."`/`S"`/`(` — emit it separately (`." :" 32 EMIT` rather than
+`." : "`). Not a bug to fix in the tokenizer for this pass (would need
+a genuinely different, raw-character-stream-based parser, a bigger
+lift than anything scoped here) — just a real, sharp edge to know
+about before writing more system-vocabulary source.
 
 ### 2.3 Storage: reuse `(SLIT)`, or add a dedicated token?
 
@@ -260,39 +277,70 @@ treatment as `(`, or stay genuinely discarded as a different, lesser
 kind of comment. Not resolved here — flagged so it isn't silently
 assumed either way.
 
-## 3. `SEE` — decompiling a definition (near-term, not yet designed in detail)
+## 3. `SEE` — decompiling a definition — done, M12 (see §6)
 
 `CORE-VOCABULARY.md` §12 already anticipated this: `WORDS` (shipped,
 M8) was explicitly framed as proving the dictionary chain-walk
 mechanics `SEE` would need, calling `SEE` itself "a bigger lift... worth
 doing once `WORDS` proves the chain-walk mechanics work" — that
-precondition is now met.
+precondition was met, and `SEE` shipped as Forth source in
+`packages/app/public/system.fth`, alongside the loading mechanism
+described in §6.
 
-The core mechanism, sketched but not fully designed: walk a word's
-Parameter Field cell by cell, same as `threadFrom` does at runtime, but
-read-only and printing instead of executing. Two cases per cell:
+The core mechanism, exactly as sketched: walk a word's Parameter Field
+cell by cell, same as `threadFrom` does at runtime, but read-only and
+printing instead of executing. Two cases per cell, both built:
 
 - **A call to another word** (a `DOCOL`/`DODOES`/primitive-coded XT):
-  resolve it back to a name. This doesn't need a separate lookup table —
-  primitives are boot-installed as real dictionary entries too
-  (`Machine`'s constructor calls `writeHeader` once per entry in
-  `rebel-opcodes.json`'s primitive list), so "given a CFA, find the
-  dictionary entry whose CFA matches it" is one uniform walk covering
-  both user-defined and primitive words, no primitive-vs-user-defined
-  special case needed at the `SEE` level.
-- **An inline-data token** (`LIT`, `BRANCH`/`0BRANCH`, `(SLIT)`, and
-  §2's comment encoding): needs the same special-casing `threadFrom`
-  itself already does to know how many trailing bytes/cells belong to
-  that token rather than being the next instruction — `SEE` is, in
-  effect, a read-only Forth-level reimplementation of `inner.ts`'s own
-  decode step.
+  resolved back to a name via `XT-NAME`, a reverse chain-walk — given
+  a CFA, find the dictionary entry whose own `>CFA` matches it. No
+  separate lookup table needed: primitives are boot-installed as real
+  dictionary entries too, so one uniform walk covers both user-defined
+  and primitive words.
+- **An inline-data token** (`LIT`, `BRANCH`/`0BRANCH`, `(SLIT)`):
+  special-cased via named constants captured at load time (`' LIT
+  CONSTANT LIT-XT`, etc.) — comparing a Parameter Field cell's *value*
+  directly against these (not a second dereference the way
+  `threadFrom` itself does — a plain-call cell's value already *is*
+  the target's `cfa`, so a direct address comparison is sufficient and
+  simpler at the Forth level).
 
-The real payoff tying this back to §1/§2: once comments are retained,
-`SEE` printing them back out inline is what actually closes the original
-loop — a decompiled word with its rationale still attached is worth
-bringing into a screen; one without is not obviously better than typing
-it fresh. Flagged as the next concrete milestone after §2 ships, not
-designed further here.
+**Real bugs caught building this, not just theorized:**
+- `XT-NAME`'s first cut leaked the matched entry's own `entry-addr`
+  onto the data stack in its found-path before `EXIT` — a genuinely
+  silent, session-corrupting bug (every subsequent call, including
+  `SEE`'s own loop calling `XT-NAME` repeatedly, inherited an extra
+  stray stack item), caught only by explicitly checking `read_stack`
+  rather than trusting that correct-looking printed output meant a
+  clean stack. Manifested as an apparent runaway/infinite loop in
+  `SEE` (corrupted `pfa` tracking, endless "not found" `?` output) —
+  diagnosed by isolating `XT-NAME` alone against a known-good
+  reference (`'`'s own native `cfa` computation) rather than debugging
+  the composed failure directly.
+- `." : "` and `." <branch> "` both silently lost their leading/
+  trailing spaces — not just imprecisely, but *entirely*, since a bare
+  delimiter token (` "` with nothing but whitespace around it) carries
+  no content for the rejoin logic to preserve (§2.2's addendum has the
+  full explanation). Fixed by moving those spaces to explicit `32
+  EMIT` calls instead of embedding them in the quoted string.
+
+**Confirmed, not just predicted:** `FORTH-ARCHITECTURE.md` §9 item 13
+flagged that Option A's `(SLIT)`+`2DROP` comment encoding is
+ambiguous against a real string a program discards on purpose — `SEE`
+on a word containing a `( comment )` now visibly demonstrates exactly
+that: `: ANNOTATED ( this is a comment ) 5 ;` decompiles as
+`: ANNOTATED "this is a comment" 2DROP 5 ;`, not clean `( ... )`
+syntax. Not fixed here — recorded as the first real evidence for that
+predicted tradeoff, still not registering as a problem worth a
+dedicated `(COMMENT)` token yet.
+
+**Explicit scope cuts, not yet done:** only `DOCOL`-coded (plain
+colon-definition) words are decompiled — `CONSTANT`/`VARIABLE`/
+`DOES>`'d words print `(not supported)` rather than guessing wrong.
+`BRANCH`/`0BRANCH` targets print as a bare `<branch>` placeholder,
+not reconstructed `IF`/`THEN`/`BEGIN`/`WHILE` source structure — a
+real decompile, not a polished one, matching this project's
+minimum-mechanism-first discipline throughout.
 
 ## 4. Bringing definitions into screens (future — blocked on infrastructure that doesn't exist yet)
 
@@ -324,3 +372,62 @@ that point, closer to a real "compacting" pass than a simple strip.
 Not designed here at all — flagged as a known future want, to be
 designed for real once baking itself is defined anywhere, which it
 currently isn't.
+
+## 6. System vocabulary source loading — done, M12
+
+The interim step §1 always meant to reach before screens (§4) exist:
+words that should live in Forth source rather than as native
+primitives — `WORDS`, `SEE` — loaded from a plain host text file,
+`packages/app/public/system.fth`, at app startup, rather than typed in
+by hand each session.
+
+**Loading is App-layer, not engine-layer**, per `CLAUDE.md`'s
+framework-agnostic-engine rule: `App.loadSystemVocabulary()`
+(`app.ts`) `fetch()`es the file (relative to `<base href>`, exactly
+like the PWA manifest/icons already are — resolves correctly under
+both local dev and the GitHub Pages `--base-href /rebel-sim/` deploy,
+and is offline-precached by the service worker for free alongside
+those same assets) and calls `machine.interpret(line)` once per line,
+before `startRepl()`. A colon-definition spanning multiple lines just
+works — `STATE` is a persistent sysvar, so a `:` left open at the end
+of one `interpret()` call is picked up correctly by the next. Errors
+are deliberately **not** caught the way `registerWebMcpTools()`
+degrades gracefully — a broken system vocabulary is a bug in *our*
+source, not a missing browser feature, and should fail loudly.
+
+**A real constraint discovered, not designed for in advance:**
+`Machine.interpret()` (used for loading) has no line-length limit —
+it operates directly on a JS string. The *interactive* path (typed at
+the on-screen REPL, or via a WebMCP `type` call) goes through
+`ACCEPT`, which is capped at `TIB_BANK_SIZE` (128 bytes) — a line
+typed interactively that exceeds that gets silently truncated
+mid-token by `ACCEPT` itself (not an engine bug — `abortDefinition`
+correctly rolls back the resulting broken colon-definition attempt,
+same recovery path a plain unrecognized-word error already uses).
+Relevant only to *interactively developing* system-vocabulary-style
+words at the REPL before committing them to the file — worth splitting
+a long definition across a few shorter typed lines while iterating,
+same way `system.fth` itself reads more clearly split across lines
+regardless.
+
+**Testing:** `app.spec.ts` mocks `fetch` to return the real file's
+content read straight off disk (`node:fs`, not a canned fixture
+string) rather than a fabricated stand-in, so a test failure here
+means the actual shipped file broke, not a stale copy of it — needed
+adding `@types/node` as an app-package devDependency (scoped to
+`tsconfig.spec.json` only, not the app's own build) purely for this.
+No dedicated engine-level tests for `WORDS`/`SEE`'s own Forth-level
+correctness — deliberately deferred (there's no established pattern
+yet for testing pure-Forth-source content in this repo, and forcing
+one now wasn't worth it for two words); verification instead leaned
+entirely on live interactive testing against the running REPL via the
+Chrome DevTools MCP path, redefining/re-testing each helper word in
+isolation before composing the full `SEE` — which is exactly how both
+real bugs above were actually found.
+
+*Implementation:* `packages/app/public/system.fth` (`WORDS`, `>CFA`,
+`XT-NAME`, the five `-XT` constants, `SEE`), `app.ts`
+(`loadSystemVocabulary`), `primitives.ts`/`rebel-opcodes.json` (token
+94, `'`/tick — needed once it became clear `SEE`/`WORDS` needed some
+way to resolve a typed name to an `xt` at runtime, which nothing in
+the existing vocabulary provided).
