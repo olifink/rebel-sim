@@ -13,9 +13,13 @@ interpret-time behavior) is open, not yet built — a genuine low-level
 Forth correctness gap, split off and kept after dropping a larger
 Canon Cat `tForth`-inspired exploration of interactive compile-only
 execution that turned out to belong at a higher (editor-UI) layer than
-this document is currently working at. Expect this to grow across
-several sessions as that infrastructure actually gets built, rather
-than being written once and left alone.
+this document is currently working at. §8 (`VOCABULARY`/`USE`) is also
+**done, M13** — a branching-chain mechanism needing one new primitive
+(`LATEST-ADDR`), otherwise pure Forth source, same M12 precedent —
+its own decluttering follow-up (§8.5) turned out to need a different
+tool than vocabularies entirely, `HIDE`, **done, M14**.
+Expect this to grow across several sessions as that infrastructure
+actually gets built, rather than being written once and left alone.
 
 ## 1. Motivation
 
@@ -477,3 +481,167 @@ of overwritten-on-next-use scratch text; this engine doesn't have one
 yet — worth deciding whether that's a small reserved scratch area (a
 new bank, or a corner of an existing one) before building this, not
 assumed.
+
+## 8. `VOCABULARY`/`USE` — multiple named dictionary chains — done, M13; decluttering follow-up done differently as `HIDE`, M14 (see `PLAN.md`)
+
+### 8.1 Motivation
+
+A concrete, already-*observed* pain point, not a hypothetical one:
+M12's own system-vocabulary tooling (`SEE`, `XT-NAME`, `>CFA`, the
+five `-XT` constants, `WORDS`, `'`) already shows up in every single
+`WORDS`/`read_dictionary` listing right alongside whatever the user
+defines next — visible in this session's own live-verification
+screenshots. As `system.fth` grows (`FORGET`, and whatever else lands
+there before the screen editor), this only gets noisier. Classic
+Forth's answer is `VOCABULARY`/`USE`: separate, named dictionary
+chains, switchable, so system tooling and project/user code don't
+have to share one flat namespace. This also matters for this
+project's own cart/project model directly — independently-loadable
+carts choosing their own internal helper-word names shouldn't be able
+to collide with system tooling or with each other.
+
+Scoped to the simpler classic model the request asked for — one
+"current chain" you switch with `USE`, not ANS Forth's fuller
+`WORDLIST`/`SEARCH-ORDER`/`ALSO`/`ONLY` stack (a separate current-vs-
+search-order split). Revisit only if a real need for multi-vocabulary
+*search order* (not just switching) shows up in practice.
+
+### 8.2 The real blocker, found by re-checking, not assumed — the same one `FORGET` hit
+
+`HERE`/`LATEST` (`primitives.ts` cases 59/60) are read-only from
+Forth: `s.push(ctx.sysvars.getHere())`/`getLatest()`, no write path,
+no raw address exposure a `!` could target. `VOCABULARY`/`USE`
+fundamentally need to *write* `LATEST` (swap which chain new
+definitions extend) — the exact same gap the (now-dropped) `FORGET`
+exploration hit.
+
+**Worth naming plainly: this is a departure from Forth tradition, not
+a deliberate design position being reconsidered here.** Real Forth
+systems typically implement `HERE`/`LATEST`/`STATE`/`BASE` as
+ordinary variables, directly `@`/`!`-able by any word — this engine
+chose dedicated read-only primitives instead (an M1/M2-era decision,
+apparently never revisited until a real need — this one — surfaced).
+
+### 8.3 One general fix, not a bespoke primitive per feature
+
+Rather than a native `setLatest()`-calling primitive built specifically
+for this (or, separately, for `FORGET`), expose the sysvar's own
+*cell address* — a new primitive, `LATEST-ADDR ( -- addr )`, reusing
+the same offset math `Sysvars`' own internal `fieldOffset('FORTH',
+'LATEST')` already computes — so ordinary `@`/`!` can manipulate it
+directly, exactly like any other memory cell. Unblocks
+`VOCABULARY`/`USE` as pure Forth source (matching M12's own
+`WORDS`/`SEE` precedent) rather than needing another native primitive
+addition. Scoped to just `LATEST-ADDR` for this feature specifically
+— not a blanket "expose every sysvar's address" — `HERE-ADDR` would
+be `FORGET`'s own concern if that gets picked back up, and
+`STATE-ADDR`/`BASE-ADDR` aren't needed for anything scoped so far;
+add only when a concrete need shows up, not preemptively.
+
+### 8.4 Mechanism — branching chains, not a search order (rejected alternative noted)
+
+**Considered and rejected: fully independent per-vocabulary chains
+with a multi-chain search order at lookup time** (closer to ANS
+Forth's model) — this would need `dictionary.ts`'s `findWord` itself
+to walk a short *list* of chains instead of one fixed `LATEST`-rooted
+walk, a real engine-level change, and the "how many vocabularies get
+searched, in what order" question is exactly the complexity the
+simpler request was explicitly trying to avoid.
+
+**What actually works, needing zero `dictionary.ts`/`findWord`
+changes at all:** each vocabulary is a *branch* off the dictionary
+chain at the point it's created, not an independent chain. A
+vocabulary word is a plain `CREATE`d cell holding its own remembered
+`LATEST` value — `VOCABULARY <name>` ≈ `CREATE <name> LATEST ,` (the
+value stored, not zero — it starts as a *continuation* of whatever
+chain was current, not empty). `USE <name>` swaps which chain
+`LATEST` (the live sysvar) currently extends, saving the outgoing
+chain's position back into *its own* cell first:
+
+```forth
+VARIABLE CURRENT-VOCAB
+
+: USE
+  ' 8 +                \ target vocab's own stored-latest cell address
+                        \ (past CREATE's reserved does-pointer cell —
+                        \ same +8 offset executeXT's own DOVAR
+                        \ dispatch already uses)
+  LATEST-ADDR @         ( target-addr current-latest )
+  CURRENT-VOCAB @ !     ( target-addr )        \ save outgoing chain's position
+  DUP @                 ( target-addr target-latest )
+  LATEST-ADDR !         ( target-addr )        \ LATEST := target's remembered chain
+  CURRENT-VOCAB !       ( )                    \ remember target as current
+;
+```
+
+Verified by hand, cell by cell, against this engine's actual `@ (
+addr -- x )`/`! ( x addr -- )` stack effects — not hand-waved. Needs
+`EXECUTE` for a cleaner `' <name> EXECUTE` form instead of the manual
+`8 +`, but `EXECUTE` doesn't exist yet either (checked, not assumed —
+94 primitives, none named `EXECUTE`) — a real, adjacent, generally
+useful primitive gap, same tier as `'` was for M12, but a separable
+concern from this one.
+
+**Why branching gets the actual goal (declutter/isolation) right,
+verified by tracing through it, not assumed:** switching to a
+*different* branch genuinely can't see words added to another one
+(each only remembers its own chain position) — but every branch still
+sees everything that existed *before* it split off, so `USE SYSTEM`
+doesn't lose access to `DUP`/`DROP`/core words the way a fully
+independent chain would. `WORDS` needs **zero changes** to become
+vocabulary-scoped for free — it already just walks from `LATEST`,
+which now means "whichever chain is currently active."
+
+### 8.5 A real sequencing dependency for `system.fth` — superseded, see `HIDE` (M14)
+
+This section originally sketched re-filing `SEE`/`XT-NAME`/`>CFA`/etc.
+into their own `SYSTEM` vocabulary as the decluttering follow-up.
+**That plan doesn't actually work, caught before writing any code
+for it:** branching chains (§8.4) only let a *later* vocabulary see
+an *earlier* one's contents, never the reverse — move `SEE` into
+`SYSTEM` and switch back to `FORTH` for normal use, and `SEE` becomes
+uncallable without an explicit `USE SYSTEM` first. Sequencing it the
+other way (`FORTH` branching *from* `SYSTEM`, inheriting visibility)
+doesn't help either, since "found by lookup" and "listed by `WORDS`"
+are the exact same chain-walk under this mechanism — there's no way
+to get one without the other with vocabularies alone.
+
+**What actually shipped instead, M14:** `HIDE`, reusing `FLAG_HIDDEN`
+— the same bit `findWord`/`WORDS` already skip for a colon-definition
+mid-compilation, applied permanently instead of temporarily. An
+already-compiled caller (`SEE`) is unaffected by hiding a word it
+calls, since compiled calls are raw addresses, not names re-resolved
+at call time. Pure Forth, zero engine changes, reusing `>CFA`/
+`XT-NAME`'s own reverse chain-walk shape. One real constraint that
+*is* still a sequencing dependency: every `HIDE` call has to happen
+after everything that still needs the target by name during its own
+compilation — for `>CFA`/`XT-NAME`/the `-XT` constants, that's after
+`SEE` itself, not right after each individual helper (a mistake the
+first draft made and testing caught immediately).
+
+`VOCABULARY`/`USE` remain exactly as designed for their own real use
+case — project/cart isolation — just not this one.
+
+### 8.6 Open questions
+
+- ~~**Root vocabulary naming/bootstrap.**~~ **Resolved, shipped:**
+  `FORTH` is the root vocabulary name; `CURRENT-VOCAB`'s initial value
+  is set via a small `system.fth` bootstrap step
+  (`VOCABULARY FORTH` `' FORTH 8 + CURRENT-VOCAB !`) right after
+  `VOCABULARY`/`USE` are defined — no engine-level help needed,
+  confirmed live.
+- **`FORGET` interaction:** if `FORGET` (part of the dropped Canon Cat
+  exploration, possibly revisited later on its own merits) removes a
+  word that some *other* vocabulary's branch point depends on being
+  there, what happens to that vocabulary's own chain integrity? Not
+  designed — worth a real pass once both features are seriously on
+  the table together, not assumed compatible by default.
+- **Nested/temporary `USE`:** classic Forth sometimes wants "use this
+  vocabulary for one definition, then restore the previous one" — not
+  scoped here; the base `USE` as designed and shipped is a plain,
+  non-nesting swap.
+- ~~**Re-filing `SEE`/`XT-NAME`/`>CFA`/the `-XT` constants into their
+  own `SYSTEM` vocabulary.**~~ **Resolved, differently than
+  expected, M14:** vocabularies turned out to be the wrong tool for
+  this specific goal — see §8.5's rewrite. `HIDE` solved it instead,
+  with zero connection to `VOCABULARY`/`USE` at all.

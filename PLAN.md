@@ -115,7 +115,34 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     — `'` (tick, token 94) — since nothing let Forth-level code
     resolve a typed name to an `xt` at runtime before this. Detailed
     below.
-14. Later/open: multi-arena isolation, `hal_error`/exception model,
+14. **M13 — `VOCABULARY`/`USE`: branching dictionary chains** —
+    **done** (`DEVELOPING.md` §8): one new primitive, `LATEST-ADDR`
+    (token 95, `( -- addr )`), exposing the `LATEST` sysvar's own
+    cell address so ordinary `@`/`!` can manipulate it — the same
+    gap the (dropped) `FORGET` exploration hit, fixed generally
+    rather than with a bespoke setter. `VOCABULARY`/`USE` themselves
+    are genuine Forth source in `system.fth`: each vocabulary is a
+    `CREATE`d cell that captures the *current* chain position at
+    creation time (a branch point, not an empty chain), so switching
+    into one never loses access to words that already existed —
+    zero `dictionary.ts`/`findWord` changes needed, `WORDS` becomes
+    vocabulary-scoped for free. Detailed below.
+15. **M14 — `HIDE`: decluttering `SEE`'s own support words** — **done**
+    (`DEVELOPING.md` §8.5's follow-up, resolved differently than
+    originally sketched there): re-filing `>CFA`/`XT-NAME`/the `-XT`
+    constants into a `SYSTEM` vocabulary turned out not to work —
+    branching chains only let a *later* vocabulary see an *earlier*
+    one, never the reverse, so `SEE` would become uncallable from
+    `FORTH` without an explicit `USE SYSTEM` first, and even the
+    other sequencing order doesn't separate "callable" from "listed
+    in `WORDS`," since they're the same chain-walk. `HIDE` (pure
+    Forth, zero engine changes — reuses `FLAG_HIDDEN`, the exact bit
+    `findWord`/`WORDS` already skip for a colon-definition
+    mid-compilation) is the right-sized tool instead: an
+    already-compiled caller like `SEE` is unaffected by hiding a word
+    it calls, since compiled calls are raw addresses, not names to
+    re-resolve. Detailed below.
+16. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -1638,3 +1665,174 @@ case) → `: FIVE 5 ;`; `SEE GREET` (a `(SLIT)` case, `S" hi" TYPE`) →
 `(not supported)`; `SEE >CFA` (self-consistency, a real 9-primitive
 word with a negative literal) → an exact match against its own
 source. Stack empty after every single one.
+
+---
+
+## M13 — `VOCABULARY`/`USE`: branching dictionary chains
+
+Built exactly per `DEVELOPING.md` §8's scoping pass — the branching-
+chain mechanism, `LATEST-ADDR` as the one general primitive addition,
+the rejected independent-chains-plus-search-order alternative all
+confirmed as designed, no surprises requiring a design change this
+time (M11/M12 both needed real design corrections mid-build; this one
+didn't).
+
+**Engine (`packages/engine/src`):** `Sysvars.fieldOffset` (previously
+private) made public — it already computed exactly the address
+`LATEST-ADDR` needs, via the same internal offset math every other
+sysvar accessor already uses, so no new computation was needed, only
+visibility. New primitive, token 95, `LATEST-ADDR ( -- addr )`:
+`s.push(ctx.sysvars.fieldOffset('FORTH', 'LATEST'))`. Two new engine
+tests (`dictionary.test.ts`) confirm `LATEST-ADDR @` matches what
+`LATEST` itself reports, and — the more important check — that
+writing through `LATEST-ADDR !` actually changes what `LATEST`
+subsequently reports, verified from both the TS accessor and a real
+Forth-level round-trip (`LATEST-ADDR @ LATEST =` → `-1`).
+
+**`system.fth`:** `VARIABLE CURRENT-VOCAB` (ordinary variable, no
+sysvar involvement); `VOCABULARY` (`LATEST CREATE ,` — note the
+order: `LATEST` must run *before* `CREATE`, since `CREATE` itself
+becomes the new `LATEST` the instant it links its own header in, so
+capturing the old value has to happen first, or a vocabulary would
+capture itself); `VOCABULARY FORTH` right after, capturing everything
+defined so far (core primitives through M12) as the root vocabulary,
+with `CURRENT-VOCAB` initialized to point at `FORTH`'s own cell;
+`USE` (swaps which chain `LATEST` extends, saving the outgoing
+chain's position back into its own remembered cell first, addressed
+via `' <name> 8 +` — the same offset `executeXT`'s own `DOVAR`
+dispatch already uses to reach a `CREATE`d word's actual data,
+skipping its Code Field and reserved does-pointer cell).
+
+**Confirms the branching-chain design's actual payoff, not just its
+mechanism:** `VOCABULARY TESTVOCAB`, `USE TESTVOCAB`, define a word —
+`read_dictionary` shows the new word plus everything that existed at
+the branch point (core + `WORDS`/`SEE`/etc.), but *not* anything from
+a sibling vocabulary. `USE FORTH` switches back — the new word
+disappears from `WORDS`/lookup entirely (confirmed both ways: it's
+gone from `read_dictionary`, and typing its name gives `? unrecognized
+word`), while the vocabulary word itself (`TESTVOCAB`) stays visible,
+correctly, since *it* was defined while `FORTH` was still active.
+Switching back to `TESTVOCAB` and calling the word again works
+immediately — chain position round-trips exactly. `SEE` composes with
+this with zero changes needed, since it only ever walks from whatever
+`LATEST` currently is.
+
+**No `dictionary.ts`/`findWord` changes at all** — confirmed, not just
+predicted: `WORDS` is completely unmodified from M12 and became
+vocabulary-scoped for free, since it already just walks from
+`LATEST`, which now means "whichever chain is currently active."
+
+**Tests:** 174 engine tests (2 new), 10 app tests unaffected (no app
+changes needed — `system.fth` growing is exactly what the M12 loading
+mechanism was built to absorb). No dedicated engine-level tests for
+`VOCABULARY`/`USE`'s own Forth-level correctness, same deliberate call
+as M12's `WORDS`/`SEE` — verified entirely live instead.
+
+**Verified live**, same Chrome DevTools MCP path as every milestone
+since M9, from a genuinely clean, file-only boot (page reload, no
+interactive redefinition): `VOCABULARY PROJECT`, `USE PROJECT`,
+`: HELPER 99 ;`, confirmed `HELPER` present in `read_dictionary`;
+`USE FORTH`, confirmed `HELPER` gone and `PROJECT` still present;
+switched back and confirmed round-trip correctness — all straight
+from the shipped `system.fth`, not redefined interactively first.
+
+**Not done this pass, flagged in `DEVELOPING.md` §8.5 as a deliberate
+follow-up, not an oversight:** actually re-filing `SEE`/`XT-NAME`/
+`>CFA`/the `-XT` constants into their own `SYSTEM` vocabulary (the
+concrete motivating use case from §8.1) needs reordering
+`system.fth`'s own load sequence — `VOCABULARY`/`USE` had to exist
+and be tested as a mechanism first.
+
+---
+
+## M14 — `HIDE`: decluttering `SEE`'s own support words
+
+The §8.5 follow-up, picked up immediately after M13 — and a real
+design correction along the way, not a straightforward execution of
+what was sketched.
+
+**The originally-planned `VOCABULARY`-based re-filing doesn't
+actually work for this goal, caught before writing any code, not
+after:** branching chains (M13's whole mechanism) only let a *later*
+vocabulary see an *earlier* one's contents, never the reverse. Move
+`SEE`/`>CFA`/`XT-NAME` into a `SYSTEM` vocabulary and switch back to
+`FORTH` for normal use, and `SEE` becomes uncallable
+(`? unrecognized word`) without an explicit `USE SYSTEM` first every
+time. Sequencing it the other way — `FORTH` branching *from*
+`SYSTEM`, inheriting visibility — doesn't help either: visibility for
+lookup and being listed by `WORDS` are the *same* underlying
+chain-walk under M13's design, so there's no way to make something
+callable-but-unlisted with vocabularies alone.
+
+**What actually fits: `HIDE`, reusing `FLAG_HIDDEN`** — the exact bit
+`findWord`/`listDictionaryEntries` already skip over for a
+colon-definition mid-compilation, applied here permanently instead of
+temporarily. An already-compiled caller is unaffected by hiding a
+word it calls: compiled calls are raw addresses baked in at compile
+time, not names re-resolved at call time — only *future* name lookup
+and `WORDS` listings change. Turns out to need **zero engine
+changes** — pure Forth, using only primitives that already existed
+(`LATEST`, `C@`, `C!`, `OR`, `>CFA`/`XT-NAME`'s own reverse chain-walk
+pattern, reused rather than duplicated conceptually):
+
+```forth
+: HIDE
+  ' >R LATEST
+  BEGIN DUP WHILE
+    DUP >CFA R@ =
+    IF 4 + DUP C@ 64 OR SWAP C! R> DROP EXIT THEN
+    @
+  REPEAT
+  DROP R> DROP
+;
+```
+
+**A real sequencing bug, caught by testing, not by re-reading the
+source:** `HIDE >CFA` can't run until *everything* that still needs
+to find `>CFA`/`XT-NAME`/the `-XT` constants by name during its own
+compilation has already been compiled — which means all the way
+through `SEE` itself, not right after each individual helper the way
+an earlier draft of this had it (`: >CFA ... ; HIDE`, immediately
+after each definition). `findWord` skips hidden entries during
+compilation too, so hiding `>CFA` before `XT-NAME` is defined breaks
+`XT-NAME`'s own compilation outright. Fixed by moving every `HIDE`
+call to after `SEE`'s closing `;`, once nothing later still needs any
+of them by name.
+
+**A second real bug, caught live, not by re-reading the source
+either:** a documentation-comment-only mistake, but a load-breaking
+one — `system.fth` itself has a standing rule (state in its own
+header comment, from M12) that `(` comments can't contain an embedded
+closing paren, since the tokenizer only checks whether a token *ends
+with* `)`, not whether parens are balanced. Two of the new comments
+explaining `HIDE` violated that rule (`bit (64) findWord/WORDS` and
+`case (project/cart isolation) once`) — each caused the actual
+comment to close early, leaking the next few words as real tokens for
+the interpreter to try to execute, throwing
+`? unrecognized word: findWord/WORDS` on page load. Caught via the
+browser console during live verification, not the type-checker or
+test suite (comments are invisible to both) — fixed by rewriting
+both without embedded parens, then rechecking every other comment in
+the file by hand for the same pattern before reloading again.
+
+**Verified live**, same Chrome DevTools MCP path as every milestone
+since M9: fresh reload after the fix loaded cleanly (no console
+error); `read_dictionary` confirmed all seven helpers
+(`>CFA`/`XT-NAME`/the five `-XT` constants) gone from the listing,
+while `SEE`/`WORDS`/`HIDE`/`VOCABULARY`/`USE`/`CURRENT-VOCAB`/`FORTH`
+all remained; `SEE SQUARE` still correctly decompiled
+`: SQUARE DUP * ;` despite calling now-hidden `XT-NAME` internally,
+stack empty afterward; `5 >CFA` correctly threw
+`? unrecognized word: >CFA`, confirming genuine hiding, not just
+delisting; M13's `VOCABULARY`/`USE` isolation behavior re-verified
+end to end with no regressions.
+
+**Tests:** 174 engine tests unaffected (no engine changes at all this
+milestone — the only genuine "engine change" tier gap identified,
+`EXECUTE`, was explicitly deferred: it would need real `inner.ts`
+special-casing to thread into an arbitrary runtime `xt` through the
+same suspend/resume-capable machinery `executeXT` itself uses, not a
+self-contained `primitives.ts` case, and nothing currently in scope
+actually needs it — `USE` already works without it). 10 app tests
+unaffected, `system.fth` growing being exactly what M12's loading
+mechanism was built to absorb.

@@ -40,7 +40,12 @@ export class Sysvars {
     this.arena.writeByte(base + 3, 0);
   }
 
-  private fieldOffset(group: GroupName, field: string): number {
+  /** DEVELOPING.md §8: the raw arena address of a sysvar cell — public
+   * so a primitive like LATEST-ADDR can expose it to Forth for direct
+   * @/! manipulation (VOCABULARY/USE), the same way real Forth systems
+   * usually treat HERE/LATEST/STATE/BASE as ordinary variables rather
+   * than read-only accessors. */
+  fieldOffset(group: GroupName, field: string): number {
     const g = opcodes.sysvarGroups[group] as {
       baseOffset: number;
       fields: Record<string, { offset: number }>;

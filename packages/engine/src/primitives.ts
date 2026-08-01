@@ -627,6 +627,10 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    case 95: // LATEST-ADDR ( -- addr ) — DEVELOPING.md §8, see rebel-opcodes.json's note
+      s.push(ctx.sysvars.fieldOffset('FORTH', 'LATEST'));
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

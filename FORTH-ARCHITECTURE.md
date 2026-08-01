@@ -623,6 +623,23 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     (`IF...THEN`/`DO...LOOP`) — was considered and dropped: that
     mechanism belongs at Canon Cat's actual layer, its document
     editor's "execute this block" UI, not this interpreter's.
+15. **[NEW]** `VOCABULARY`/`USE` — multiple named dictionary chains
+    (`DEVELOPING.md` §8) — **done, M13**. Same root blocker
+    as item 14 shared with the dropped `FORGET` exploration:
+    `HERE`/`LATEST` are read-only from Forth, a departure from Forth
+    tradition (real Forth systems usually expose these as ordinary
+    variables) this engine never revisited until now. Fix: one new
+    primitive, `LATEST-ADDR ( -- addr )`, exposing the sysvar's own
+    cell address so ordinary `@`/`!` can manipulate it — unblocks
+    `VOCABULARY`/`USE` as pure Forth source, same M12 precedent, no
+    other native primitive needed. Mechanism is branching dictionary
+    chains (each vocabulary remembers its own `LATEST` position,
+    starting as a continuation of whatever was current, not empty),
+    not an ANS-style independent-chains-plus-search-order model —
+    the latter was considered and rejected specifically because it
+    would need `dictionary.ts`'s `findWord` to search a list of
+    chains, a real engine change the simpler, requested model avoids
+    entirely.
 
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 

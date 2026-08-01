@@ -30,7 +30,12 @@
 ( SEE support, DEVELOPING.md section 3: decompiling a definition. )
 ( CORE-VOCABULARY.md section 12 itself flagged SEE as the natural )
 ( next step once WORDS proved the chain-walk mechanics work -- )
-( that precondition was met back in M8. )
+( that precondition was met back in M8. >CFA/XT-NAME/the -XT )
+( constants below are pure internal plumbing for SEE -- HIDden )
+( further down, once nothing later still needs to find them by )
+( name during its own compilation (SEE itself does, right up )
+( until its own closing semicolon, so hiding has to wait until )
+( after that, not happen inline right after each one). )
 
 ( >CFA entry-addr -- cfa: same header-layout math WORDS already )
 ( walks -- flags-byte low five bits are the name length, the )
@@ -94,4 +99,89 @@
   ELSE
     DROP ." (not supported)"
   THEN
+;
+
+( HIDE name -- marks an already-defined word hidden, using exactly )
+( the FLAG_HIDDEN bit, value 64, that findWord/WORDS already skip )
+( over for a colon-definition mid-compilation -- reused here for )
+( the same invisible-to-lookup-and-listing effect after the fact. )
+( Pure Forth, no engine change -- the same reverse chain-walk )
+( XT-NAME already does, given an xt, find the entry whose own )
+( >CFA matches it, just setting a flag instead of printing a name. )
+( Already-compiled callers are unaffected by hiding a word they )
+( call -- compiled calls are raw addresses, not names to )
+( re-resolve -- only future name lookup and WORDS listings change, )
+( which is exactly why this has to run after SEE, not inline right )
+( after each helper: SEE itself still needs to find XT-NAME and )
+( the -XT constants by name, right up until its own closing )
+( semicolon. )
+: HIDE
+  '
+  >R
+  LATEST
+  BEGIN
+    DUP
+  WHILE
+    DUP >CFA R@ =
+    IF
+      4 + DUP C@ 64 OR SWAP C!
+      R> DROP
+      EXIT
+    THEN
+    @
+  REPEAT
+  DROP R> DROP
+;
+
+( A VOCABULARY-based split was considered instead of HIDE and )
+( rejected: branching chains only let a *later* vocabulary see an )
+( *earlier* one, never the reverse, and visibility/WORDS-listing )
+( are the same underlying chain-walk -- there's no way to make )
+( something callable-but-unlisted with vocabularies alone. HIDE is )
+( the actual right-sized tool for this specific job -- VOCABULARY )
+( and USE stay reserved for their own real use case, project and )
+( cart isolation, once that's a concrete need, not this one. )
+HIDE >CFA
+HIDE XT-NAME
+HIDE LIT-XT
+HIDE EXIT-XT
+HIDE BRANCH-XT
+HIDE 0BRANCH-XT
+HIDE SLIT-XT
+
+( VOCABULARY/USE, DEVELOPING.md section 8: branching dictionary )
+( chains, not independent chains plus a search order -- each )
+( vocabulary remembers its own LATEST position, starting as a )
+( continuation of whatever chain was current, not empty, so )
+( switching into one never loses access to words that already )
+( existed before the branch point. )
+
+( Ordinary VARIABLE, not a sysvar -- just needs plain read/write, )
+( holding the address of whichever vocabulary's own cell USE )
+( should save the outgoing chain position back into next. )
+VARIABLE CURRENT-VOCAB
+
+( VOCABULARY name -- creates a new vocabulary, its own CREATEd )
+( cell capturing the CURRENT chain position at creation time, not )
+( zero. LATEST must run before CREATE: CREATE itself becomes the )
+( new LATEST the instant it links its own header in, so capturing )
+( the old value has to happen first. )
+: VOCABULARY LATEST CREATE , ;
+
+( Everything defined above this point becomes the root vocabulary. )
+VOCABULARY FORTH
+' FORTH 8 + CURRENT-VOCAB !
+
+( USE name -- switches which chain new definitions extend and )
+( lookups walk. Saves the outgoing chain's current position back )
+( into its own remembered cell, then loads the target's remembered )
+( position into LATEST itself. The +8 skips the target's Code )
+( Field and CREATE's reserved does-pointer cell -- the same offset )
+( executeXT's own DOVAR dispatch already uses to reach a CREATEd )
+( word's actual data. )
+: USE
+  ' 8 +
+  LATEST-ADDR @ CURRENT-VOCAB @ !
+  DUP @ LATEST-ADDR !
+  CURRENT-VOCAB !
 ;

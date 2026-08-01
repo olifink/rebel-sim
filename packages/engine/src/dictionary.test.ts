@@ -153,3 +153,27 @@ describe('listDictionaryEntries', () => {
     expect(entry?.breakable).toBe(true);
   });
 });
+
+describe('LATEST-ADDR (DEVELOPING.md §8, VOCABULARY/USE)', () => {
+  it('LATEST-ADDR @ reads the same value LATEST itself pushes', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    m.interpret('LATEST-ADDR @ LATEST =');
+    expect(m.stack.toArray()).toEqual([-1]);
+  });
+
+  it('writing through LATEST-ADDR actually changes what LATEST reports', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    const beforeLatest = m.sysvars.getLatest();
+    m.interpret(': FIVE 5 ;');
+    const afterLatest = m.sysvars.getLatest();
+    expect(afterLatest).not.toBe(beforeLatest);
+
+    m.interpret(`${beforeLatest} LATEST-ADDR !`);
+    expect(m.sysvars.getLatest()).toBe(beforeLatest);
+    // Confirmed from the Forth side too, not just the TS accessor.
+    m.interpret('LATEST .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe(String(beforeLatest));
+  });
+});

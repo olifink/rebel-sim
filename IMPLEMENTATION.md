@@ -1113,6 +1113,89 @@ theoretical tradeoff.
 
 ---
 
+### 1.34 `VOCABULARY`/`USE`: branching dictionary chains (M13, `DEVELOPING.md` §8)
+
+One new primitive, `LATEST-ADDR ( -- addr )` (token 95) — pushes the
+`LATEST` sysvar's own cell address (not its value; `LATEST` already
+gives that), via `Sysvars.fieldOffset` made public (it already
+computed exactly this, just had no external caller before). Fixes the
+same gap the dropped `FORGET` exploration hit — `HERE`/`LATEST` are
+read-only from Forth in this engine, unlike most real Forth systems,
+which usually expose them as ordinary variables — generally, via one
+address-exposing primitive, rather than a bespoke setter.
+
+`VOCABULARY`/`USE` themselves are pure Forth source in `system.fth`,
+no further engine changes. Mechanism: **branching chains, not
+independent chains with a search order.** A vocabulary is a `CREATE`d
+cell holding its own remembered `LATEST` position — `VOCABULARY name`
+is `LATEST CREATE ,` (note the order: `LATEST` must run *before*
+`CREATE`, since `CREATE` becomes the new `LATEST` itself the instant
+it links in, so the old value has to be captured first, or a
+vocabulary would capture itself). Critically, that captured value is
+whatever `LATEST` *was*, not zero — a vocabulary starts as a
+*continuation* of the chain that was current when it was created, not
+an empty one. `USE name` saves the outgoing chain's current position
+back into its own cell, then loads the target's remembered position
+into the live `LATEST` sysvar (via `LATEST-ADDR`), addressing the
+target's own cell with `' name 8 +` — the same `+8` past a `CREATE`d
+word's Code Field and reserved does-pointer cell that `executeXT`'s
+own `DOVAR` dispatch already uses.
+
+Because it's branching, not independent, switching into a vocabulary
+never loses access to words that already existed before the branch —
+`USE SYSTEM` doesn't lose `DUP`/`DROP`. And because `WORDS`/`findWord`
+were never touched — they already just walk from `LATEST`, unchanged
+since M8 — a vocabulary switch changes what they see *for free*: no
+`dictionary.ts` changes at all. **A fully independent-chains-with-
+search-order model (closer to ANS Forth) was considered and rejected**
+specifically because it would need `findWord` to walk a list of
+chains instead of one, real engine surface the simpler, requested
+model avoids entirely.
+
+Verified live from a genuinely clean, file-only boot: `VOCABULARY
+PROJECT`, `USE PROJECT`, define a word — visible via `read_dictionary`
+alongside everything that existed at the branch point, not anything
+from a sibling vocabulary; `USE FORTH` — the new word disappears from
+both listing *and* lookup (`? unrecognized word`), while `PROJECT`
+itself (defined before the branch) stays visible; switching back
+round-trips exactly.
+
+*Implementation:* `sysvars.ts` (`fieldOffset` made public),
+`primitives.ts`/`rebel-opcodes.json` (token 95, `LATEST-ADDR`),
+`packages/app/public/system.fth` (`CURRENT-VOCAB`, `VOCABULARY`,
+`FORTH`, `USE`).
+
+---
+
+### 1.35 `HIDE`: decluttering `SEE`'s own support words (M14, `DEVELOPING.md` §8.5)
+
+The `VOCABULARY`-based re-filing §8.5 originally sketched doesn't
+work: branching chains (§1.34) only let a *later* vocabulary see an
+*earlier* one, never the reverse, and "found by lookup" and "listed
+by `WORDS`" are the same chain-walk — no way to get one without the
+other under that mechanism. `HIDE` fits instead, reusing
+`FLAG_HIDDEN` — the exact bit `findWord`/`listDictionaryEntries`
+already skip for a colon-definition mid-compilation, applied here
+permanently. An already-compiled caller is unaffected by hiding a
+word it calls, since compiled calls are raw addresses, not names
+re-resolved at call time. Zero engine changes — pure Forth, reusing
+`>CFA`/`XT-NAME`'s own reverse chain-walk shape (given an `xt`, find
+the entry whose own `>CFA` matches it) to set a flag instead of
+printing a name.
+
+**A real sequencing constraint:** every `HIDE` call has to happen
+after *everything* that still needs to find the target by name during
+its own compilation has already been compiled — for `>CFA`/`XT-NAME`/
+the `-XT` constants, that means after `SEE` itself, not immediately
+after each individual helper, since `findWord` skips hidden entries
+during compilation too and `SEE`'s own body needs to find all of them
+by name right up until its closing `;`.
+
+*Implementation:* `packages/app/public/system.fth` (`HIDE`, and the
+seven `HIDE <name>` calls after `SEE`). No engine changes.
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -1230,5 +1313,7 @@ exactly as it would be on the bare-metal target.
 | **M10** | Word-level breakpoints (§1.31): a third `StepSignal`/`StepStatus` value, `'breakpoint'`, reusing M7's exact suspend/resume shape — checked at the four "about to thread into a compiled word's body" sites in `inner.ts`. Breakpoints are a session-local `Set` on `Machine`, not a dictionary header flag (that byte's fully packed). Five new WebMCP tools; the one required app-side change was `App.startPump`'s `tick()`, which previously ignored `step()`'s return value entirely. | `inner.ts`, `repl.ts`, `app.ts` |
 | **M11** | Comments as compiled data (§1.32): a new `IMMEDIATE` primitive, `(` (token 93), reusing `S"`'s `(SLIT)` mechanism via a `consumeQuotedText`/`compileSlit` refactor that also fixed `S"`/`."`'s previously-undocumented single-word-only bug. Compiles to `(SLIT)`+`2DROP` (a genuine no-op) while compiling, discards while interpreting. Zero `inner.ts`/`dictionary.ts`/`repl.ts` changes — dispatched through the same `IMMEDIATE`-primitive path `IF`/`S"` already use. | `rebel-opcodes.json`, `primitives.ts` |
 | **M12** | System vocabulary (§1.33): `WORDS`/`SEE` loaded as genuine Forth source from `packages/app/public/system.fth` at boot, not native primitives — an interim step before real portable screens/carts exist. One new primitive, `'` (tick, token 94), needed since nothing let Forth-level code resolve a name to an `xt` at runtime before this. `SEE` is a real decompiler (`>CFA`/`XT-NAME` reverse-walk the dictionary); confirms live a tradeoff §1.32 only predicted (the comment encoding is ambiguous against a genuine discarded string). | `system.fth`, `app.ts`, `rebel-opcodes.json`, `primitives.ts` |
+| **M13** | `VOCABULARY`/`USE` (§1.34): branching dictionary chains, not independent chains with a search order — a vocabulary is a `CREATE`d cell capturing the *current* `LATEST` position (a branch point, not empty) when created; `USE` swaps which chain `LATEST` extends. One new primitive, `LATEST-ADDR` (token 95), exposing the sysvar's own cell address so ordinary `@`/`!` can manipulate it — the same gap the dropped `FORGET` exploration hit. Zero `dictionary.ts`/`findWord` changes — `WORDS` becomes vocabulary-scoped for free. | `sysvars.ts`, `rebel-opcodes.json`, `primitives.ts`, `system.fth` |
+| **M14** | `HIDE` (§1.35): decluttering `SEE`'s own support words (`>CFA`/`XT-NAME`/the `-XT` constants) from `WORDS`. The `VOCABULARY`-based plan §8.5 originally sketched doesn't actually work — branching only lets a *later* vocabulary see an *earlier* one, and visibility/listing are the same chain-walk. `HIDE` reuses `FLAG_HIDDEN` instead, permanently, pure Forth, zero engine changes. Every `HIDE` call has to wait until after `SEE` itself, not right after each helper, since `SEE`'s own compilation still needs to find them by name. | `system.fth` only |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
