@@ -578,6 +578,18 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     that, not via anything this repo runs. See `PLAN.md`'s M9 section
     for what was initially assumed (a bespoke relay server) and why
     that was wrong.
+12. **[NEW]** Breakpoint/debugging suspend-resume model — scoped for
+    Rebel-Sim (tentatively M10) in `DEBUGGING.md`: word-level
+    breakpoints via a third `StepSignal` (`'breakpoint'`) alongside the
+    existing `'progress'`/`'blocked'` yields M7's generator-based inner
+    interpreter already uses for blocking `KEY`. The suspend/resume
+    *mechanism* (a JS generator yield) is Rebel-Sim-specific; what
+    Rebel-ROM's Phase-11-equivalent debugging support would need is the
+    same *behavioral contract* — pause before a compiled word's body
+    runs, resume with stack/return-stack/IP fully intact — built on
+    whatever cooperative-suspension mechanism that execution loop
+    already has. Genuinely open until Rebel-ROM's real source is read
+    for this specifically; not assumed to already have an answer.
 
 ---
 

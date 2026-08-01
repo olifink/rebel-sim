@@ -74,7 +74,17 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `define_word`/`trace_execution` tools needed, a plain `type()` plus
     reads over the M8 inspector panel's introspection surface covers it
     (Forth's homoiconic). Detailed below.
-11. Later/open: multi-arena isolation, `hal_error`/exception model,
+11. **M10 — Breakpoints/debugging** *(planned, not yet built)*:
+    word-level breakpoints built on a third `StepSignal`
+    (`'breakpoint'`) alongside M7's existing `'progress'`/`'blocked'`
+    generator yields, plus the WebMCP tools to drive them
+    (`debug_set_breakpoint`/`debug_continue`/etc.). Full design in
+    `DEBUGGING.md`, including the one easy-to-miss required change:
+    `App.startPump`'s `tick()` currently ignores `step()`'s return
+    value entirely, so without an explicit "stop pumping while paused"
+    flag a breakpoint would resume on the very next animation frame
+    rather than actually holding.
+12. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
