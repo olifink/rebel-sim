@@ -590,6 +590,19 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     whatever cooperative-suspension mechanism that execution loop
     already has. Genuinely open until Rebel-ROM's real source is read
     for this specifically; not assumed to already have an answer.
+13. **[NEW]** Comment storage encoding (`DEVELOPING.md` §2.3) — open
+    between reusing `S"`'s existing `(SLIT)` compile mechanism plus a
+    trailing `2DROP` (zero new primitives, but a decompiler can't
+    unambiguously tell "this is a comment" from "this program discards
+    a string for its own reasons" by pattern alone) vs. a dedicated
+    `(COMMENT)` primitive (unambiguous, costs a real opcode addition).
+    Leaning towards the reuse option first per this project's
+    minimum-mechanism-first discipline (`CLAUDE.md`); revisit if `SEE`
+    (`DEVELOPING.md` §3) output ever proves genuinely ambiguous in
+    practice. This is a Rebel-Sim/bootstrap-Forth-source decision, not
+    a cross-target opcode-table one, unless Option B is chosen — a new
+    primitive would need the same canonical-source-of-truth treatment
+    (§0) as any other token id.
 
 ---
 

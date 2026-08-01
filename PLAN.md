@@ -84,7 +84,17 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     value entirely, so without an explicit "stop pumping while paused"
     flag a breakpoint would resume on the very next animation frame
     rather than actually holding.
-12. Later/open: multi-arena isolation, `hal_error`/exception model,
+12. **M11 — Comments compiled as retained data** *(planned, not yet
+    built)*: `DEVELOPING.md` §2 — `(` compiles a Jupiter-Ace-style inline
+    comment string instead of discarding it (comments don't exist at
+    all yet, confirmed by reading `tokenizeAndRun`'s plain whitespace
+    tokenizer), reusing `S"`'s existing `(SLIT)` compile mechanism
+    (generalized to a proper multi-token loop, fixing `S"`'s own
+    single-token limitation along the way) rather than adding a new
+    primitive — pure bootstrap Forth source, no `packages/engine`
+    changes. Prerequisite for the `SEE`/screen-editor work sketched
+    (not scoped) in `DEVELOPING.md` §3-§5.
+13. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
