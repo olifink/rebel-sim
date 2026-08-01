@@ -892,10 +892,21 @@ exactly the introspection surface the M8 inspector panel already
 exposes — no new engine-level read methods needed for M9 at all.
 Registration is wrapped defensively against both a synchronous throw
 and an async `Promise` rejection, since WebMCP is gated behind
-`chrome://flags/#enable-webmcp-testing` as of this writing and the app
+`chrome://flags/#enable-webmcp-testing` even on Chrome 150 and the app
 must keep booting normally without it (verified: `document.modelContext`
 absent → zero console errors, same degrade-gracefully contract already
 established for OPFS storage).
+
+Verified fully end-to-end via the Chrome DevTools MCP server against
+the deployed GitHub Pages build: with the flag enabled,
+`list_webmcp_tools` returns all six registered tools, and calling
+`type` through the real tool path (not a direct `RemoteChannel.push()`
+bypass) drives the REPL and shows up via `read_screen` exactly as
+expected. Also confirmed the shared-session merge works in the
+human→agent direction, not just agent→human: text typed at the
+physical keyboard and text sent via the `type` tool both land in the
+same console output, interleaved, with neither displacing the other —
+`CompositeChannel` behaving exactly as designed (§ above).
 
 *Implementation:* `channel.ts` (`RemoteChannel`, `CompositeChannel`),
 `repl.ts` (`MachineOptions.remoteChannel`), `app.ts`

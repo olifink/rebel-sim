@@ -1227,24 +1227,49 @@ instantiation) rather than a shared loop, with the try/catch
 boilerplate factored into the small `safeRegisterWebMcpTool` helper
 instead.
 
-**Verified live in the browser:** `document.modelContext` was not
-present in the Chrome instance available for testing (Chrome 150,
-without the WebMCP testing flag enabled, and browser-internal
-`chrome://` pages aren't reachable through the automation tooling used
-this session) — so the actual `declareExperimentalWebMcpTool`-to-agent
-path couldn't be exercised end-to-end today. What *was* verified
-directly: the app boots with zero console errors when
-`document.modelContext` is absent (graceful degradation confirmed);
-and, bypassing only the registration call itself,
-`remoteChannel.push('2 3 + .\n')` correctly typed, executed, and
-printed `5` on the framebuffer exactly as a real `type` tool call
-would, immediately followed by physical keyboard input (`7 DUP .`)
-proving `CompositeChannel` genuinely merges both sources into the same
-live session rather than one displacing the other. The one piece not
-directly observed end-to-end is Angular's own `declareExperimentalWebMcpTool`
-plumbing in a browser that actually has `document.modelContext` —
-that's Angular's tested code, not this repo's, and the app-side wiring
-around it (what *is* this repo's code) is what got verified.
+**Verified live in the browser (updated after this session's earlier
+attempt):** the first attempt used the `claude-in-chrome` extension,
+which can't navigate `chrome://` pages, so the WebMCP testing flag
+couldn't be enabled and `document.modelContext` was absent —
+verification stopped at bypassing registration and driving
+`remoteChannel` directly (see below). A follow-up session using the
+**Chrome DevTools MCP server** (`chrome-devtools` — a different tool,
+launched against a real Chrome instance via
+`--remote-debugging-port`) *can* reach `chrome://flags`, and closed
+the gap completely:
+
+1. Navigated to the deployed GitHub Pages build
+   (`https://olifink.github.io/rebel-sim/`) — `list_webmcp_tools`
+   initially returned none, because `document.modelContext` genuinely
+   doesn't exist yet without the flag (confirmed via
+   `evaluate_script`), even on Chrome 150.
+2. Enabled `chrome://flags/#enable-webmcp-testing` (and
+   `#devtools-webmcp-support`) and relaunched Chrome.
+3. Reloaded the app — `list_webmcp_tools` now returned all six tools
+   with their real names/descriptions/schemas, registered by the
+   app's own `declareExperimentalWebMcpTool` calls, no workaround.
+4. Called `execute_webmcp_tool("type", {"text": "2 3 + .\n"})`, then
+   `read_screen` — confirmed `5` printed on the framebuffer via the
+   *actual* WebMCP tool path end-to-end, not the `remoteChannel.push()`
+   bypass used previously.
+5. Confirmed `read_stack`/`read_dictionary`/`read_banks` all return
+   correct live data.
+6. Confirmed the shared-session merge from the human side too: typed
+   `: hello 5 8 * 2 + . ;` and `hello` directly at the keyboard in the
+   browser window, then called `read_screen` again and saw both the
+   agent-typed and human-typed lines interleaved in one console —
+   `CompositeChannel` genuinely shares one live session in both
+   directions, exactly as designed.
+
+Net result: every piece of M9, including the one gap the original
+verification pass couldn't close (Angular's `declareExperimentalWebMcpTool`
+plumbing talking to a real `document.modelContext`), is now confirmed
+working against the deployed build via a real MCP client. Caveat worth
+keeping: this required the `chrome://flags/#enable-webmcp-testing` flag
+even on Chrome 150 — native, unflagged support wasn't actually present
+at that version despite earlier research suggesting Chrome 149+ ships
+it by default. Treat "native support" claims for fast-moving web
+platform features as flag-gated until directly observed otherwise.
 
 **Tests:** `channel.test.ts` gained cases for `RemoteChannel` (FIFO
 order, empty-queue `-1`, accumulation across multiple `push()` calls)
@@ -1255,13 +1280,17 @@ total, all passing; 8 app tests unaffected (`app.spec.ts`'s
 keyboard-driven test staying green is what confirms `CompositeChannel`
 didn't regress the M7a on-screen REPL flow).
 
-**Consuming this today is explicitly out of this repo's scope.** As of
-this writing, no mainstream MCP client — including the `claude-in-chrome`
-extension — discovers or calls page-registered WebMCP tools natively
-yet. The practical path is a generic, page-agnostic bridge (a browser
-extension plus the community `webmcp-server` npm package registered as
-a stdio MCP server) that works against *any* WebMCP-enabled page, not
-something Rebel-Sim vendors or depends on. This milestone's job was
-making Rebel-Sim correctly WebMCP-enabled per the real spec; how a
-given client reaches it is that client's concern, and gets easier over
-time as native support and agent-side discovery both mature.
+**Consuming this today is still not this repo's job to build, but it is
+now confirmed reachable.** The `claude-in-chrome` extension still can't
+discover or call page-registered WebMCP tools natively (and can't
+reach `chrome://flags` to enable the testing flag in the first place).
+The **Chrome DevTools MCP server** (`chrome-devtools`, a separate,
+general-purpose tool attaching to any Chrome instance via
+`--remote-debugging-port`) does support WebMCP directly —
+`list_webmcp_tools`/`execute_webmcp_tool` — and was used to verify this
+milestone end-to-end above, once `chrome://flags/#enable-webmcp-testing`
+was enabled. That's still a one-time, user-side browser/tooling setup
+step, not anything Rebel-Sim vendors or depends on — it works against
+*any* WebMCP-enabled page. This milestone's job was making Rebel-Sim
+correctly WebMCP-enabled per the real spec; that job is now verified
+done against a real client, not just plausible in theory.
