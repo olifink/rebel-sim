@@ -914,6 +914,75 @@ same console output, interleaved, with neither displacing the other —
 
 ---
 
+### 1.31 Word-level breakpoints (M10, `DEBUGGING.md`)
+
+A third `StepSignal` value, `'breakpoint'`, added alongside M7's
+`'progress'`/`'blocked'` — the exact same suspend/resume shape blocking
+`KEY` already uses, reused rather than parallel-built. `Inner` holds a
+`breakpoints: Set<number>` of `cfa` addresses (constructor-injected,
+owned and mutated by `Machine`, `Inner` only ever reads it) and a
+private `checkBreakpoint(xt)` generator: `if (this.breakpoints.has(xt))
+yield 'breakpoint';` — deliberately not an if/else wrapping the rest of
+the call. Resuming (another `.next()`) continues right past the yield
+into the normal entry logic, so no "already broke here" flag is
+needed, and a recursive or looped call to the same word correctly
+re-breaks on every entry, not just the first.
+
+Checked at four sites, all "about to thread into a compiled word's
+body": `executeXT`'s top-level `DOCOL` and `DODOES_TOKEN` branches
+(covers a breakpointed word being the very first one typed on a line,
+or a `CREATE...DOES>` word invoked directly — not reached via
+`threadFrom` at all), and `threadFrom`'s own `DOCOL`/`DODOES_TOKEN`
+branches (every nested call). Deliberately *not* checked for
+primitive-coded words (`dispatch()`'s path) — DEBUGGING.md's explicit
+scope cut, since a primitive has no interesting paused-mid-execution
+state to inspect that reading the stack before/after doesn't already
+show.
+
+Breakpoints are a session-local `Set` on `Machine`
+(`setBreakpoint`/`clearBreakpoint`/`listBreakpoints`, thin wrappers
+over the existing `findWord`/`listDictionaryEntries`), not a
+dictionary header flag — that byte is already fully packed
+(`FLAG_IMMEDIATE`/`FLAG_HIDDEN`/`FLAG_COMPILE_ONLY` + 5-bit name length
+leaves zero spare bits), and the header layout is a fixed cross-target
+contract not worth growing for a debug-only, unpersisted concern.
+"Which word is currently paused at" is `Inner.pausedAtXt` — set right
+before the `'breakpoint'` yield fires, read by `Machine.pausedAtWord()`
+— a small refinement over `DEBUGGING.md`'s original sketch (which
+proposed reading it off the return stack's current top frame; that
+turned out to be the *caller's* resume address, not the paused word's
+identity, once actually implemented).
+
+**The one required app-side change, easy to miss:** `App.startPump`'s
+`tick()` previously ignored `step()`'s return value entirely — a
+`'breakpoint'` would otherwise resume on the very next animation frame
+(~16ms later), never actually holding. `App` gained a
+`pausedAtBreakpoint` boolean: `tick()` skips its `machine.step()` call
+while set, and sets it when `step()` returns `'breakpoint'`. Five new
+WebMCP tools registered alongside M9's six —
+`debug_set_breakpoint`/`debug_clear_breakpoint`/`debug_list_breakpoints`/
+`debug_status`/`debug_continue` — with `debug_continue` only clearing
+the flag `tick()` already polls, never driving `step()` itself, keeping
+"one place drives `step()`" true. `setBreakpoint`/`clearBreakpoint` on
+an unknown word and `debug_continue` while not paused all throw real
+errors out of `execute()` rather than returning an error string — a
+genuine tool-error state for the calling agent, not a string it has to
+parse.
+
+Verified live via the same Chrome DevTools MCP path M9 used, against
+the local dev server: defined `SQUARE`, armed a breakpoint, typed
+`5 SQUARE .`, confirmed `debug_status` reported `"paused at SQUARE"`
+with `read_stack` showing only `5` (not `25`), `debug_continue`'d,
+confirmed `25` printed and status returned to `"running"` — and that
+`debug_continue` correctly errors when called with nothing paused.
+
+*Implementation:* `inner.ts` (`StepSignal`, `Inner.breakpoints`/
+`pausedAtXt`/`checkBreakpoint`), `repl.ts` (`StepStatus`,
+`Machine.setBreakpoint`/`clearBreakpoint`/`listBreakpoints`/
+`pausedAtWord`), `app.ts` (`pausedAtBreakpoint`, five `debug_*` tools).
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -1028,5 +1097,6 @@ exactly as it would be on the bare-metal target.
 | **M7a** | On-screen REPL (§1.25) — `ACCEPT` (a second, multi-step blocking primitive built the same way as `KEY`), `TIB` bank, `Machine.startRepl()`/`replLoop()`. `packages/app`'s DOM `<input>`/`<form>`/`.log` retired entirely — the whole page is the terminal now, keyboard routing no longer gated on any element's focus. | `inner.ts` (`accept()`), `repl.ts` (`startRepl`) |
 | **M8** | Core vocabulary (§1.26-§1.29, 61 new primitives, tokens 32-92): memory access, return-stack words, control flow (`BRANCH`/`0BRANCH` + the `IF`/`BEGIN`/`DO`/... IMMEDIATE compiler words), `CREATE`/`DOES>` (two more Code Field sentinels, `DOVAR`/`DODOES`), strings (`S"`/`."`, scoped to single-token literals — a real tokenizer limitation, documented not hidden), and the remaining stack/arithmetic fillers. `FLAG_COMPILE_ONLY` (reserved since M2) finally enforced. `WORDS`/`VLIST` (`CORE-VOCABULARY.md` §12's own sufficiency check) runs correctly on nothing but this vocabulary, proving it's actually enough. | `primitives.ts`, `inner.ts`, `dictionary.ts`, `rebel-opcodes.json` |
 | **M9** | Remote channel / WebMCP (§1.30): `RemoteChannel`/`CompositeChannel` merge remote input with the keyboard into one shared session — no interpreter changes, exactly as M7's `Channel` design intended. No server: the page registers tools via the real WebMCP browser API (`document.modelContext`, Angular's `declareExperimentalWebMcpTool`) — `type` plus five reads over the M8 inspector panel's existing introspection. Initial design assumed a bespoke bridge server; corrected after review, see `PLAN.md`. | `channel.ts`, `repl.ts`, `app.ts` |
+| **M10** | Word-level breakpoints (§1.31): a third `StepSignal`/`StepStatus` value, `'breakpoint'`, reusing M7's exact suspend/resume shape — checked at the four "about to thread into a compiled word's body" sites in `inner.ts`. Breakpoints are a session-local `Set` on `Machine`, not a dictionary header flag (that byte's fully packed). Five new WebMCP tools; the one required app-side change was `App.startPump`'s `tick()`, which previously ignored `step()`'s return value entirely. | `inner.ts`, `repl.ts`, `app.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

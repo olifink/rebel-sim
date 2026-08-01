@@ -48,6 +48,7 @@ import {
   findWord,
   FLAG_COMPILE_ONLY,
   FLAG_IMMEDIATE,
+  listDictionaryEntries,
   markLatestImmediate,
   writeHeader,
 } from './dictionary.js';
@@ -100,8 +101,12 @@ export interface MachineOptions {
  * `'blocked'` — the session is alive but waiting on the bound channel
  * (e.g. `KEY` with nothing queued); call `step()` again later, once
  * `hasData()` might be true. `'more-to-run'` — the budget ran out before
- * the line finished; call `step()` again to continue it. */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run';
+ * the line finished; call `step()` again to continue it. `'breakpoint'`
+ * (DEBUGGING.md, M10) — execution paused right before a breakpointed
+ * word's body would run; `pausedAtWord()` names it, `step()` again to
+ * resume (same "just call step() again" shape as `'blocked'`, but the
+ * caller — not a data source — decides when). */
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -118,6 +123,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   private readonly tibBank: Bank;
   private readonly acceptCfa: number;
   private session: Generator<StepSignal, void, void> | undefined;
+
+  /** DEBUGGING.md (M10): word-level breakpoints, a session-local `Set`
+   * of `cfa` addresses — not a dictionary header flag (that byte is
+   * already fully packed) and not persisted (a debugging aid, not
+   * project state). `Machine` owns the `Set` instance so it can expose
+   * name-based mutation without `Inner` needing dictionary-lookup logic
+   * of its own; `Inner` only ever reads it. */
+  private readonly breakpoints = new Set<number>();
 
   // The outer interpreter's own parse position — M8, CORE-VOCABULARY.md
   // §7: CREATE/VARIABLE/CONSTANT/S" all need to consume the *next* word
@@ -175,7 +188,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     this.stack = new DataStack(this.arena, dstkBank);
     this.rstack = new DataStack(this.arena, rstkBank);
-    this.inner = new Inner(this.arena, this.rstack, this);
+    this.inner = new Inner(this.arena, this.rstack, this, this.breakpoints);
 
     for (const p of opcodes.primitives) {
       // M8: some primitives (IF/DO/DOES>/S"/...) must run at compile
@@ -228,8 +241,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
    * session yields blocked (never busy-spins waiting for the channel —
    * that can only ever be resolved by something outside this call, e.g.
    * a keystroke, so spinning here would just freeze synchronously for
-   * no reason); `'more-to-run'` if the budget ran out first; `'idle'`
-   * once the session actually finishes (and clears it). An error thrown
+   * no reason); `'breakpoint'` the instant the session yields one
+   * (DEBUGGING.md, M10) — same never-busy-spin reasoning, except here
+   * it's an explicit caller decision, not a data source, that resolves
+   * it; `'more-to-run'` if the budget ran out first; `'idle'` once the
+   * session actually finishes (and clears it). An error thrown
    * mid-session propagates out of this call and clears the session (it's
    * dead either way — same as a completed one). */
   step(budget: number): StepStatus {
@@ -246,12 +262,61 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         if (value === 'blocked') {
           return 'blocked';
         }
+        if (value === 'breakpoint') {
+          return 'breakpoint';
+        }
       }
       return 'more-to-run';
     } catch (err) {
       this.session = undefined;
       throw err;
     }
+  }
+
+  /** DEBUGGING.md (M10): arm a word-level breakpoint by name — `step()`
+   * will return `'breakpoint'` right before that word's body next runs,
+   * every time it's entered (recursive/looped calls each re-break; see
+   * `Inner.checkBreakpoint`'s doc comment). Throws on an unknown word,
+   * matching how the outer interpreter itself fails loudly on one
+   * (`interpretExecuting`'s `? unrecognized word` case). */
+  setBreakpoint(name: string): void {
+    const found = findWord(this, name);
+    if (!found) {
+      throw new Error(`? unrecognized word: ${name}`);
+    }
+    this.breakpoints.add(found.cfa);
+  }
+
+  /** Disarms a breakpoint set via `setBreakpoint()`. A no-op (not an
+   * error) if the word has no breakpoint set — clearing is idempotent,
+   * unlike setting on an unknown word. */
+  clearBreakpoint(name: string): void {
+    const found = findWord(this, name);
+    if (!found) {
+      throw new Error(`? unrecognized word: ${name}`);
+    }
+    this.breakpoints.delete(found.cfa);
+  }
+
+  /** Names of all currently-armed breakpoints. */
+  listBreakpoints(): string[] {
+    return listDictionaryEntries(this)
+      .filter((e) => this.breakpoints.has(e.cfa))
+      .map((e) => e.name);
+  }
+
+  /** Name of the word `step()` most recently paused at (`Inner.pausedAtXt`),
+   * or `undefined` if nothing has ever triggered a breakpoint this
+   * session. Only meaningful immediately after `step()` returns
+   * `'breakpoint'` — once execution resumes past it, this keeps
+   * returning the same (now stale) name until the next breakpoint hit,
+   * so callers should gate on `step()`'s own return value, not this. */
+  pausedAtWord(): string | undefined {
+    const xt = this.inner.pausedAtXt;
+    if (xt === undefined) {
+      return undefined;
+    }
+    return listDictionaryEntries(this).find((e) => e.cfa === xt)?.name;
   }
 
   /** Convenience wrapper preserving the pre-M7 synchronous contract:

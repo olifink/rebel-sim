@@ -52,6 +52,14 @@
  * or `'blocked'` (possibly several times in a row) while KEY's dispatch
  * waits on `ctx.channel.hasData()` — the *same* token is retried on each
  * resume; nothing about it re-executes until data is actually available.
+ *
+ * DEBUGGING.md (M10): a third yield, `'breakpoint'`, reuses this exact
+ * suspend/resume shape for word-level breakpoints — `checkBreakpoint()`
+ * yields once right before threading into a compiled word's body
+ * whose `cfa` is in the (session-local, `Machine`-owned) breakpoint
+ * set, then resuming (another `.next()`) continues right past it into
+ * the normal entry logic, no different from how `'blocked'` retries
+ * the same token until data shows up.
  */
 
 import { Arena, alignCell, CELL_SIZE as CELL } from './arena.js';
@@ -83,14 +91,43 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked';
+export type StepSignal = 'progress' | 'blocked' | 'breakpoint';
 
 export class Inner {
+  /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
+   * the `cfa` of the word about to run, so `Machine.pausedAtWord()`
+   * (repl.ts) can resolve a name without `StepSignal` itself needing to
+   * carry a payload. Stale once execution has moved on; callers should
+   * only read this while genuinely paused (`step()` just returned
+   * `'breakpoint'`). */
+  pausedAtXt: number | undefined;
+
   constructor(
     private readonly arena: Arena,
     private readonly rstack: DataStack,
     private readonly ctx: PrimitiveContext,
+    /** DEBUGGING.md: word-level breakpoints, a session-local `Set` of
+     * `cfa` addresses owned by `Machine` (not a dictionary header flag —
+     * that byte is already fully packed, and the header layout is a
+     * fixed cross-target contract not worth growing for a debug-only,
+     * session-local concern). */
+    private readonly breakpoints: Set<number>,
   ) {}
+
+  /** Checked right before threading into a compiled word's body — both
+   * at top-level entry (`executeXT`'s own `DOCOL`/`DODOES_TOKEN`
+   * branches) and on every nested call (`threadFrom`'s). Deliberately
+   * not an if/else around the rest of the call: `yield 'breakpoint'`
+   * just pauses, and resuming (another `.next()`) continues right after
+   * it into the normal entry logic — no extra "already broke here"
+   * state needed, so a recursive or looped call to the same word
+   * correctly re-breaks every time. */
+  private *checkBreakpoint(xt: number): Generator<StepSignal, void, void> {
+    if (this.breakpoints.has(xt)) {
+      this.pausedAtXt = xt;
+      yield 'breakpoint';
+    }
+  }
 
   /** Executes the word whose Code Field lives at `xt`, yielding once per
    * completed step (or repeatedly while blocked) rather than running to
@@ -134,6 +171,7 @@ export class Inner {
       // does-pointer cell (the word's own data, e.g. what `,` stored),
       // then thread into the code the does-pointer points at, same as
       // DOCOL threading into a parameter field.
+      yield* this.checkBreakpoint(xt);
       this.ctx.stack.push(xt + CELL + CELL);
       yield* this.threadFrom(this.arena.readCell(xt + CELL));
       return;
@@ -143,6 +181,7 @@ export class Inner {
       return;
     }
 
+    yield* this.checkBreakpoint(xt);
     yield* this.threadFrom(xt + CELL);
   }
 
@@ -193,10 +232,12 @@ export class Inner {
         ip = this.rstack.pop();
         yield 'progress';
       } else if (slotCode === DOCOL) {
+        yield* this.checkBreakpoint(slotXt);
         this.rstack.push(ip);
         ip = slotXt + CELL;
         yield 'progress';
       } else if (slotCode === DODOES_TOKEN) {
+        yield* this.checkBreakpoint(slotXt);
         this.ctx.stack.push(slotXt + CELL + CELL);
         this.rstack.push(ip);
         ip = this.arena.readCell(slotXt + CELL);

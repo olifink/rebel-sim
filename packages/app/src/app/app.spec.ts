@@ -61,4 +61,48 @@ describe('App', () => {
 
     expect(compiled.querySelector('.stack-values')?.textContent).toContain('2 3');
   });
+
+  // DEBUGGING.md (M10): the required App-side half of breakpoints —
+  // tick() ignores step()'s return value for every other status, but
+  // must genuinely stop calling step() once it sees 'breakpoint', or
+  // the pause wouldn't outlive a single animation frame. Drives input
+  // through app's own remoteChannel (exactly what the real WebMCP
+  // `type` tool does — see registerWebMcpTools) rather than synthetic
+  // keyboard events: startRepl() has already claimed the one session
+  // by the time ngAfterViewInit returns, so machine.interpret()/
+  // beginLine() can't be called directly here, and there's no
+  // document.modelContext in jsdom to exercise the real debug_* tools
+  // through — this reaches into App's private fields to do exactly what
+  // they do underneath.
+  it('a breakpoint holds the REPL until resumed, matching debug_continue', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      machine: { setBreakpoint(name: string): void };
+      remoteChannel: { push(text: string): void };
+      pausedAtBreakpoint: boolean;
+    };
+
+    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    await waitFor(() => (compiled.querySelector('.inspector-words')?.textContent ?? '').includes('SQUARE'));
+
+    app.machine.setBreakpoint('SQUARE');
+    app.remoteChannel.push('5 SQUARE\n');
+
+    await waitFor(() => app.pausedAtBreakpoint);
+    const stackAtPause = compiled.querySelector('.stack-values')?.textContent ?? '';
+    expect(stackAtPause).toContain('5');
+    expect(stackAtPause).not.toContain('25'); // SQUARE's body hasn't run yet
+
+    // Confirm it genuinely holds — not just true for the one frame that
+    // set it — across several more animation frames.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(app.pausedAtBreakpoint).toBe(true);
+    expect(compiled.querySelector('.stack-values')?.textContent ?? '').not.toContain('25');
+
+    app.pausedAtBreakpoint = false; // debug_continue's actual effect
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('25'));
+  });
 });

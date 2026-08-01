@@ -579,7 +579,7 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     for what was initially assumed (a bespoke relay server) and why
     that was wrong.
 12. **[NEW]** Breakpoint/debugging suspend-resume model — scoped for
-    Rebel-Sim (tentatively M10) in `DEBUGGING.md`: word-level
+    Rebel-Sim in `DEBUGGING.md` — **done, M10**: word-level
     breakpoints via a third `StepSignal` (`'breakpoint'`) alongside the
     existing `'progress'`/`'blocked'` yields M7's generator-based inner
     interpreter already uses for blocking `KEY`. The suspend/resume
@@ -588,8 +588,9 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     same *behavioral contract* — pause before a compiled word's body
     runs, resume with stack/return-stack/IP fully intact — built on
     whatever cooperative-suspension mechanism that execution loop
-    already has. Genuinely open until Rebel-ROM's real source is read
-    for this specifically; not assumed to already have an answer.
+    already has. Rebel-ROM's own equivalent remains genuinely open
+    until its real source is read for this specifically; not assumed to
+    already have an answer.
 13. **[NEW]** Comment storage encoding (`DEVELOPING.md` §2.3) — open
     between reusing `S"`'s existing `(SLIT)` compile mechanism plus a
     trailing `2DROP` (zero new primitives, but a decompiler can't

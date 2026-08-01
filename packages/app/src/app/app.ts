@@ -71,6 +71,14 @@ export class App implements AfterViewInit, OnDestroy {
   // Guards against overlapping requestAnimationFrame chains.
   private pumping = false;
 
+  // DEBUGGING.md (M10): set the instant step() returns 'breakpoint';
+  // tick() then skips calling step() on every subsequent frame until a
+  // debug_continue tool call clears it. Without this, a breakpoint
+  // would resume on the very next animation frame (~16ms later) instead
+  // of actually holding — step()'s return value is otherwise ignored
+  // here, same as it always has been for 'blocked'/'more-to-run'.
+  private pausedAtBreakpoint = false;
+
   constructor(
     private readonly zone: NgZone,
     private readonly injector: Injector,
@@ -303,6 +311,95 @@ export class App implements AfterViewInit, OnDestroy {
         this.injector,
       ),
     );
+
+    // DEBUGGING.md (M10): word-level breakpoints. set/clear/list are
+    // thin wrappers over Machine's own methods (which already throw on
+    // an unknown word — left to propagate as a real tool error rather
+    // than swallowed into a string). debug_status/debug_continue read
+    // and clear this.pausedAtBreakpoint, the flag startPump's tick()
+    // checks each frame — continue doesn't drive step() itself, it just
+    // un-pauses the pump so the *next* frame's own step() call resumes
+    // past the breakpoint (keeping "one place drives step()" true).
+    this.safeRegisterWebMcpTool('debug_set_breakpoint', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'debug_set_breakpoint',
+          description: 'Pause execution right before the named word runs, every time it is entered.',
+          inputSchema: {
+            type: 'object',
+            properties: { word: { type: 'string', description: 'Name of a defined word.' } },
+            required: ['word'],
+          },
+          execute: ({ word }) => {
+            machine.setBreakpoint(word);
+            return `breakpoint set on ${word.toUpperCase()}`;
+          },
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('debug_clear_breakpoint', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'debug_clear_breakpoint',
+          description: 'Remove a breakpoint set by debug_set_breakpoint.',
+          inputSchema: {
+            type: 'object',
+            properties: { word: { type: 'string', description: 'Name of a defined word.' } },
+            required: ['word'],
+          },
+          execute: ({ word }) => {
+            machine.clearBreakpoint(word);
+            return `breakpoint cleared on ${word.toUpperCase()}`;
+          },
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('debug_list_breakpoints', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'debug_list_breakpoints',
+          description: 'List all currently-armed breakpoints.',
+          inputSchema: noArgsSchema,
+          execute: () => machine.listBreakpoints().join(' ') || '(none)',
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('debug_status', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'debug_status',
+          description: 'Report whether the REPL is running normally or paused at a breakpoint.',
+          inputSchema: noArgsSchema,
+          execute: () =>
+            this.pausedAtBreakpoint ? `paused at ${machine.pausedAtWord() ?? '(unknown)'}` : 'running',
+        },
+        this.injector,
+      ),
+    );
+
+    this.safeRegisterWebMcpTool('debug_continue', () =>
+      declareExperimentalWebMcpTool(
+        {
+          name: 'debug_continue',
+          description: 'Resume execution after a breakpoint pause.',
+          inputSchema: noArgsSchema,
+          execute: () => {
+            if (!this.pausedAtBreakpoint) {
+              throw new Error('not currently paused at a breakpoint');
+            }
+            this.pausedAtBreakpoint = false;
+            return 'resumed';
+          },
+        },
+        this.injector,
+      ),
+    );
   }
 
   // WebMCP is an experimental browser feature
@@ -350,7 +447,12 @@ export class App implements AfterViewInit, OnDestroy {
 
     const tick = (): void => {
       try {
-        this.machine.step(App.STEP_BUDGET);
+        if (!this.pausedAtBreakpoint) {
+          const status = this.machine.step(App.STEP_BUDGET);
+          if (status === 'breakpoint') {
+            this.pausedAtBreakpoint = true;
+          }
+        }
       } catch (e) {
         // The on-screen REPL loop (replLoop) catches and prints ordinary
         // Forth errors itself and keeps running — reaching here means

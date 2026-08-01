@@ -74,7 +74,7 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `define_word`/`trace_execution` tools needed, a plain `type()` plus
     reads over the M8 inspector panel's introspection surface covers it
     (Forth's homoiconic). Detailed below.
-11. **M10 — Breakpoints/debugging** *(planned, not yet built)*:
+11. **M10 — Breakpoints/debugging** — **done**:
     word-level breakpoints built on a third `StepSignal`
     (`'breakpoint'`) alongside M7's existing `'progress'`/`'blocked'`
     generator yields, plus the WebMCP tools to drive them
@@ -1314,3 +1314,86 @@ step, not anything Rebel-Sim vendors or depends on — it works against
 *any* WebMCP-enabled page. This milestone's job was making Rebel-Sim
 correctly WebMCP-enabled per the real spec; that job is now verified
 done against a real client, not just plausible in theory.
+
+---
+
+## M10 — Breakpoints/debugging
+
+Built exactly per `DEBUGGING.md`'s design — word-level breakpoints,
+zero deviation from the plan's shape, one implementation-time
+refinement worth recording.
+
+**Engine (`packages/engine/src`):** `StepSignal` (`inner.ts`) gained a
+third value, `'breakpoint'`, alongside M7's `'progress'`/`'blocked'`.
+`Inner` gained a `breakpoints: Set<number>` constructor param (owned
+and mutated by `Machine`, not `Inner` itself — `Inner` only ever reads
+it) and a private `checkBreakpoint(xt)` generator, called from four
+sites: `executeXT`'s top-level `DOCOL` *and* `DODOES_TOKEN` branches
+(covers a breakpointed word being the very first one on a line, plus a
+`CREATE...DOES>` word invoked directly), and `threadFrom`'s `DOCOL`/
+`DODOES_TOKEN` branches (every nested call). Deliberately not an
+if/else around the rest of the call — `yield 'breakpoint'` just pauses;
+resuming continues right past it into normal entry logic, so no
+"already broke here" flag is needed and a recursive/looped call to the
+same word correctly re-breaks every time (verified directly —
+`debug.test.ts`'s recursive-countdown case). `Machine` (`repl.ts`)
+gained `setBreakpoint`/`clearBreakpoint`/`listBreakpoints` (thin
+wrappers over `findWord`/`listDictionaryEntries`, no new dictionary
+mechanism) and `pausedAtWord()`; `StepStatus` gained `'breakpoint'`;
+`step()` gained one more early-return branch, same shape as its
+existing `'blocked'` one.
+
+**One refinement past the design doc:** `DEBUGGING.md` sketched
+`debug_status` resolving the paused word's name "from the return
+stack's current top frame" — on actually implementing it, that turned
+out to be imprecise (the return stack's top at a breakpoint yield is
+the *caller's* resume address, unrelated to the about-to-run word's
+identity). Implemented instead as `Inner.pausedAtXt`, a field set right
+before the `'breakpoint'` yield fires, read by `Machine.pausedAtWord()`
+— simpler and unambiguous, no rstack inspection needed.
+
+**App (`packages/app/src/app/app.ts`):** the one required, easy-to-miss
+change the design doc flagged — `startPump`'s `tick()` previously
+ignored `step()`'s return value entirely, so a breakpoint would have
+resumed on the very next animation frame without a change here. Added
+a `pausedAtBreakpoint` boolean field: `tick()` skips its `machine.step()`
+call while set, and sets it when `step()` returns `'breakpoint'`. Five
+new WebMCP tools registered alongside M9's six:
+`debug_set_breakpoint`/`debug_clear_breakpoint`/`debug_list_breakpoints`/
+`debug_status`/`debug_continue` — `debug_continue` doesn't drive
+`step()` itself, it only clears the flag `tick()` already polls, keeping
+"one place drives `step()`" true. Errors (`setBreakpoint`/
+`clearBreakpoint` on an unknown word, `debug_continue` while not
+paused) are left to propagate as real thrown errors from `execute()`
+rather than swallowed into a returned string — surfaces as a genuine
+tool-error state to the calling agent.
+
+**Tests:** `debug.test.ts` (new, engine): unknown-word throws on
+set/clear, idempotent clear, `listBreakpoints`, pause-with-state-intact
+and resume, a breakpoint on the first word of a line (top-level entry,
+not just nested), a call that never reaches the breakpointed word stays
+silent, a cleared breakpoint stops firing, and a recursive word
+re-breaking on every entry (4 breaks for a countdown from 3) — 160
+engine tests total, all passing (151 before). `app.spec.ts` gained one
+case confirming the pump genuinely holds across several animation
+frames (not just the one that set the flag) and resumes correctly —
+driven through `App`'s own `remoteChannel` (the same path the real
+`type` WebMCP tool uses) rather than synthetic keyboard events, since
+`startRepl()` has already claimed the one session by the time
+`ngAfterViewInit` returns, so `machine.interpret()`/`beginLine()`
+can't be called directly in a test anymore once the app has booted —
+9 app tests total, all passing (8 before).
+
+**Verified live**, same Chrome DevTools MCP path proven out for M9,
+against the local dev server (`ng serve`, not yet deployed to GitHub
+Pages): hit the same Vite stale-dependency-cache gotcha M8/M9 both hit
+(`packages/app/.angular/cache` needed clearing after rebuilding
+`packages/engine`) — `machine.setBreakpoint is not a function` until
+cleared. Once cleared: defined `SQUARE`, armed a breakpoint on it,
+typed `5 SQUARE .`, confirmed `debug_status` reported `"paused at
+SQUARE"` and `read_stack` showed only `5` (not `25` — `SQUARE`'s body
+genuinely hadn't run), called `debug_continue`, confirmed `read_screen`
+then showed `25` and `debug_status` back to `"running"`. Also confirmed
+`debug_continue` correctly errors (`"not currently paused at a
+breakpoint"`, visible in the console) when called a second time with
+nothing paused.
