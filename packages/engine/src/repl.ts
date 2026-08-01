@@ -278,11 +278,18 @@ export class Machine implements PrimitiveContext, DictionaryContext {
    * every time it's entered (recursive/looped calls each re-break; see
    * `Inner.checkBreakpoint`'s doc comment). Throws on an unknown word,
    * matching how the outer interpreter itself fails loudly on one
-   * (`interpretExecuting`'s `? unrecognized word` case). */
+   * (`interpretExecuting`'s `? unrecognized word` case) — and throws on
+   * a non-`breakable` one (a primitive, `CONSTANT`, or plain
+   * `CREATE`/`VARIABLE` with no `DOES>`) rather than silently accepting
+   * a breakpoint that could never fire (`Inner.checkBreakpoint` only
+   * ever checks `DOCOL`/`DODOES` entry points). */
   setBreakpoint(name: string): void {
     const found = findWord(this, name);
     if (!found) {
       throw new Error(`? unrecognized word: ${name}`);
+    }
+    if (!found.breakable) {
+      throw new Error(`? ${found.name} has no compiled body to break on (not a colon-definition or DOES>'d word)`);
     }
     this.breakpoints.add(found.cfa);
   }

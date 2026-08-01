@@ -199,11 +199,9 @@ same-milestone add-on.
   are one-shot native actions with no interesting paused-mid-execution
   state to inspect — there's nothing a breakpoint would let you see
   that reading the stack before/after already doesn't.
-- **No UI affordance in the inspector panel** for this pass — purely a
-  WebMCP-driven feature, same "ship the mechanism, add UI once a real
-  need shows up" discipline `CLAUDE.md` already calls for generally.
-  Worth revisiting once this is actually used and a visual "paused
-  here, here's the call stack" view earns its keep.
+- ~~No UI affordance in the inspector panel~~ — **added** right after
+  this milestone shipped, see §9 below. Still no call-stack/step view —
+  that's the part still deferred, not the whole UI.
 
 ## 7. Cross-target portability note
 
@@ -240,3 +238,68 @@ equivalent debugging work, not assumed to already have an answer.
   confirm `debug_status` reports paused, confirm `read_stack` shows the
   argument already pushed but no result yet, `debug_continue`, confirm
   `read_screen` then shows the completed result.
+
+## 9. Inspector panel UI (added post-ship)
+
+Built directly on top of everything above — no engine mechanism
+changed, only what the app's inspector panel (`app.html`/`app.ts`)
+shows and reacts to. One real engine addition first, though: a new
+`breakable: boolean` field on `DictionaryEntry` (`dictionary.ts`),
+computed by reading the entry's *current* Code Field (`DOCOL`/`DODOES`
+→ `true`, anything else → `false`) at both `findWord` and
+`listDictionaryEntries` call time — not cached at definition time,
+since a `CREATE`d word's Code Field is rewritten to `DODOES` by
+`DOES>` after the fact, so a stale snapshot would be wrong for exactly
+the words that matter most. `Machine.setBreakpoint` was tightened to
+throw on a non-`breakable` word (a primitive, `CONSTANT`, or plain
+`CREATE`/`VARIABLE`) rather than silently accepting a breakpoint that
+`Inner.checkBreakpoint` could never actually fire for — a real gap from
+the original implementation pass, closed once this UI needed to know
+"which words are even worth offering as clickable" and made it obvious
+the engine itself should reject the same case, not just the UI.
+
+**App-side:** `pausedWord: Signal<string | undefined>` replaced the
+plain `pausedAtBreakpoint: boolean` field from §4 — `undefined` while
+running, the paused word's name once set, driving both `tick()`'s pump
+gate and the template directly (no separate boolean to keep in sync).
+`breakpointWords: Signal<ReadonlySet<string>>` is polled/diffed in
+`tick()` exactly like `dictionaryWords`/`bankTable` already were — one
+update path regardless of whether a breakpoint was armed from this UI
+or from a WebMCP `debug_set_breakpoint` call, so the two never drift.
+`resumeFromBreakpoint()` is the one method both the Continue button and
+`debug_continue`'s `execute()` call — `zone.run()` is harmless to call
+from either an already-in-zone click handler or an external WebMCP
+callback outside it, so no special-casing was needed between the two
+callers.
+
+**Template:** a dedicated "breakpoints" inspector section (armed names,
+red, click to clear) above the dictionary section; dictionary words
+gain a `breakable`-gated `(click)` to toggle a breakpoint (only
+`w.breakable` words get a pointer cursor/hover underline — non-breakable
+ones are inert, matching the engine's own rejection); a red "paused at
+WORD — Continue" banner in the console pane when `pausedWord()` is set.
+
+**A real bug caught during testing, not just theorized:** the
+breakpoints section and the dictionary section originally shared the
+`.inspector-words` class for their word-list containers. Since the
+breakpoints section renders first in the DOM, `querySelector('.inspector-words')`
+in a test wanting the *dictionary* list silently matched the (usually
+empty) breakpoints list instead — a real "define SQUARE, wait for it to
+appear" test hung until this was caught and fixed by giving each
+container its own class (`breakpoint-list`/`dictionary-list`). Worth
+remembering: reusing a class name across sibling sections is exactly
+the kind of thing that looks harmless until DOM order changes which
+one `querySelector` actually finds.
+
+**Verified both ways:** the app test suite (`app.spec.ts`) drives this
+through `App`'s own `remoteChannel`/`resumeFromBreakpoint()` (jsdom has
+no real `document.modelContext` to exercise the WebMCP tools through),
+and separately live against the dev server via the Chrome DevTools MCP
+path — clicked `SQUARE` in the dictionary list directly (`evaluate_script`
++ a real DOM `.click()`, not a tool call) to arm it, confirmed the
+breakpoints section and dictionary highlighting both updated, drove a
+breakpoint hit via the `type` tool, confirmed the pause banner and
+stack state, clicked the on-page Continue button directly, confirmed
+`25` printed and `debug_list_breakpoints` still reported `SQUARE`
+armed (clearing and pausing are independent — resuming doesn't disarm
+a breakpoint, and clicking a primitive like `DUP` correctly did nothing).

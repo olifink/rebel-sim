@@ -3,6 +3,7 @@ import {
   NgZone,
   Injector,
   signal,
+  computed,
   ViewChild,
   ElementRef,
   AfterViewInit,
@@ -38,6 +39,21 @@ export class App implements AfterViewInit, OnDestroy {
   protected readonly bankTable = signal<readonly Bank[]>([]);
   protected readonly storageStatus = signal<string>('checking…');
 
+  // DEBUGGING.md (M10) UI: `undefined` while running; the paused
+  // word's name once step() returns 'breakpoint'. Both the pump loop
+  // (tick(), on a fresh breakpoint hit) and debug_continue's WebMCP
+  // execute() write this through resumeFromBreakpoint()/directly — see
+  // their call sites for why neither needs to special-case being
+  // in/outside the Angular zone.
+  protected readonly pausedWord = signal<string | undefined>(undefined);
+  // Currently-armed breakpoint names — polled/diffed in tick() exactly
+  // like dictionaryWords/bankTable below, so it stays correct whether a
+  // breakpoint was armed from this UI (toggleBreakpoint) or from a
+  // WebMCP debug_set_breakpoint call, without two separate update paths
+  // to keep in sync.
+  protected readonly breakpointWords = signal<ReadonlySet<string>>(new Set());
+  protected readonly breakpointList = computed(() => Array.from(this.breakpointWords()).sort());
+
   // Constructed in ngAfterViewInit — the engine's Screen.cls() (M3) runs
   // during Machine's own constructor and paints through the HAL
   // immediately, so the canvas must already exist before `new Machine()`.
@@ -70,14 +86,6 @@ export class App implements AfterViewInit, OnDestroy {
 
   // Guards against overlapping requestAnimationFrame chains.
   private pumping = false;
-
-  // DEBUGGING.md (M10): set the instant step() returns 'breakpoint';
-  // tick() then skips calling step() on every subsequent frame until a
-  // debug_continue tool call clears it. Without this, a breakpoint
-  // would resume on the very next animation frame (~16ms later) instead
-  // of actually holding — step()'s return value is otherwise ignored
-  // here, same as it always has been for 'blocked'/'more-to-run'.
-  private pausedAtBreakpoint = false;
 
   constructor(
     private readonly zone: NgZone,
@@ -376,8 +384,10 @@ export class App implements AfterViewInit, OnDestroy {
           name: 'debug_status',
           description: 'Report whether the REPL is running normally or paused at a breakpoint.',
           inputSchema: noArgsSchema,
-          execute: () =>
-            this.pausedAtBreakpoint ? `paused at ${machine.pausedAtWord() ?? '(unknown)'}` : 'running',
+          execute: () => {
+            const word = this.pausedWord();
+            return word ? `paused at ${word}` : 'running';
+          },
         },
         this.injector,
       ),
@@ -390,16 +400,48 @@ export class App implements AfterViewInit, OnDestroy {
           description: 'Resume execution after a breakpoint pause.',
           inputSchema: noArgsSchema,
           execute: () => {
-            if (!this.pausedAtBreakpoint) {
+            if (this.pausedWord() === undefined) {
               throw new Error('not currently paused at a breakpoint');
             }
-            this.pausedAtBreakpoint = false;
+            this.resumeFromBreakpoint();
             return 'resumed';
           },
         },
         this.injector,
       ),
     );
+  }
+
+  // Shared by the debug_continue WebMCP tool and the inspector's
+  // Continue button — one place, so the two never drift. Safe to call
+  // from either a real Angular-zone context (the button's click
+  // handler already is) or an external callback outside it (WebMCP's
+  // execute()) — zone.run() is harmless to nest/call from anywhere,
+  // it just guarantees change detection actually runs for this write.
+  protected resumeFromBreakpoint(): void {
+    this.zone.run(() => this.pausedWord.set(undefined));
+  }
+
+  // DEBUGGING.md (M10) UI: clicking a breakable dictionary word arms/
+  // disarms a breakpoint on it directly (no WebMCP round-trip needed).
+  // Non-breakable entries (primitives, CONSTANTs, plain CREATE/VARIABLE
+  // — DictionaryEntry.breakable, dictionary.ts) are inert here, matching
+  // Machine.setBreakpoint's own rejection of them. breakpointWords isn't
+  // written here — tick()'s poll/diff below picks the change up next
+  // frame, the same single update path a WebMCP-set breakpoint uses.
+  protected toggleBreakpoint(word: DictionaryEntry): void {
+    if (!word.breakable) {
+      return;
+    }
+    if (this.breakpointWords().has(word.name)) {
+      this.machine.clearBreakpoint(word.name);
+    } else {
+      this.machine.setBreakpoint(word.name);
+    }
+  }
+
+  protected clearBreakpointByName(name: string): void {
+    this.machine.clearBreakpoint(name);
   }
 
   // WebMCP is an experimental browser feature
@@ -428,6 +470,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastRStackSnapshot: number[] = [];
   private lastLatestAddr = -1;
   private lastBankCount = 0;
+  private lastBreakpointWords: ReadonlySet<string> = new Set();
 
   // Must be called from outside the Angular zone (ngAfterViewInit's call
   // site already is) — requestAnimationFrame callbacks scheduled there
@@ -447,10 +490,11 @@ export class App implements AfterViewInit, OnDestroy {
 
     const tick = (): void => {
       try {
-        if (!this.pausedAtBreakpoint) {
+        if (this.pausedWord() === undefined) {
           const status = this.machine.step(App.STEP_BUDGET);
           if (status === 'breakpoint') {
-            this.pausedAtBreakpoint = true;
+            const word = this.machine.pausedAtWord();
+            this.zone.run(() => this.pausedWord.set(word));
           }
         }
       } catch (e) {
@@ -494,6 +538,15 @@ export class App implements AfterViewInit, OnDestroy {
         const banks = this.machine.banks.getAllBanks();
         this.zone.run(() => this.bankTable.set(banks));
       }
+      // DEBUGGING.md (M10) UI: one diff-and-set path for breakpointWords
+      // regardless of whether a breakpoint was armed from this UI
+      // (toggleBreakpoint) or a WebMCP debug_set_breakpoint call — same
+      // reasoning as the dictionary/bank guards above.
+      const currentBreakpoints = new Set(this.machine.listBreakpoints());
+      if (!setsEqual(currentBreakpoints, this.lastBreakpointWords)) {
+        this.lastBreakpointWords = currentBreakpoints;
+        this.zone.run(() => this.breakpointWords.set(currentBreakpoints));
+      }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -502,4 +555,8 @@ export class App implements AfterViewInit, OnDestroy {
 
 function arraysEqual(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+function setsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every((v) => b.has(v));
 }

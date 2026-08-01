@@ -13,6 +13,17 @@ describe('Word-level breakpoints (DEBUGGING.md, M10)', () => {
     expect(() => m.clearBreakpoint('DUP')).not.toThrow();
   });
 
+  it('setBreakpoint rejects a primitive — it would never actually fire', () => {
+    const m = new Machine();
+    expect(() => m.setBreakpoint('DUP')).toThrow(/no compiled body/);
+  });
+
+  it('setBreakpoint rejects a plain CREATE/VARIABLE word (no DOES>, no compiled body)', () => {
+    const m = new Machine();
+    m.interpret('VARIABLE FOO');
+    expect(() => m.setBreakpoint('FOO')).toThrow(/no compiled body/);
+  });
+
   it('pausedAtWord is undefined until a breakpoint has ever fired', () => {
     const m = new Machine();
     expect(m.pausedAtWord()).toBeUndefined();

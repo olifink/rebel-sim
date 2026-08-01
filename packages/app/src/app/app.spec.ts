@@ -82,27 +82,61 @@ describe('App', () => {
     const app = fixture.componentInstance as unknown as {
       machine: { setBreakpoint(name: string): void };
       remoteChannel: { push(text: string): void };
-      pausedAtBreakpoint: boolean;
+      pausedWord: () => string | undefined;
+      resumeFromBreakpoint(): void;
     };
 
     app.remoteChannel.push(': SQUARE DUP * ;\n');
-    await waitFor(() => (compiled.querySelector('.inspector-words')?.textContent ?? '').includes('SQUARE'));
+    await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
 
     app.machine.setBreakpoint('SQUARE');
     app.remoteChannel.push('5 SQUARE\n');
 
-    await waitFor(() => app.pausedAtBreakpoint);
+    await waitFor(() => app.pausedWord() !== undefined);
+    expect(app.pausedWord()).toBe('SQUARE');
     const stackAtPause = compiled.querySelector('.stack-values')?.textContent ?? '';
     expect(stackAtPause).toContain('5');
     expect(stackAtPause).not.toContain('25'); // SQUARE's body hasn't run yet
+    expect(compiled.querySelector('.pause-bar')?.textContent ?? '').toContain('paused at SQUARE');
 
     // Confirm it genuinely holds — not just true for the one frame that
     // set it — across several more animation frames.
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(app.pausedAtBreakpoint).toBe(true);
+    expect(app.pausedWord()).toBe('SQUARE');
     expect(compiled.querySelector('.stack-values')?.textContent ?? '').not.toContain('25');
 
-    app.pausedAtBreakpoint = false; // debug_continue's actual effect
+    app.resumeFromBreakpoint(); // same effect as debug_continue and the Continue button
     await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('25'));
+    fixture.detectChanges();
+    expect(compiled.querySelector('.pause-bar')).toBeFalsy();
+  });
+
+  it('clicking a breakable dictionary word arms a breakpoint, shown in the breakpoints section', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+    };
+
+    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
+    fixture.detectChanges();
+
+    const words = Array.from(compiled.querySelectorAll('.inspector-word')) as HTMLElement[];
+    const squareEl = words.find((el) => el.textContent?.trim().startsWith('SQUARE'));
+    expect(squareEl).toBeTruthy();
+    squareEl!.click();
+
+    // The breakpoints section is the first .inspector-section in the
+    // template — targeted directly (not via a generic .inspector-word
+    // search) since SQUARE, being the most-recently-defined word, would
+    // otherwise also match the dictionary section's own entry for it.
+    await waitFor(() => (compiled.querySelector('.inspector-section')?.textContent ?? '').includes('SQUARE'));
+    fixture.detectChanges();
+    const breakpointsSection = compiled.querySelector('.inspector-section');
+    expect(breakpointsSection?.textContent ?? '').toContain('breakpoints (1)');
+    expect(breakpointsSection?.textContent ?? '').toContain('SQUARE');
   });
 });

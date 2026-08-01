@@ -1397,3 +1397,22 @@ then showed `25` and `debug_status` back to `"running"`. Also confirmed
 `debug_continue` correctly errors (`"not currently paused at a
 breakpoint"`, visible in the console) when called a second time with
 nothing paused.
+
+**Follow-up, same day: inspector panel UI** (`DEBUGGING.md` §9, itself
+originally scoped out as "no UI for this pass"). A "breakpoints"
+section, clickable dictionary words (gated on a new
+`DictionaryEntry.breakable` field — closed a real gap where
+`setBreakpoint` had silently accepted a primitive/`CONSTANT` that could
+never actually fire), and a red "paused at WORD — Continue" banner.
+Caught one real bug during testing: the breakpoints and dictionary
+sections briefly shared a `.inspector-words` class, and since
+breakpoints render first in the DOM a test's `querySelector` silently
+grabbed the wrong (usually empty) one — fixed with distinct
+`breakpoint-list`/`dictionary-list` classes. 164 engine tests (4 more:
+`breakable` reporting correctly + `setBreakpoint` rejecting
+non-breakable words) + 10 app tests (1 more: clicking a word arms a
+breakpoint, shown in the new section), all passing. Verified live
+against the dev server via Chrome DevTools MCP, driving actual DOM
+clicks (`evaluate_script` + `.click()`) rather than only WebMCP tool
+calls — confirmed the click-to-arm/clear flow, the pause banner, and
+that clicking a non-breakable word (`DUP`) correctly does nothing.

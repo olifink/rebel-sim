@@ -132,4 +132,24 @@ describe('listDictionaryEntries', () => {
     const entry = listDictionaryEntries(m).find((e) => e.name === 'SHOUTY');
     expect(entry?.immediate).toBe(true);
   });
+
+  it('reports breakable=true for a colon-definition, false for a primitive (M10)', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    const entries = listDictionaryEntries(m);
+    expect(entries.find((e) => e.name === 'SQUARE')?.breakable).toBe(true);
+    expect(entries.find((e) => e.name === 'DUP')?.breakable).toBe(false);
+  });
+
+  it('reports breakable=true for a CREATE...DOES> word once DOES> has run (M10)', () => {
+    const m = new Machine();
+    m.interpret(': CONST CREATE , DOES> @ ;');
+    // Before DOES> runs (a bare CREATE with no DOES> yet), the Code
+    // Field is still DOVAR, not DODOES — a plain CREATE-only word (no
+    // compiled body to break on) stays false. CONST itself is a
+    // DOCOL-coded colon-definition, so it's breakable regardless.
+    m.interpret('5 CONST FIVE');
+    const entry = listDictionaryEntries(m).find((e) => e.name === 'FIVE');
+    expect(entry?.breakable).toBe(true);
+  });
 });

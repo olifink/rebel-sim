@@ -19,6 +19,10 @@
 import { alignCell, Arena, CELL_SIZE } from './arena.js';
 import { Bank } from './banks.js';
 import { Sysvars } from './sysvars.js';
+import opcodes from './rebel-opcodes.json' with { type: 'json' };
+
+const DOCOL = opcodes.docolTokenId;
+const DODOES_TOKEN = opcodes.dodoesTokenId;
 
 export const FLAG_IMMEDIATE = 0x80;
 export const FLAG_HIDDEN = 0x40;
@@ -44,6 +48,17 @@ export interface DictionaryEntry {
    * interpreter (repl.ts) rejects a compile-only word found while
    * interpreting (STATE=0). */
   readonly compileOnly: boolean;
+  /** M10 (DEBUGGING.md §6's scope cut): whether `Machine.setBreakpoint`
+   * would actually do anything useful on this word — true only for
+   * `DOCOL`/`DODOES`-coded (colon-definition or `DOES>`'d) entries,
+   * i.e. ones with a compiled body to pause before running. Primitives,
+   * `CONSTANT`s, and plain `CREATE`/`VARIABLE`s (no `DOES>`) are never
+   * breakable — they have no interesting paused-mid-execution state to
+   * inspect that the stack before/after doesn't already show. Read from
+   * the *current* Code Field, not cached from definition time — a
+   * `CREATE`d word's Code Field is rewritten to `DODOES` by `DOES>`
+   * after the fact, so this can only be correct if computed fresh. */
+  readonly breakable: boolean;
 }
 
 function decodeName(ctx: DictionaryContext, addr: number, len: number): string {
@@ -52,6 +67,10 @@ function decodeName(ctx: DictionaryContext, addr: number, len: number): string {
     name += String.fromCharCode(ctx.arena.readByte(addr + 5 + i));
   }
   return name;
+}
+
+function isBreakable(codeField: number): boolean {
+  return codeField === DOCOL || codeField === DODOES_TOKEN;
 }
 
 export class DictionaryOverflowError extends Error {}
@@ -99,6 +118,7 @@ export function writeHeader(
     name: upperName,
     immediate: (extraFlags & FLAG_IMMEDIATE) !== 0,
     compileOnly: (extraFlags & FLAG_COMPILE_ONLY) !== 0,
+    breakable: isBreakable(codeField),
   };
 }
 
@@ -130,6 +150,7 @@ export function findWord(ctx: DictionaryContext, name: string): DictionaryEntry 
           name: upperName,
           immediate: (flagsByte & FLAG_IMMEDIATE) !== 0,
           compileOnly: (flagsByte & FLAG_COMPILE_ONLY) !== 0,
+          breakable: isBreakable(arena.readCell(cfa)),
         };
       }
     }
@@ -162,6 +183,7 @@ export function listDictionaryEntries(ctx: DictionaryContext): DictionaryEntry[]
         name: decodeName(ctx, addr, len),
         immediate: (flagsByte & FLAG_IMMEDIATE) !== 0,
         compileOnly: (flagsByte & FLAG_COMPILE_ONLY) !== 0,
+        breakable: isBreakable(arena.readCell(cfa)),
       });
     }
 

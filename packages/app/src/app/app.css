@@ -54,6 +54,38 @@
   font-size: 14px;
 }
 
+/* DEBUGGING.md (M10) UI: red rather than green — deliberately distinct
+   from the rest of the terminal's palette so a paused REPL is
+   impossible to miss, matching a debugger's usual "stopped" color. */
+.pause-bar {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #200;
+  border: 1px solid #f55;
+  color: #f55;
+  padding: 4px 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.continue-button {
+  background: #000;
+  color: #f55;
+  border: 1px solid #f55;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.continue-button:hover {
+  background: #f55;
+  color: #000;
+}
+
 .inspector {
   border: 1px solid #0f0;
   min-width: 260px;
@@ -88,6 +120,31 @@
 
 .flag-immediate {
   opacity: 0.7;
+}
+
+/* DEBUGGING.md (M10) UI: only breakable dictionary words (colon-
+   definitions, DOES>'d words — DictionaryEntry.breakable) invite a
+   click; primitives/CONSTANTs/plain CREATE/VARIABLE stay plain text,
+   matching Machine.setBreakpoint's own rejection of them. */
+.inspector-word.breakable {
+  cursor: pointer;
+}
+
+.inspector-word.breakable:hover {
+  text-decoration: underline;
+}
+
+/* Same class used for both an armed word inside the dictionary list
+   and a chip in the dedicated breakpoints section above it — an armed
+   word is always breakable, so this alone is enough to also imply
+   clickable (no need to combine with .breakable). */
+.inspector-word.breakpoint-word {
+  color: #f55;
+  cursor: pointer;
+}
+
+.inspector-empty {
+  opacity: 0.6;
 }
 
 .bank-table {

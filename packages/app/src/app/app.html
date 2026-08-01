@@ -7,6 +7,13 @@
       <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
     </div>
 
+    @if (pausedWord(); as word) {
+      <div class="pause-bar">
+        <span>paused at {{ word }}</span>
+        <button type="button" class="continue-button" (click)="resumeFromBreakpoint()">Continue</button>
+      </div>
+    }
+
     <div class="storage-bar">
       <span class="stack-label">storage:</span>
       <span class="storage-status">{{ storageStatus() }}</span>
@@ -15,10 +22,27 @@
 
   <aside class="inspector">
     <div class="inspector-section">
+      <div class="inspector-label">breakpoints ({{ breakpointList().length }}):</div>
+      <div class="inspector-words breakpoint-list">
+        @for (name of breakpointList(); track name) {
+          <span class="inspector-word breakpoint-word" (click)="clearBreakpointByName(name)" title="click to clear">● {{ name }}</span>
+        } @empty {
+          <span class="inspector-empty">(none)</span>
+        }
+      </div>
+    </div>
+
+    <div class="inspector-section">
       <div class="inspector-label">dictionary ({{ dictionaryWords().length }}):</div>
-      <div class="inspector-words">
+      <div class="inspector-words dictionary-list">
         @for (w of dictionaryWords(); track w.entryAddr) {
-          <span class="inspector-word">{{ w.name }}@if (w.immediate) {<span class="flag-immediate">*</span>}</span>
+          <span
+            class="inspector-word"
+            [class.breakable]="w.breakable"
+            [class.breakpoint-word]="breakpointWords().has(w.name)"
+            [title]="w.breakable ? 'click to toggle a breakpoint' : 'no compiled body to break on'"
+            (click)="toggleBreakpoint(w)"
+          >{{ w.name }}@if (w.immediate) {<span class="flag-immediate">*</span>}</span>
         }
       </div>
     </div>

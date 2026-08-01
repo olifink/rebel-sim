@@ -979,7 +979,20 @@ confirmed `25` printed and status returned to `"running"` — and that
 *Implementation:* `inner.ts` (`StepSignal`, `Inner.breakpoints`/
 `pausedAtXt`/`checkBreakpoint`), `repl.ts` (`StepStatus`,
 `Machine.setBreakpoint`/`clearBreakpoint`/`listBreakpoints`/
-`pausedAtWord`), `app.ts` (`pausedAtBreakpoint`, five `debug_*` tools).
+`pausedAtWord`), `app.ts` (`pausedWord` signal, five `debug_*` tools).
+
+**Inspector panel UI, added right after** (`DEBUGGING.md` §9): a
+"breakpoints" section, clickable dictionary words, and a "paused at
+WORD — Continue" banner — driven by `Machine.listBreakpoints()`
+diffed in `tick()` exactly like `dictionaryWords`/`bankTable` already
+were, so it stays correct whether a breakpoint was armed from the UI
+or from a WebMCP call. Required one real engine addition:
+`DictionaryEntry.breakable` (`dictionary.ts`) — computed from the
+entry's *current* Code Field (not cached at definition time, since
+`DOES>` rewrites it after the fact) — which also let
+`Machine.setBreakpoint` reject a non-breakable word outright instead
+of silently accepting a breakpoint `Inner.checkBreakpoint` could never
+fire for.
 
 ---
 
