@@ -8,7 +8,12 @@ and opening outward into things that are real but genuinely not
 designed yet. §3 (`SEE`) and §6 (the system-vocabulary loading
 mechanism it shipped alongside) are also **done, M12** — see `PLAN.md`
 for both. §4/§5 (screens, baking) remain future, blocked on
-infrastructure that doesn't exist yet. Expect this to grow across
+infrastructure that doesn't exist yet. §7 (`S"`/`."` real
+interpret-time behavior) is open, not yet built — a genuine low-level
+Forth correctness gap, split off and kept after dropping a larger
+Canon Cat `tForth`-inspired exploration of interactive compile-only
+execution that turned out to belong at a higher (editor-UI) layer than
+this document is currently working at. Expect this to grow across
 several sessions as that infrastructure actually gets built, rather
 than being written once and left alone.
 
@@ -431,3 +436,44 @@ real bugs above were actually found.
 94, `'`/tick — needed once it became clear `SEE`/`WORDS` needed some
 way to resolve a typed name to an `xt` at runtime, which nothing in
 the existing vocabulary provided).
+
+## 7. `S"`/`."` — real interpret-time behavior (open, not yet built)
+
+Split off from a larger Canon Cat `tForth`-inspired exploration
+(interactive execution of compile-only control structures like
+`IF...THEN`/`DO...LOOP`) that turned out to belong at a different
+layer than this document is currently working at — Canon Cat's actual
+mechanism lived in its document editor's "execute this block" command,
+a higher-level UI concern, not a low-level interpreter one. Dropped
+from scope here rather than carried forward half-considered; this
+section keeps only the one piece that's a genuine, already-flagged,
+low-level Forth correctness gap in its own right.
+
+`S"`/`."` are `compileOnly: true` (`rebel-opcodes.json`) for an
+engine-specific reason, not a Forth semantic — `compileInlineString`
+always compiles regardless of `STATE`, and the primitive's own note
+already flags this as an interim scope cut ("Throws if used while
+interpreting (STATE=0) rather than pretending to support it"). In real
+Forth, `S" hello" TYPE` typed loose at the prompt is completely
+ordinary: `S"` parses the string and returns `addr len` directly, no
+compilation involved.
+
+The fix: give `S"`/`."` real dual-mode behavior — while interpreting,
+copy the string into a scratch/transient area and push `addr len`
+directly (no `HERE`/dictionary involvement at all); while compiling,
+keep compiling `(SLIT)` inline exactly as today. Once fixed this way,
+`S"`/`."` genuinely stop being compile-only, so the `compileOnly` flag
+should be removed.
+
+**A real, tested-behavior change, confirmed by checking, not
+assumed:** `strings.test.ts`'s `'S" is compile-time only for now —
+throws a clear error while interpreting'` asserts today's throw
+outright and would need rewriting to assert the new dual-mode
+behavior instead.
+
+**Open, not resolved here:** where does the transient scratch text
+live? Classic Forth has a dedicated `PAD` region for exactly this kind
+of overwritten-on-next-use scratch text; this engine doesn't have one
+yet — worth deciding whether that's a small reserved scratch area (a
+new bank, or a corner of an existing one) before building this, not
+assumed.
