@@ -441,7 +441,7 @@ real bugs above were actually found.
 way to resolve a typed name to an `xt` at runtime, which nothing in
 the existing vocabulary provided).
 
-## 7. `S"`/`."` — real interpret-time behavior (open, not yet built)
+## 7. `S"`/`."` — real interpret-time behavior — done, M16
 
 Split off from a larger Canon Cat `tForth`-inspired exploration
 (interactive execution of compile-only control structures like
@@ -467,20 +467,107 @@ copy the string into a scratch/transient area and push `addr len`
 directly (no `HERE`/dictionary involvement at all); while compiling,
 keep compiling `(SLIT)` inline exactly as today. Once fixed this way,
 `S"`/`."` genuinely stop being compile-only, so the `compileOnly` flag
-should be removed.
+should be removed (`immediate` stays — both still need to run at
+compile time to do their own parsing/compiling, the same reason
+`IF`/`S"` already run immediately while `STATE=-1`).
+
+`S"`/`."` diverge slightly in what "interpreted mode" even means for
+them, so they get two separate (short) case bodies rather than one
+shared dual-mode helper:
+
+- **`S" ( -- addr len )`** — while interpreting, the string has to
+  *outlive* this one primitive call (the caller might pass `addr len`
+  to `TYPE`, store it, compare it — anything), so it needs a real
+  backing address. Copy the text into the scratch area (below), push
+  that area's address, then the length.
+- **`." ( -- )`** — while interpreting, nothing needs to survive past
+  this call: the whole point is printing immediately. No scratch area
+  involved at all — just loop `ctx.screen.emit()` over the parsed
+  text directly, same as `TYPE`'s own loop but fed from the JS string
+  instead of arena bytes.
+
+### Where the scratch text lives — resolved: a new `PAD` bank
+
+Classic Forth's `PAD` is a small, fixed, "overwritten on next use"
+scratch region, entirely separate from any input buffer — real
+systems don't double up `TIB` for this. This engine doesn't have a
+`PAD` yet; adding one (a new bank, tag `PAD`, 128 bytes — the same
+size as `TIB`, plenty for anything typed at the prompt) is the
+smallest thing that's still the *actual* mechanism, not a workaround.
+
+**Rejected alternative, considered and set aside:** reuse the existing
+`TIB` bank as scratch instead of adding a new one. It would technically
+work — by the time a line is being interpreted, `TIB`'s bytes have
+already been copied out into the JS token array `tokenizeAndRun` walks
+(`repl.ts`), so `TIB` really is idle for the rest of that line's
+processing, and nothing currently exposes `TIB`'s base address to
+Forth for anything to read stale bytes back out of it. But it makes
+"terminal input buffer" secretly also mean "string-literal scratch
+area," coupling two call sites (`ACCEPT` and `S"`) through an
+implicit "doesn't overlap *today*" invariant rather than a named
+contract — the same category of mistake this project caught itself
+making with the `VOCABULARY`-based re-filing plan (§8.5): reusing a
+mechanism for an adjacent-but-different job, rather than building the
+actual right-sized one. A dedicated 128-byte `PAD` bank costs about as
+much as `TIB` itself did and keeps each bank's contract to one job.
+
+**Bounds check:** a string longer than the `PAD`'s 128 bytes while
+interpreting throws a clear error rather than silently overwriting
+whatever bank comes after it in the arena — matching this project's
+existing "fail loudly on a scope cut" convention (`ACCEPT`'s
+`maxLen`-capped write, `S"`'s own current compile-only throw) rather
+than real Forth's usual no-bounds-check `PAD`, which only gets away
+with that because it typically sits in unmapped/don't-care memory a
+host language wouldn't tolerate silently corrupting.
+
+**A small, free, in-scope addition:** since `PAD`'s address becomes a
+real, meaningful thing to have once the bank exists, expose it as an
+ordinary primitive, `PAD ( -- addr )` — the same "if it's a real
+address, give Forth source a word for it" precedent `HERE`/`LATEST`
+already set. Costs one more primitive token, nothing else.
 
 **A real, tested-behavior change, confirmed by checking, not
 assumed:** `strings.test.ts`'s `'S" is compile-time only for now —
 throws a clear error while interpreting'` asserts today's throw
-outright and would need rewriting to assert the new dual-mode
-behavior instead.
+outright and needs rewriting to assert the new dual-mode behavior
+instead — the interim scope cut it exists to document goes away
+entirely, not just partially.
 
-**Open, not resolved here:** where does the transient scratch text
-live? Classic Forth has a dedicated `PAD` region for exactly this kind
-of overwritten-on-next-use scratch text; this engine doesn't have one
-yet — worth deciding whether that's a small reserved scratch area (a
-new bank, or a corner of an existing one) before building this, not
-assumed.
+**Implementation sketch:**
+- `rebel-opcodes.json`: remove `compileOnly` from primitives 68
+  (`S"`) and 70 (`."`); add a `PAD` bank tag with a Rebel-Sim-only
+  note (same status as `TIB`'s — no shipped Rebel-ROM Phase 11 to
+  reconcile against yet); add primitive 97, `PAD ( -- addr )`.
+- `repl.ts`: `Machine`'s constructor creates a `PAD` bank (128 bytes,
+  same tier as `TIB_BANK_SIZE`) alongside the existing `tibBank`;
+  expose its `base`/`size` via two new `PrimitiveContext` fields
+  (`padBase`/`padSize`) so `primitives.ts` can bounds-check and write
+  into it without needing the whole `Bank` object.
+- `primitives.ts`: case 68 (`S"`) and case 70 (`."`) each branch on
+  `ctx.sysvars.getState()` — compiling keeps today's `compileSlit`
+  (-`+TYPE`-call, for `."`) path unchanged; interpreting takes the new
+  path described above. Case 97 (`PAD`) is a one-liner:
+  `s.push(ctx.padBase)`.
+- `inner.ts`: **no changes.** `SLIT_TOKEN`'s existing "used outside a
+  compiled word body" guard is about the `(SLIT)` *runtime helper*
+  primitive, not `S"`/`."` themselves — this fix never touches that
+  path.
+
+**Verification plan:** rewrite the one throw-assertion test; add
+cases for `S"`/`."` used loose at the top-level prompt (not inside a
+colon-definition) — `S" hi" TYPE`, `." hi"` — plus one confirming a
+compiled definition using `S"`/`."` is completely unaffected (same
+`(SLIT)` path as always), and one confirming the `PAD`
+bounds-check throws on an oversized interpreted string. Live-verify
+in the browser via the `type` WebMCP tool, same as every milestone
+since M9.
+
+**Scope cuts, explicit:** no attempt to make `PAD` reentrant/nestable
+(`S" a" S" b" TYPE` while interpreting would have the second call
+overwrite the first's bytes before they're used — a documented
+footgun, not a bug, matching real Forth's own `PAD` contract); no
+`WORD`/general tokenizer rework — this only touches `S"`/`."`'s own
+two primitive cases.
 
 ## 8. `VOCABULARY`/`USE` — multiple named dictionary chains — done, M13; decluttering follow-up done differently as `HIDE`, M14 (see `PLAN.md`)
 

@@ -152,7 +152,17 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     blocking (`KEY`/`ACCEPT`) all behave identically to a direct call,
     reusing the shared `rstack` sentinel push/pop `threadFrom` already
     does for every nested call. Detailed below.
-17. Later/open: multi-arena isolation, `hal_error`/exception model,
+17. **M16 — `S"`/`."` real interpret-time behavior** — **done**:
+    `compileOnly` removed from both (`immediate` kept — they still need
+    to run at "compile" time to parse the quoted text either way);
+    `S"`/`."` now each dispatch to one of two case bodies depending on
+    `STATE`, not a single throw-if-interpreting path. A new `PAD` bank
+    (128 bytes, same size as `TIB`) holds the text `S"` copies in while
+    interpreting, exposed to Forth via a new primitive 97, `PAD ( --
+    addr )`. `."` needs no PAD at all while interpreting — it emits
+    directly. Closes `DEVELOPING.md` §7, open since the Canon Cat
+    split-off. Detailed below.
+18. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -1887,3 +1897,86 @@ recursion), and a breakpoint set on a word that's reached only via
 arithmetic on prior counts), 7 new for `EXECUTE`. No app-level
 changes — `EXECUTE` needed zero Angular/UI wiring, same as
 `LATEST-ADDR`.
+
+## M16 — `S"`/`."` real interpret-time behavior — **done**
+
+Closes `DEVELOPING.md` §7, open since the Canon Cat interactive
+control-flow exploration was dropped and `S"`/`."` were shipped
+`compileOnly` as an engine-specific limitation, not a real Forth
+semantic: real Forth supports `S" hello" TYPE` typed loose at the
+prompt.
+
+**The fix, scoped before implementing (per this project's established
+workflow):** `compileOnly` removed from both in `rebel-opcodes.json`
+(`immediate` stays — both still need to run at "compile" time to parse
+the quoted text, whether or not that text ends up compiled anywhere).
+`primitives.ts`'s case 68 (`S"`) and case 70 (`."`) each now branch on
+`ctx.sysvars.getState()` rather than throwing when not `-1`: compiling
+behavior is unchanged (inline `(SLIT)` store for `S"`; the same plus a
+compiled `TYPE` call for `."`); interpreting is new. Deliberately *not*
+a single shared dual-mode helper — `S" ( -- addr len )` must persist
+bytes for the caller to consume, `." ( -- )` only needs to print
+immediately — genuinely different bodies, not one abstraction forced
+over two shapes.
+
+**Where the interpreted text lives:** a new bank, tag `PAD`, 128 bytes
+(same size as `TIB`), created in `repl.ts` alongside `tibBank`, exposed
+to `primitives.ts` as two new `PrimitiveContext` fields (`padBase`/
+`padSize`). Interpreted `S"` copies its text into `PAD` and pushes
+`padBase`/length; interpreted `."` emits directly via `screen.emit()`
+in a loop, never touching `PAD` at all, since nothing needs to persist
+past the print. **Rejected alternative:** reusing the already-idle
+`TIB` bank — technically safe today (`TIB`'s bytes are copied out to a
+token array before dispatch ever runs) but rejected as an *implicit*
+"doesn't overlap today" coupling between `ACCEPT` and `S"` rather than
+a named contract, the same mistake class as the `VOCABULARY`-based
+re-filing idea M14 rejected in favor of `HIDE`. A dedicated bank is the
+minimum real mechanism, not a clever reuse that creates hidden coupling
+— consistent with this project's standing "no gold-plating, no
+premature reuse" discipline.
+
+**Bounds check:** an interpreted `S"` whose text exceeds `padSize`
+throws (`too long for PAD`) rather than silently corrupting whatever
+arena memory sits past `PAD` — stricter than real Forth's typically
+unchecked `PAD`, and a deliberate choice given Rebel-Sim's arena is a
+flat, bounds-checkable `ArrayBuffer`, not raw hardware memory.
+
+**A free addition:** `PAD ( -- addr )`, primitive 97, exposing the
+bank's base address directly — mirrors the `HERE`/`LATEST` precedent,
+costs nothing since the bank already has to exist for `S"` to work.
+
+**`inner.ts`: no changes.** `(SLIT)`'s inner-interpreter guard concerns
+the compiled-mode runtime helper token, an entirely different code path
+from `S"`/`."`'s own primitive dispatch — confirmed by reading it, not
+assumed.
+
+**Verified via the engine test suite** (`strings.test.ts`): the old
+"`S"` throws while interpreting" test was rewritten (the behavior
+changed, not just relaxed) into six new/changed cases — `S"` and `."`
+both working loose at the prompt; `PAD` being a single shared,
+overwritten-on-each-call region (two successive interpreted `S"` calls
+return the same base address, second call's text fully replaces the
+first's); the too-long-for-`PAD` throw; `PAD ( -- addr )` matching
+`S"`'s returned address; and confirming compiled-mode `S"`/`."`
+behavior (inline `DICT` storage, unrelated to `PAD`) is unaffected.
+**Live-verified in the browser** via the WebMCP `type`/`read_screen`/
+`read_banks`/`read_dictionary`/`read_stack` tools: `S" hello" TYPE` and
+`." direct print"` both work loose at the prompt with zero console
+errors; `S" abc" DROP PAD =` returns `-1` (`TRUE`), confirming `S"`'s
+returned address really is `PAD`'s base; `read_banks` shows the new
+`PAD` bank sized and placed correctly right after `TIB`; a compiled
+`S"`-using word defined and called live still works unchanged. One
+live-testing wrinkle, not a bug: typing an over-128-char `S" ..."` line
+at the actual REPL prompt can't reach the `PAD`-overflow throw at all,
+because `ACCEPT`'s pre-existing `TIB` cap (also 128 bytes, M7a) silently
+truncates the *typed line itself* first — the closing `"` never arrives,
+so the error surfaced is `? expected a name, but the input ended`
+instead. Not a regression: `interpret()` (used by the engine test) calls
+`tokenizeAndRun` directly, bypassing `ACCEPT`/`TIB` entirely, which is
+exactly why the unit test can (and does) exercise the real `PAD`-overflow
+path that live typing structurally cannot.
+
+**Tests:** 187 engine tests total (182 after M15; here, `strings.test.ts`
+lost its old throw-while-interpreting case and gained six new ones,
+net +5), confirmed via a full test run. 10 app tests and the full
+build unaffected — no Angular/UI changes.

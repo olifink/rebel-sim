@@ -1226,6 +1226,52 @@ generator chain exactly as they would from a direct call).
 (`EXECUTE_TOKEN` in `dispatch()`). No `primitives.ts` case — it never
 reaches the switch.
 
+### 1.37 `S"`/`."` real interpret-time behavior, and the `PAD` bank (M16, `DEVELOPING.md` §7)
+
+`S"`/`."` were `compileOnly` since M8 — an engine limitation (no
+interpret-time behavior had been built), not a real Forth semantic.
+Both are now dual-mode: `compileOnly` dropped from `rebel-opcodes.json`
+(`immediate` stays — both still need to run at "compile" time to parse
+the quoted text either way), and `primitives.ts`'s case 68 (`S"`)/case
+70 (`."`) each branch on `ctx.sysvars.getState()`. Compiling is
+unchanged: inline `(SLIT)`+length+bytes for `S"`; the same plus a
+compiled `TYPE` call for `."`. Interpreting is new, and deliberately
+*not* unified into one shared helper — `S" ( -- addr len )` must
+persist bytes for the caller to consume afterward; `." ( -- )` only
+needs to print immediately, no persistence at all.
+
+**The `PAD` bank:** a new 128-byte bank (tag `PAD`, sized like `TIB`),
+created in `repl.ts` right alongside `tibBank`, exposed to
+`primitives.ts` as two new `PrimitiveContext` fields — `padBase`/
+`padSize`. Interpreted `S"` copies its text into `PAD` and pushes
+`padBase`, then the length; interpreted `."` never touches `PAD` at
+all, it emits directly through `screen.emit()`. `PAD` is a single
+shared, overwritten-on-every-call region — no reentrancy/nesting
+support, the same footgun real Forth's own `PAD` has, documented not
+hidden. An oversized interpreted string (longer than `padSize`) throws
+rather than silently corrupting adjacent arena memory.
+
+**Rejected alternative:** reusing the already-idle `TIB` bank instead
+of adding a new one. Technically safe today — `TIB`'s bytes are copied
+out into a JS token array before the outer interpreter ever dispatches
+a word, so `S"` writing into `TIB` mid-line couldn't actually collide
+with anything live — but rejected as an *implicit* "doesn't overlap
+today" coupling between `ACCEPT` and `S"` rather than a named contract,
+the same mistake class as the `VOCABULARY`-based re-filing idea §1.35
+rejected in favor of `HIDE`. A dedicated `PAD` bank is the minimum real
+mechanism for what `S"` actually needs, not a clever reuse that would
+quietly couple two otherwise-unrelated subsystems.
+
+**A free addition:** `PAD ( -- addr )`, primitive 97 — the bank already
+has to exist for `S"` to work, so exposing its address to Forth costs
+nothing extra, mirroring the `HERE`/`LATEST` precedent.
+
+*Implementation:* `rebel-opcodes.json` (drop `compileOnly` from 68/70,
+add the `PAD` bank tag, add primitive 97), `repl.ts` (new `padBank`,
+`padBase`/`padSize` fields), `primitives.ts` (dual-mode cases 68/70, a
+one-line case 97). `inner.ts`: no changes — `(SLIT)`'s guard concerns
+the compiled-mode runtime helper token, an unrelated code path.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1348,5 +1394,6 @@ exactly as it would be on the bare-metal target.
 | **M13** | `VOCABULARY`/`USE` (§1.34): branching dictionary chains, not independent chains with a search order — a vocabulary is a `CREATE`d cell capturing the *current* `LATEST` position (a branch point, not empty) when created; `USE` swaps which chain `LATEST` extends. One new primitive, `LATEST-ADDR` (token 95), exposing the sysvar's own cell address so ordinary `@`/`!` can manipulate it — the same gap the dropped `FORGET` exploration hit. Zero `dictionary.ts`/`findWord` changes — `WORDS` becomes vocabulary-scoped for free. | `sysvars.ts`, `rebel-opcodes.json`, `primitives.ts`, `system.fth` |
 | **M14** | `HIDE` (§1.35): decluttering `SEE`'s own support words (`>CFA`/`XT-NAME`/the `-XT` constants) from `WORDS`. The `VOCABULARY`-based plan §8.5 originally sketched doesn't actually work — branching only lets a *later* vocabulary see an *earlier* one, and visibility/listing are the same chain-walk. `HIDE` reuses `FLAG_HIDDEN` instead, permanently, pure Forth, zero engine changes. Every `HIDE` call has to wait until after `SEE` itself, not right after each helper, since `SEE`'s own compilation still needs to find them by name. | `system.fth` only |
 | **M15** | `EXECUTE` (§1.36): one new primitive (token 96, `( xt -- )`), the indirect-call gap M13/M14 both flagged and deferred. Special-cased in `inner.ts`'s `dispatch()` (not `primitives.ts`) — recurses into `executeXT()` itself, so `DOCOL`/`DOVAR`/`DOCON`/`DODOES` dispatch, breakpoints, and nested blocking all work identically to a direct call, reusing the shared `rstack` sentinel `threadFrom` already manages on every call. | `rebel-opcodes.json`, `inner.ts` |
+| **M16** | `S"`/`."` real interpret-time behavior (§1.37): `compileOnly` dropped from both; each now branches on `STATE` in `primitives.ts` instead of throwing while interpreting. A new `PAD` bank (128 bytes, like `TIB`) holds interpreted `S"`'s text; interpreted `."` needs no `PAD` at all. New primitive 97, `PAD ( -- addr )`. Rejected reusing `TIB` — an implicit, undocumented coupling with `ACCEPT` instead of a named contract. `inner.ts` untouched. | `rebel-opcodes.json`, `repl.ts`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

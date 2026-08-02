@@ -609,18 +609,20 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     ambiguity is real and now directly observable, though not yet
     judged worth the dedicated-token fallback.
 14. **[NEW]** `S"`/`."` real interpret-time behavior
-    (`DEVELOPING.md` §7) — open, not yet built. `compileOnly: true`
-    for an accidental, engine-specific reason (`compileInlineString`
-    always compiles regardless of `STATE`), not a Forth semantic —
+    (`DEVELOPING.md` §7) — **done, M16**. `compileOnly: true` had been
+    an accidental, engine-specific reason (`compileInlineString`
+    always compiled regardless of `STATE`), not a Forth semantic —
     real Forth supports `S" hello" TYPE` typed loose at the prompt
-    directly. Fix: dual-mode behavior (push `addr len` from a
-    transient scratch area while interpreting, keep compiling
-    `(SLIT)` inline while compiling), then drop the `compileOnly`
-    flag entirely. Where the transient scratch text lives (a `PAD`-
-    style reserved area doesn't exist in this engine yet) is still
-    open. A related, broader exploration — Canon Cat `tForth`'s
-    interactive execution of compile-only *control-flow* words
-    (`IF...THEN`/`DO...LOOP`) — was considered and dropped: that
+    directly. Fix: dual-mode behavior in `primitives.ts` (push `addr
+    len` from a new `PAD` bank while interpreting, keep compiling
+    `(SLIT)` inline while compiling), `compileOnly` dropped entirely.
+    Where the transient scratch text lives is resolved as a dedicated
+    new bank (tag `PAD`, 128 bytes, sized like `TIB`) rather than
+    reusing the already-idle `TIB` bank — reuse was rejected as an
+    implicit, undocumented coupling between `ACCEPT` and `S"` rather
+    than a named contract. A related, broader exploration — Canon Cat
+    `tForth`'s interactive execution of compile-only *control-flow*
+    words (`IF...THEN`/`DO...LOOP`) — was considered and dropped: that
     mechanism belongs at Canon Cat's actual layer, its document
     editor's "execute this block" UI, not this interpreter's.
 15. **[NEW]** `VOCABULARY`/`USE` — multiple named dictionary chains

@@ -62,6 +62,7 @@ const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
 const TIB_BANK_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a); not a formal size class, just a fixed small scratch region
+const PAD_BANK_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
@@ -122,6 +123,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   private readonly inner: Inner;
   private readonly tibBank: Bank;
   private readonly acceptCfa: number;
+  readonly padBase: number;
+  readonly padSize: number;
   private session: Generator<StepSignal, void, void> | undefined;
 
   /** DEBUGGING.md (M10): word-level breakpoints, a session-local `Set`
@@ -205,6 +208,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     this.tibBank = this.banks.createBank('TIB', TIB_BANK_SIZE, 'TIB');
     this.acceptCfa = findWord(this, 'ACCEPT')!.cfa;
+
+    const padBank = this.banks.createBank('PAD', PAD_BANK_SIZE, 'PAD');
+    this.padBase = padBank.base;
+    this.padSize = padBank.size;
   }
 
   getBase(): number {

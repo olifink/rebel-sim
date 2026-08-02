@@ -42,6 +42,11 @@ export interface PrimitiveContext extends DictionaryContext {
   readonly screen: Screen;
   readonly keyboard: Keyboard;
   readonly channel: Channel;
+  /** DEVELOPING.md §7, M16: the PAD bank — fixed scratch text S" copies
+   * into while interpreting (compiling mode doesn't use it, see the
+   * case 68/70 note below). */
+  readonly padBase: number;
+  readonly padSize: number;
   getBase(): number;
   /** Consumes the next word directly from whatever line the outer
    * interpreter is currently walking — see repl.ts's header comment on
@@ -103,14 +108,27 @@ function compileSlit(ctx: PrimitiveContext, text: string): void {
   ctx.sysvars.setHere(alignCell(start + text.length));
 }
 
-/** Shared by S"/." (§8): both are compile-time only (unlike `(`, which
- * also has a discard-only interpreted-mode behavior — its own case
- * below, not built on this). */
+/** Shared by S"/." while compiling (§8): both compile the same
+ * (SLIT)-based inline-store, the difference between them being only
+ * what gets compiled *after* it (case 68 vs. 70 below). */
 function compileInlineString(ctx: PrimitiveContext): void {
-  if (ctx.sysvars.getState() !== -1) {
-    throw new Error('S"/." only work inside a colon-definition for now');
-  }
   compileSlit(ctx, consumeQuotedText(ctx, '"'));
+}
+
+/** S"'s interpreted-mode body (DEVELOPING.md §7, M16): copies text into
+ * the fixed PAD bank (overwritten on every call, same footgun as real
+ * Forth's PAD — no reentrancy/nesting support) and pushes its addr/len,
+ * so `S" hello" TYPE` works loose at the prompt, not just compiled. */
+function interpretStringLiteral(ctx: PrimitiveContext): void {
+  const text = consumeQuotedText(ctx, '"');
+  if (text.length > ctx.padSize) {
+    throw new Error(`S" text too long for PAD (${text.length} > ${ctx.padSize} bytes)`);
+  }
+  for (let i = 0; i < text.length; i++) {
+    ctx.arena.writeByte(ctx.padBase + i, text.charCodeAt(i));
+  }
+  ctx.stack.push(ctx.padBase);
+  ctx.stack.push(text.length);
 }
 
 export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
@@ -480,9 +498,14 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
 
     // --- §8: strings. (SLIT)'s runtime (pushing addr/len) lives in
-    // inner.ts — these cases only handle the compile-time inline-store. ---
-    case 68: // S" ( -- addr len, at runtime ) IMMEDIATE, compile-time only for now
-      compileInlineString(ctx);
+    // inner.ts for the compiled path; the interpreted path (DEVELOPING.md
+    // §7, M16) uses PAD instead and needs no (SLIT) involvement at all. ---
+    case 68: // S" ( -- addr len ) IMMEDIATE, dual-mode: compile inline vs. PAD at interpret time
+      if (ctx.sysvars.getState() === -1) {
+        compileInlineString(ctx);
+      } else {
+        interpretStringLiteral(ctx);
+      }
       break;
     case 69: { // TYPE ( addr len -- )
       const len = s.pop();
@@ -492,9 +515,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       }
       break;
     }
-    case 70: // ." ( -- ) IMMEDIATE, sugar for S" ... TYPE
-      compileInlineString(ctx);
-      compileCell(ctx, findWord(ctx, 'TYPE')!.cfa);
+    case 70: // ." ( -- ) IMMEDIATE, dual-mode: S" ... TYPE sugar vs. direct emit at interpret time
+      if (ctx.sysvars.getState() === -1) {
+        compileInlineString(ctx);
+        compileCell(ctx, findWord(ctx, 'TYPE')!.cfa);
+      } else {
+        const text = consumeQuotedText(ctx, '"');
+        for (const ch of text) {
+          ctx.screen.emit(ch.charCodeAt(0));
+        }
+      }
       break;
 
     // --- §9: stack/arithmetic rounding out ---
@@ -629,6 +659,10 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
 
     case 95: // LATEST-ADDR ( -- addr ) — DEVELOPING.md §8, see rebel-opcodes.json's note
       s.push(ctx.sysvars.fieldOffset('FORTH', 'LATEST'));
+      break;
+
+    case 97: // PAD ( -- addr ) — DEVELOPING.md §7, M16
+      s.push(ctx.padBase);
       break;
 
     default:

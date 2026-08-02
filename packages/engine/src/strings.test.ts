@@ -35,14 +35,60 @@ describe('Strings (M8, CORE-VOCABULARY.md §8)', () => {
     expect(m.screen.readRowText(0).trimEnd()).toBe('hi');
   });
 
-  it('S" is compile-time only for now — throws a clear error while interpreting', () => {
+  it('S" works loose at the prompt now (M16, DEVELOPING.md §7) — pushes addr/len via PAD, not a throw', () => {
     const m = new Machine();
-    // compileOnly (checked by the outer interpreter before dispatch, per
-    // the M8 IF/DO/... fix) fires first; the internal STATE check inside
-    // compileInlineString is a redundant defensive backstop for a path
-    // that's actually unreachable now (S" is always IMMEDIATE, so it can
-    // never end up compiled as a plain call into another word's body).
-    expect(() => m.interpret('S" oops"')).toThrow(/compile-only/);
+    m.interpret('S" hello" TYPE');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('hello');
+  });
+
+  it('." works loose at the prompt too, printing directly with no PAD involved', () => {
+    const m = new Machine();
+    m.interpret('." hi there"');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('hi there');
+  });
+
+  it('interpreted S" is overwritten by the next S" call — PAD is a single shared scratch region, not per-call storage', () => {
+    const m = new Machine();
+    m.interpret('S" first"');
+    const len1 = m.stack.pop();
+    const addr1 = m.stack.pop();
+    m.interpret('S" second-longer"');
+    const len2 = m.stack.pop();
+    const addr2 = m.stack.pop();
+    expect(addr1).toBe(addr2); // same PAD base, reused
+    let text = '';
+    for (let i = 0; i < len2; i++) text += String.fromCharCode(m.arena.readByte(addr2 + i));
+    expect(text).toBe('second-longer');
+    expect(len1).toBe(5);
+  });
+
+  it('interpreted S" throws if the text is too long for PAD, rather than corrupting adjacent arena memory', () => {
+    const m = new Machine();
+    const tooLong = 'x '.repeat(100).trim(); // words joined by consumeQuotedText exceed padSize (128)
+    expect(() => m.interpret(`S" ${tooLong}"`)).toThrow(/too long for PAD/);
+  });
+
+  it('PAD ( -- addr ) exposes the scratch region address directly', () => {
+    const m = new Machine();
+    m.interpret('S" abc" DROP PAD =');
+    expect(m.stack.pop()).toBe(-1); // TRUE — S"'s addr is PAD's base
+  });
+
+  it('compiled S"/." behavior is unaffected by the interpreted-mode addition — still inline-compiled, no PAD involved', () => {
+    const m = new Machine();
+    m.interpret(': GREET S" hello" TYPE ;');
+    m.interpret('GREET');
+    const addrBefore = (() => {
+      m.interpret(': GET S" hello" ;');
+      m.interpret('GET');
+      const len = m.stack.pop();
+      const addr = m.stack.pop();
+      expect(len).toBe(5);
+      return addr;
+    })();
+    m.interpret('PAD');
+    const padBase = m.stack.pop();
+    expect(addrBefore).not.toBe(padBase); // compiled string lives in DICT, not PAD
   });
 
   it('S"/." now support multi-word strings (DEVELOPING.md §2.4 fixed the old single-token-only limitation)', () => {
