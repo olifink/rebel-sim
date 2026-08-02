@@ -22,3 +22,7 @@ coverage/
 # System files
 .DS_Store
 Thumbs.db
+
+# references
+rebel-rom
+rebel-rom/
