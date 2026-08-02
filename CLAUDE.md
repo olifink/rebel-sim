@@ -13,17 +13,42 @@ scripts before relying on it.
 
 ## What this project is
 
-**Rebel-Sim** is the planned browser-based (TypeScript/Angular) simulator
-for **Rebel**, a bare-metal "keyboard computer." It's one of three targets
-that must all run **identical Forth source** at the word-definition level:
+**Rebel-Sim** is the browser-based (TypeScript/Angular) simulator for
+**Rebel**, a bare-metal "keyboard computer." It's one implementation in
+a growing family of targets that must all run **identical Forth source**
+at the word-definition level — `HAL.md` (repo root) has the concrete,
+code-level breakdown of the family and how far each one has actually
+gotten; this list is the short version, and `HAL.md` is the one to
+correct first if it drifts:
 
-- **Rebel-Sim** (this repo) — TypeScript/Angular, browser-based, fast-iteration simulator for tool development. Does not exist in code yet.
-- **Rebel-ROM** — C++/Circle bare-metal on Arm (Pi 500/400). **The reference implementation** — the only one of the three that currently exists in code (lives in a separate repo, not here). Phases 3–9 are done and hardware-verified.
-- **Rebel-Board** — RISC-V (Pico 2 / RP2350), custom hardware. Does not exist in code yet.
+- **Rebel-Sim** (this repo) — TypeScript/Angular, browser-based,
+  fast-iteration simulator. **Ahead on the interpreter**: a working
+  token-threaded Forth engine (`PLAN.md`'s milestone log, M1 onward)
+  with a real dictionary, compiler, and a growing primitive set — the
+  design lab the hardware targets get implemented against, not a
+  simulator trailing a finished reference.
+- **`rebel-rom`** — C++/Circle bare-metal on Arm, the Pi 400/500
+  family. Symlinked into this checkout at `rebel-rom/` (gitignored —
+  a sibling repo on disk, not vendored; may not be present in every
+  checkout, don't assume it without checking). **Ahead on the
+  hardware substrate**: memory/banks, sysvars, screen, font, execution
+  loop/scheduler, keyboard, and storage are implemented and
+  hardware-verified — but its Forth executor doesn't exist yet, so
+  there's no C++ Forth engine to compare Rebel-Sim's primitive
+  behavior against, only the substrate it'll eventually run on.
+- **Rebel Machine MkI** — custom hardware: RP2350 (RISC-V), HSTX
+  display, SPI flash + RAM, with a separate RP2040 co-processor
+  handling the keyboard matrix and custom controls. Does not exist in
+  code yet.
+- **Headless Rebel firmware** — RP2350 (Arm and RISC-V builds) /
+  RP2040, UART-channel-driven, no display/keyboard. Does not exist in
+  code yet.
+- **Further out, unscoped:** ESP32-S2, UEFI.
 
-Rebel-Sim's whole purpose is to let Forth source/tool development happen at
-browser-refresh speed instead of flash-a-Pi speed, while staying faithful
-to Rebel-ROM's shipped design.
+Rebel-Sim's whole purpose is to let Forth engine design happen at
+browser-refresh speed instead of flash-a-device speed — the other
+targets catch up to what gets designed and proven here, not the
+reverse.
 
 ## Required reading before writing any code
 
@@ -48,16 +73,30 @@ source when you just need to understand how something works; update it
 when a milestone changes or adds a mechanism. `PLAN.md` is the separate
 decision/build log (what shipped, when, why) — don't conflate the two.
 
-Both documents reference several `docs/*.md` files (`docs/MEMORY-MODEL.md`,
-`docs/SYSVARS.md`, `docs/SCREEN-MODULE.md`, `docs/KEYBOARD.md`,
-`docs/STORAGE.md`, `docs/EXECUTION-LOOP.md`) and a `CLAUDE.md`/`PLAN.md`
-from the **Rebel-ROM** repo as sources of truth for implementation detail.
-**These live in the separate Rebel-ROM repo, not here** — do not assume
-they exist in this checkout. Where `FORTH-ARCHITECTURE.md` cites specific
+**Then read `HAL.md`** (repo root) — the concrete, code-checked version
+of the cross-target HAL contract `FORTH-ARCHITECTURE.md` only names
+abstractly (`hal_emit`, `hal_key_pressed?`, …), verified directly
+against `rebel-rom`'s real source where it names something specific.
+Prefer it over re-deriving a HAL fact from scratch; extend it, don't
+duplicate it, when a HAL-boundary question comes up.
+
+Both `FORTH-ARCHITECTURE.md` and `PORTING-WEB.md` reference several
+`docs/*.md` files (`docs/MEMORY-MODEL.md`, `docs/SYSVARS.md`,
+`docs/SCREEN-MODULE.md`, `docs/KEYBOARD.md`, `docs/STORAGE.md`,
+`docs/EXECUTION-LOOP.md`) and a `CLAUDE.md`/`PLAN.md` from the
+**`rebel-rom`** repo as sources of truth for implementation detail.
+**These live in a separate repo** — but as of `HAL.md`, that repo is
+often reachable from here via a gitignored symlink, `rebel-rom/` (a
+sibling checkout on disk, not vendored). Check whether `rebel-rom/`
+actually resolves before assuming either way — it won't be present in
+every checkout (e.g. a fresh clone without the sibling repo alongside
+it), and `HAL.md` itself may have been written in a session that had
+it and gone stale since. Where `FORTH-ARCHITECTURE.md` cites specific
 C++ classes/methods (`CBankTable::CreateBank`, `CScreenModule::Emit`,
-`CKeyboardModule::ReadEvent`, …), read those as precise descriptions of
-required *behavior* to reimplement faithfully in TypeScript — there is
-nothing in this repo to link or import against.
+`CKeyboardModule::ReadEvent`, …) and `rebel-rom/` isn't available,
+read those as precise descriptions of required *behavior* to
+reimplement faithfully in TypeScript rather than something to link or
+import against.
 
 ## Architectural rules that will shape any code written here
 
