@@ -575,12 +575,17 @@ VARIABLE CURRENT-VOCAB
 ```
 
 Verified by hand, cell by cell, against this engine's actual `@ (
-addr -- x )`/`! ( x addr -- )` stack effects — not hand-waved. Needs
-`EXECUTE` for a cleaner `' <name> EXECUTE` form instead of the manual
-`8 +`, but `EXECUTE` doesn't exist yet either (checked, not assumed —
-94 primitives, none named `EXECUTE`) — a real, adjacent, generally
-useful primitive gap, same tier as `'` was for M12, but a separable
-concern from this one.
+addr -- x )`/`! ( x addr -- )` stack effects — not hand-waved. This
+used the manual `' <name> 8 +` form rather than a cleaner `' <name>
+EXECUTE` — at the time, `EXECUTE` genuinely didn't exist (checked, not
+assumed — 94 primitives, none named `EXECUTE`). **Resolved, M15:**
+`EXECUTE ( xt -- )` now exists (token 96, `IMPLEMENTATION.md` §1.36),
+special-cased in `inner.ts` rather than `primitives.ts` since it needs
+to recurse into `executeXT` itself — DOCOL/DOVAR/DOCON/DODOES,
+breakpoints, and nested blocking all fall out of that for free. `USE`
+itself wasn't rewritten to use it (the `8 +` form still works and
+isn't broken), but any future indirect-call need in `system.fth` can
+now reach for `EXECUTE` directly instead of hand-rolling the offset.
 
 **Why branching gets the actual goal (declutter/isolation) right,
 verified by tracing through it, not assumed:** switching to a

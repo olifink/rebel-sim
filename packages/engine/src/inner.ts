@@ -81,6 +81,7 @@ const BRANCH_TOKEN = opcodes.primitives.find((p) => p.name === 'BRANCH')!.id;
 const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
 const DOES_TOKEN = opcodes.primitives.find((p) => p.name === '(DOES>)')!.id;
 const SLIT_TOKEN = opcodes.primitives.find((p) => p.name === '(SLIT)')!.id;
+const EXECUTE_TOKEN = opcodes.primitives.find((p) => p.name === 'EXECUTE')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
@@ -264,6 +265,16 @@ export class Inner {
   private *dispatch(token: number): Generator<StepSignal, void, void> {
     if (token === ACCEPT_TOKEN) {
       yield* this.accept();
+      return;
+    }
+    if (token === EXECUTE_TOKEN) {
+      // Recurse into the same top-level entry point a direct call would
+      // use — DOCOL/DOVAR/DOCON/DODOES dispatch, breakpoints, and nested
+      // blocking (KEY/ACCEPT) all fall out of this for free, since
+      // executeXT's own threadFrom() pushes/pops its own rstack sentinel
+      // regardless of whether it was reached via a compiled call or here.
+      const xt = this.ctx.stack.pop();
+      yield* this.executeXT(xt);
       return;
     }
     if (token === KEY_TOKEN) {

@@ -1194,6 +1194,38 @@ by name right up until its closing `;`.
 *Implementation:* `packages/app/public/system.fth` (`HIDE`, and the
 seven `HIDE <name>` calls after `SEE`). No engine changes.
 
+### 1.36 `EXECUTE` (M15)
+
+`EXECUTE ( xt -- )` runs the word whose Code Field address is on the
+stack, exactly as if it had been called directly — the gap M13/M14
+both flagged and deferred (`USE`'s own `' <name> 8 +` addressing had
+to work around not having it; nothing else in scope needed it until
+now). A new primitive token, 96, no `immediate`/`compileOnly` flags —
+an ordinary runtime word, auto-registered into the dictionary by
+`Machine`'s constructor loop over `opcodes.primitives` with zero
+`repl.ts`/`dictionary.ts` changes.
+
+**Why `inner.ts`, not a `primitives.ts` case:** the same reason
+`ACCEPT` lives there — `executePrimitive`'s switch runs to completion
+in one synchronous call and has no way to reach `executeXT`.
+`Inner.dispatch()` special-cases `EXECUTE_TOKEN` right alongside
+`ACCEPT_TOKEN`/`KEY_TOKEN`: pop the `xt`, then `yield*
+this.executeXT(xt)`. Because `executeXT`/`threadFrom` already
+push/pop their own return-stack sentinel on *every* call — compiled
+(a `DOCOL` slot inside another word's body) or not — recursing into
+`executeXT` from `dispatch()` is exactly the same shape as a nested
+call, just reached from a dynamic runtime value instead of a
+compile-time slot address. This is what makes `EXECUTE` correctly
+inherit, for free: `DOCOL`/`DOVAR`/`DOCON`/`DODOES` dispatch,
+word-level breakpoints (`checkBreakpoint` fires identically whether
+the `xt` was reached via a compiled call or `EXECUTE`), and nested
+blocking (`KEY`/`ACCEPT` inside the executed word suspend the whole
+generator chain exactly as they would from a direct call).
+
+*Implementation:* `rebel-opcodes.json` (token 96), `inner.ts`
+(`EXECUTE_TOKEN` in `dispatch()`). No `primitives.ts` case — it never
+reaches the switch.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1315,5 +1347,6 @@ exactly as it would be on the bare-metal target.
 | **M12** | System vocabulary (§1.33): `WORDS`/`SEE` loaded as genuine Forth source from `packages/app/public/system.fth` at boot, not native primitives — an interim step before real portable screens/carts exist. One new primitive, `'` (tick, token 94), needed since nothing let Forth-level code resolve a name to an `xt` at runtime before this. `SEE` is a real decompiler (`>CFA`/`XT-NAME` reverse-walk the dictionary); confirms live a tradeoff §1.32 only predicted (the comment encoding is ambiguous against a genuine discarded string). | `system.fth`, `app.ts`, `rebel-opcodes.json`, `primitives.ts` |
 | **M13** | `VOCABULARY`/`USE` (§1.34): branching dictionary chains, not independent chains with a search order — a vocabulary is a `CREATE`d cell capturing the *current* `LATEST` position (a branch point, not empty) when created; `USE` swaps which chain `LATEST` extends. One new primitive, `LATEST-ADDR` (token 95), exposing the sysvar's own cell address so ordinary `@`/`!` can manipulate it — the same gap the dropped `FORGET` exploration hit. Zero `dictionary.ts`/`findWord` changes — `WORDS` becomes vocabulary-scoped for free. | `sysvars.ts`, `rebel-opcodes.json`, `primitives.ts`, `system.fth` |
 | **M14** | `HIDE` (§1.35): decluttering `SEE`'s own support words (`>CFA`/`XT-NAME`/the `-XT` constants) from `WORDS`. The `VOCABULARY`-based plan §8.5 originally sketched doesn't actually work — branching only lets a *later* vocabulary see an *earlier* one, and visibility/listing are the same chain-walk. `HIDE` reuses `FLAG_HIDDEN` instead, permanently, pure Forth, zero engine changes. Every `HIDE` call has to wait until after `SEE` itself, not right after each helper, since `SEE`'s own compilation still needs to find them by name. | `system.fth` only |
+| **M15** | `EXECUTE` (§1.36): one new primitive (token 96, `( xt -- )`), the indirect-call gap M13/M14 both flagged and deferred. Special-cased in `inner.ts`'s `dispatch()` (not `primitives.ts`) — recurses into `executeXT()` itself, so `DOCOL`/`DOVAR`/`DOCON`/`DODOES` dispatch, breakpoints, and nested blocking all work identically to a direct call, reusing the shared `rstack` sentinel `threadFrom` already manages on every call. | `rebel-opcodes.json`, `inner.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

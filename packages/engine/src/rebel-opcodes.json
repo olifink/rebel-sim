@@ -114,7 +114,9 @@
 
     { "id": 94, "name": "'", "note": "DEVELOPING.md §6 (system vocabulary loading): tick. ( -- xt ) Not IMMEDIATE — runs at execution time like CREATE, so a Forth-defined word that compiles a call to ' (e.g. `: SEE ' ... ;`) correctly consumes its *caller's* next input word when it executes, the same shared-cursor mechanism CREATE already relies on. Parses the next input word, looks it up, errors (`? unrecognized word`) if not found, else pushes its cfa. Added specifically because there was previously no way for Forth-level source to resolve a name to an xt at runtime — a real, necessary primitive addition, not a SEE-specific hack." },
 
-    { "id": 95, "name": "LATEST-ADDR", "note": "DEVELOPING.md §8 (VOCABULARY/USE): ( -- addr ) pushes the raw arena address of the LATEST sysvar cell itself (not its current value — LATEST already does that), so ordinary @/! can read and write it directly. Real Forth systems usually expose HERE/LATEST/STATE/BASE as ordinary variables rather than read-only accessors; this fixes that gap for LATEST specifically, the one VOCABULARY/USE need, rather than a blanket change." }
+    { "id": 95, "name": "LATEST-ADDR", "note": "DEVELOPING.md §8 (VOCABULARY/USE): ( -- addr ) pushes the raw arena address of the LATEST sysvar cell itself (not its current value — LATEST already does that), so ordinary @/! can read and write it directly. Real Forth systems usually expose HERE/LATEST/STATE/BASE as ordinary variables rather than read-only accessors; this fixes that gap for LATEST specifically, the one VOCABULARY/USE need, rather than a blanket change." },
+
+    { "id": 96, "name": "EXECUTE", "note": "( xt -- ) pops a code-field address and runs it exactly as if it had been called directly — DOCOL threading, DOVAR/DOCON/DODOES dispatch, breakpoints, and a blocking word (KEY/ACCEPT) inside it all behave identically to a normal call. Special-cased in inner.ts's dispatch(), never reaches primitives.ts's switch, because it needs to recurse into executeXT() itself (generator-level access a plain stack-effect primitive doesn't have), the same reason ACCEPT is handled there instead of here." }
   ],
 
   "bankTags": {

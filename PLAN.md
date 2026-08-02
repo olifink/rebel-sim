@@ -142,7 +142,17 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     already-compiled caller like `SEE` is unaffected by hiding a word
     it calls, since compiled calls are raw addresses, not names to
     re-resolve. Detailed below.
-16. Later/open: multi-arena isolation, `hal_error`/exception model,
+16. **M15 — `EXECUTE`** — **done**: one new primitive (token 96,
+    `( xt -- )`), the gap M13/M14's write-ups both flagged and
+    deferred (indirect calls only worked via manual `8 +` arithmetic
+    in `USE`, and `EXECUTE` itself was confirmed absent — checked, not
+    assumed). Special-cased in `inner.ts`'s `dispatch()`, not a plain
+    `primitives.ts` case: it recurses into `executeXT()` itself so
+    DOCOL/DOVAR/DOCON/DODOES dispatch, breakpoints, and nested
+    blocking (`KEY`/`ACCEPT`) all behave identically to a direct call,
+    reusing the shared `rstack` sentinel push/pop `threadFrom` already
+    does for every nested call. Detailed below.
+17. Later/open: multi-arena isolation, `hal_error`/exception model,
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -1836,3 +1846,44 @@ self-contained `primitives.ts` case, and nothing currently in scope
 actually needs it — `USE` already works without it). 10 app tests
 unaffected, `system.fth` growing being exactly what M12's loading
 mechanism was built to absorb.
+
+## M15 — `EXECUTE` — **done**
+
+Closes the gap M13/M14 both flagged and deferred: `EXECUTE ( xt -- )`,
+run the word whose code-field address is on the stack, exactly as if
+it had been called directly. One new primitive token, 96, added to
+`rebel-opcodes.json` (no `immediate`, no `compileOnly` — it's an
+ordinary runtime word). Auto-registered into the dictionary for free
+by `Machine`'s constructor loop over `opcodes.primitives` — confirmed
+by re-reading that loop rather than assuming, same discipline as every
+other primitive addition this project — so no `repl.ts`/`dictionary.ts`
+changes were needed, only `rebel-opcodes.json` plus `inner.ts`.
+
+**Why it's special-cased in `inner.ts`, not `primitives.ts`:** same
+reason `ACCEPT` is — a plain `executePrimitive` switch case runs to
+completion in one synchronous call and has no access to `executeXT`
+itself. `EXECUTE` pops the `xt` and does `yield* this.executeXT(xt)`
+from inside `dispatch()` — genuine generator delegation, not a new
+mechanism. This means it gets DOCOL/DOVAR/DOCON/DODOES dispatch,
+word-level breakpoints, and nested blocking (`KEY`/`ACCEPT` inside the
+executed word) all correctly, for free: `executeXT`'s own `threadFrom`
+already pushes/pops its own return-stack sentinel on every call
+(compiled or not), so recursing into it from `dispatch()` is no
+different from a nested `DOCOL` slot in an ordinary compiled body —
+the shared `rstack` just grows one more frame, same as always.
+
+**Verified via the engine test suite** (not yet re-verified live in
+the browser — this primitive has no UI-visible behavior beyond what
+`'`/direct calls already exercised): `execute.test.ts`, 7 new cases —
+`EXECUTE` on a primitive (`DUP`), a colon-definition (`DOCOL`
+threading), a `VARIABLE` (`DOVAR`), a `CONSTANT` (`DOCON`), a
+`CREATE...DOES>` word (`DODOES`), a nested case (a word `EXECUTE`d
+itself calls `EXECUTE` on another xt, exercising the shared-rstack
+recursion), and a breakpoint set on a word that's reached only via
+`' NAME EXECUTE` rather than a direct compiled call — confirms
+`Inner.checkBreakpoint` fires identically either way.
+
+**Tests:** 182 engine tests total (confirmed via a full test run, not
+arithmetic on prior counts), 7 new for `EXECUTE`. No app-level
+changes — `EXECUTE` needed zero Angular/UI wiring, same as
+`LATEST-ADDR`.
