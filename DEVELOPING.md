@@ -737,3 +737,125 @@ case — project/cart isolation — just not this one.
   expected, M14:** vocabularies turned out to be the wrong tool for
   this specific goal — see §8.5's rewrite. `HIDE` solved it instead,
   with zero connection to `VOCABULARY`/`USE` at all.
+
+
+## 9. `ABORT` — done, M17
+
+Originally scoped as a full `THROW`/`CATCH`/`ABORT` exception model
+(`FORTH-ARCHITECTURE.md` §9 item 3/14). **Reconsidered and trimmed**:
+`THROW`/`CATCH` — and the `ForthError` class hierarchy, ANS-code
+bucketing of ~30 throw sites, and new `LAST-ERROR` sysvar that
+existed only to serve them — are tabled. This project doesn't need to
+track ANS Forth conformance closely, and none of that machinery has a
+real consumer without `CATCH` actually existing to use it; building it
+speculatively ahead of an actual need is exactly what this project's
+own scope discipline (`CLAUDE.md`) warns against. Revisit only if a
+concrete need for catchable errors shows up — not by default.
+
+What's still worth building: a classic `ABORT` — empty the data
+stack and get back to a clean prompt, callable from Forth source
+itself (e.g. `... IF ." bad input" ABORT THEN`), not just something
+that happens to you via an uncaught JS exception.
+
+### A genuine, pre-existing bug found while scoping this (confirmed empirically)
+
+`threadFrom()` (`inner.ts`) pushes an rstack sentinel (or, for a
+nested `DOCOL` call within the same loop, a return `ip`) with no
+`try`/`finally` around the loop that's supposed to pop it back off.
+When an exception is thrown from anywhere inside — a primitive, a
+stack under/overflow, anything — that push is simply never undone.
+Confirmed live, not assumed: defining a word that throws when called,
+then repeatedly interpreting it in the same `Machine`, grows
+`rstack.depth` by exactly one on every single error (checked: 0 → 1 →
+2 across two successive caught errors). Neither `replLoop` nor
+`runLine`'s `catch` blocks reset `rstack` (or the data stack) today —
+this leak is real, silent, and accumulates forever in a long-lived
+session. Worth fixing alongside `ABORT`, since an `ABORT` that clears
+the data stack but leaves the return stack quietly corrupted wouldn't
+actually deliver "a clean prompt" — the two are the same underlying
+fix, not two separate features bundled together.
+
+### Design
+
+One new primitive, **`ABORT ( -- )`, token 98** (next free after
+`PAD`, M16), an ordinary `primitives.ts` case — no generator access
+needed: `ctx.stack.clear(); throw new Error('ABORT');`. `DataStack`
+gains a new `clear()` method (`this.sp = bank.base + bank.size`, i.e.
+depth back to 0) — the one new piece of shared mechanism this
+actually needs. `ABORT` throwing a plain `Error('ABORT')` (no new
+error class) is deliberate: nothing distinguishes it from any other
+error without `CATCH` to special-case it, so a dedicated class would
+have no consumer — same "don't build ahead of an actual need"
+reasoning as tabling `THROW`/`CATCH` itself. Uncaught, it surfaces via
+the *existing* `replLoop`/`runLine` catch-and-print path exactly like
+every other error already does today (`? ABORT`) — no new display
+logic needed.
+
+**`replLoop`'s catch block also gets a stack/rstack clear**, for
+*any* uncaught error, not just explicit `ABORT` — this is the actual
+fix for the leak above, and it's what makes an ordinary uncaught error
+(divide-by-zero, an unrecognized word, anything) behave the same way
+`ABORT` does: back to a genuinely clean prompt, not a data stack reset
+sitting on top of a silently-growing return stack.
+
+```ts
+} catch (err) {
+  if (this.sysvars.getState() === -1) abortDefinition(this);
+  this.stack.clear();
+  this.rstack.clear();
+  const message = err instanceof Error ? err.message : String(err);
+  this.emitString(`? ${message}`);
+}
+```
+
+**Deliberately not applied to `interpret()`/`runLine()`** (the
+programmatic path `beginLine()`/`step()`/every engine test uses) —
+that contract stays exactly as documented today ("throws exactly as
+before on a genuine error," no side effects beyond the existing
+mid-compile cleanup). Host callers may have real reasons to inspect
+post-error stack state. Only the interactive on-screen/WebMCP REPL —
+the one place a human or agent is actually typing successive lines
+into one long-lived session — gets the new recovery behavior.
+
+### Rejected/tabled
+
+- **`THROW`/`CATCH`, the `ForthError` class hierarchy, ANS-code
+  bucketing, and `LAST-ERROR`** — see above. Not rejected as wrong,
+  just not worth building without a concrete need driving it; "probably
+  not," per direction, unless something later actually needs catchable
+  errors.
+- **`ABORT"`** — needs its own quoted-string parsing (`S"`-style);
+  a separate unit of work regardless, not folded in here either.
+
+### Implementation sketch
+
+- `stack.ts`: new `DataStack.clear()` method.
+- `rebel-opcodes.json`: token 98, `ABORT`.
+- `primitives.ts`: case 98, `ABORT`.
+- `repl.ts`: `replLoop`'s catch block clears both stacks on any
+  uncaught error (fixes the confirmed leak generally, not just for
+  explicit `ABORT`).
+
+### Verification plan
+
+- New engine test(s): `ABORT` empties a non-empty data stack and
+  throws. The `rstack`-leak fix has to be verified through
+  `startRepl()`/`replLoop` specifically (a fresh `Machine`,
+  `startRepl()`, feed a throwing line via a test `Channel`, `step()`
+  through it, then check `rstack.depth === 0`) — the programmatic
+  `interpret()` path is explicitly *not* getting this fix, so a test
+  asserting the fix must drive it through `replLoop`, not
+  `interpret()`.
+- Live, via WebMCP: an uncaught `5 0 /` at the prompt leaves
+  `read_return_stack`/`read_stack` both empty afterward; an explicit
+  `ABORT` after pushing some values does the same.
+- Full engine + app test suite and `npm run build` — confirm zero
+  regressions, same discipline as every prior milestone.
+
+### Scope cuts, explicit
+
+- No `THROW`/`CATCH`, no `ForthError`, no `LAST-ERROR`, no ANS
+  error-code assignments of any kind.
+- No `ABORT"`.
+- `interpret()`/`runLine()`'s host-facing error contract is unchanged
+  — only the interactive `replLoop` gets stack-reset-on-error.

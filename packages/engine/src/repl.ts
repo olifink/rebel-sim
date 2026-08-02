@@ -392,6 +392,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         if (this.sysvars.getState() === -1) {
           abortDefinition(this);
         }
+        // DEVELOPING.md §9, M17: any uncaught error gets back to a
+        // genuinely clean prompt, not just a printed message — fixes a
+        // real, confirmed bug (threadFrom's rstack sentinel push has no
+        // try/finally, so it leaks one entry per uncaught error
+        // otherwise) and makes ABORT's own behavior the same thing every
+        // other error already does, not a special case. Deliberately
+        // NOT applied to interpret()/runLine() — that's a separate,
+        // unchanged contract for programmatic callers.
+        this.stack.clear();
+        this.rstack.clear();
         const message = err instanceof Error ? err.message : String(err);
         this.emitString(`? ${message}`);
       }

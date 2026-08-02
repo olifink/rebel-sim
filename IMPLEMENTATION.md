@@ -1272,6 +1272,39 @@ add the `PAD` bank tag, add primitive 97), `repl.ts` (new `padBank`,
 one-line case 97). `inner.ts`: no changes — `(SLIT)`'s guard concerns
 the compiled-mode runtime helper token, an unrelated code path.
 
+### 1.38 `ABORT`, and a fixed return-stack leak (M17, `DEVELOPING.md` §9)
+
+Originally scoped as a full `THROW`/`CATCH`/`ABORT` exception model,
+then deliberately trimmed to just `ABORT` before implementing — see
+`DEVELOPING.md` §9 for the full reasoning (`THROW`/`CATCH` and
+everything that existed only to serve them are tabled, not built ahead
+of an actual need).
+
+`ABORT ( -- )`, primitive 98, an ordinary `primitives.ts` case: empty
+the data stack, then `throw new Error('ABORT')`. `DataStack` gains a
+new `clear()` method (`this.sp = bank.base + bank.size`) — `ABORT`'s
+only real new piece of shared mechanism. No dedicated error class:
+without `CATCH`, nothing needs to distinguish `ABORT` from any other
+error, so it surfaces uncaught through the exact same `? <message>`
+path every error already used (`? ABORT`).
+
+**A real bug, found while scoping and fixed here:** `threadFrom()`'s
+rstack sentinel push (`inner.ts`) has no `try`/`finally`, so any
+exception thrown from inside a compiled call leaves that push on
+`rstack` permanently — confirmed empirically (repeatedly interpreting
+a throwing word grows `rstack.depth` by exactly one *per error*,
+unbounded). `replLoop`'s catch block now clears both `stack` and
+`rstack` on any uncaught error, not just explicit `ABORT` — otherwise
+`ABORT` would clear the data stack while leaving the return stack
+silently corrupted. Deliberately **not** applied to `interpret()`/
+`runLine()` — that programmatic contract (used by every engine test)
+is unchanged; only the interactive `replLoop` gets the new recovery
+behavior.
+
+*Implementation:* `stack.ts` (`DataStack.clear()`), `rebel-opcodes.json`
+(token 98), `primitives.ts` (case 98), `repl.ts` (`replLoop`'s catch
+block clears both stacks).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1395,5 +1428,6 @@ exactly as it would be on the bare-metal target.
 | **M14** | `HIDE` (§1.35): decluttering `SEE`'s own support words (`>CFA`/`XT-NAME`/the `-XT` constants) from `WORDS`. The `VOCABULARY`-based plan §8.5 originally sketched doesn't actually work — branching only lets a *later* vocabulary see an *earlier* one, and visibility/listing are the same chain-walk. `HIDE` reuses `FLAG_HIDDEN` instead, permanently, pure Forth, zero engine changes. Every `HIDE` call has to wait until after `SEE` itself, not right after each helper, since `SEE`'s own compilation still needs to find them by name. | `system.fth` only |
 | **M15** | `EXECUTE` (§1.36): one new primitive (token 96, `( xt -- )`), the indirect-call gap M13/M14 both flagged and deferred. Special-cased in `inner.ts`'s `dispatch()` (not `primitives.ts`) — recurses into `executeXT()` itself, so `DOCOL`/`DOVAR`/`DOCON`/`DODOES` dispatch, breakpoints, and nested blocking all work identically to a direct call, reusing the shared `rstack` sentinel `threadFrom` already manages on every call. | `rebel-opcodes.json`, `inner.ts` |
 | **M16** | `S"`/`."` real interpret-time behavior (§1.37): `compileOnly` dropped from both; each now branches on `STATE` in `primitives.ts` instead of throwing while interpreting. A new `PAD` bank (128 bytes, like `TIB`) holds interpreted `S"`'s text; interpreted `."` needs no `PAD` at all. New primitive 97, `PAD ( -- addr )`. Rejected reusing `TIB` — an implicit, undocumented coupling with `ACCEPT` instead of a named contract. `inner.ts` untouched. | `rebel-opcodes.json`, `repl.ts`, `primitives.ts` |
+| **M17** | `ABORT` (§1.38): scoped in full as `THROW`/`CATCH`/`ABORT`, deliberately trimmed to just `ABORT` (token 98) before implementing — no consumer for the rest without `CATCH`, and this project doesn't track ANS conformance closely. Empties the data stack (`DataStack.clear()`, new) and throws a plain `Error`. Found and fixed a real, independent bug along the way: `threadFrom`'s rstack sentinel leaked one entry per uncaught error, forever — `replLoop`'s catch now clears both stacks on any error, not just `ABORT`. `interpret()`'s contract is unchanged. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

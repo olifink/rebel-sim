@@ -665,6 +665,10 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.push(ctx.padBase);
       break;
 
+    case 98: // ABORT ( -- ) — DEVELOPING.md §9, M17
+      s.clear();
+      throw new Error('ABORT');
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

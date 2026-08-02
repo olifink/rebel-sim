@@ -162,7 +162,19 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     addr )`. `."` needs no PAD at all while interpreting — it emits
     directly. Closes `DEVELOPING.md` §7, open since the Canon Cat
     split-off. Detailed below.
-18. Later/open: multi-arena isolation, `hal_error`/exception model,
+18. **M17 — `ABORT`** — **done**: originally scoped as a full
+    `THROW`/`CATCH`/`ABORT` exception model, then deliberately trimmed
+    — `THROW`/`CATCH` tabled ("probably not, unless a real need shows
+    up"), since none of that machinery has a consumer without `CATCH`
+    itself and this project doesn't need to track ANS Forth conformance
+    closely. Just `ABORT ( -- )` (token 98): empties the data stack,
+    throws a plain `Error('ABORT')`, surfaces via the same
+    uncaught-error path every error already used. Along the way, found
+    and fixed a real, independent bug: `threadFrom`'s rstack sentinel
+    push had no `try`/`finally`, so it leaked one entry per uncaught
+    error, forever — confirmed empirically (0 → 1 → 2 across two
+    errors) before fixing it. Detailed below.
+19. Later/open: multi-arena isolation, `THROW`/`CATCH` (tabled, M17),
     Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
@@ -1980,3 +1992,76 @@ path that live typing structurally cannot.
 lost its old throw-while-interpreting case and gained six new ones,
 net +5), confirmed via a full test run. 10 app tests and the full
 build unaffected — no Angular/UI changes.
+
+## M17 — `ABORT` — done
+
+Originally scoped in full as `THROW`/`CATCH`/`ABORT` (`DEVELOPING.md`
+§9 v1) — a `ForthError` class hierarchy, ANS-code bucketing of every
+throw site in the engine, a new `LAST-ERROR` sysvar. Reconsidered
+before implementing: none of that machinery has a real consumer
+without `CATCH` actually existing to use it, and this project doesn't
+need to track ANS Forth conformance closely. Trimmed to just `ABORT`,
+the classic-Forth-useful subset that doesn't need any of it — same
+"minimum real mechanism" discipline this project has applied at every
+prior milestone.
+
+**What shipped:** one new primitive, `ABORT ( -- )`, token 98 (next
+free after `PAD`, M16) — an ordinary `primitives.ts` case, no generator
+access needed: empty the data stack (`DataStack` gains a new `clear()`
+method), then `throw new Error('ABORT')`. Deliberately no dedicated
+error class — nothing needs to distinguish `ABORT` from any other
+error without `CATCH` to special-case it, so uncaught it surfaces
+through the exact same `? <message>` path every error already used
+(`? ABORT`).
+
+**A real, independent bug found while scoping, fixed here:**
+`threadFrom()` (`inner.ts`) pushes its rstack sentinel with no
+`try`/`finally` around the loop that's supposed to pop it. Any
+exception thrown from inside — a primitive, a stack under/overflow,
+anything — left that push permanently on `rstack`. Confirmed
+empirically before touching any code: defining a word that throws when
+called and interpreting it twice in the same session grew
+`rstack.depth` by exactly one *per error*, unbounded (0 → 1 → 2).
+`replLoop`'s catch block (the interactive on-screen/WebMCP REPL, the
+one long-lived session that actually accumulates errors over real
+usage) now clears both `stack` and `rstack` on *any* uncaught error,
+not just explicit `ABORT` — otherwise `ABORT` would clear the data
+stack while leaving the return stack silently corrupted, which
+wouldn't actually be "a clean prompt." **Deliberately not applied to
+`interpret()`/`runLine()`** — the programmatic path every engine test
+uses keeps its exact documented contract ("throws exactly as before,"
+no side effects beyond the existing mid-compile cleanup); only the
+interactive REPL loop gets the new recovery behavior.
+
+**A pre-existing, unrelated test fragility surfaced and fixed along
+the way:** `words-sufficiency.test.ts`'s `fullScreenText` helper joined
+screen rows with `' '` before searching for word names. `screen.ts`'s
+cursor wrap (bottom row wraps to row 0, no scroll) means a row
+boundary is a rendering artifact, not a character actually written to
+the stream — `WORDS`'s own definition already emits a real space
+between words. Adding `ABORT` shifted every later character's row/col
+position by a few bytes, which happened to land a row-wrap exactly
+inside `SWAP`, and the injected join-space then read it back as `S
+WAP`, failing a test that has nothing to do with `ABORT` itself. Fixed
+by joining with `''` instead — the physically correct representation
+of what's actually rendered, robust to any future primitive-count
+change landing a word on a row boundary again.
+
+**Verified via the engine test suite** (`abort.test.ts`, new): `ABORT`
+empties a non-empty stack and throws a plain `Error`; `interpret()`'s
+own error contract is confirmed unchanged (stack depth left dirty, on
+purpose); `replLoop`, driven via a `RemoteChannel` (no simulated
+keypresses needed), confirms the data stack clears after an uncaught
+error typed at the prompt; the exact nested-call `rstack`-leak scenario
+confirmed above now stays at depth 0 across two repeated errors; an
+explicit `ABORT` reached through a compiled call (so it goes through a
+real `threadFrom` frame too) leaves both stacks clean. **Live-verified
+in the browser** via WebMCP: `1 2 3 ABORT` empties `read_stack`;
+`: BAD DUP ; BAD` (twice in a row) leaves `read_return_stack` empty
+both times, not growing; the screen shows `? ABORT` and
+`? DSTK stack underflow` printed exactly like any other error; zero
+console errors; `read_dictionary` shows `ABORT` registered correctly.
+
+**Tests:** 193 engine tests total (187 after M16, 6 new in
+`abort.test.ts`), confirmed via a full test run. 10 app tests and the
+full build unaffected — no Angular/UI changes.

@@ -539,8 +539,14 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
    the flag byte needs to become 2 bytes.
 2. Whether `COMPILE-ONLY` flag is needed now or can be added later without
    breaking the header layout (it can — bit 5 is reserved for it above).
-3. `hal_error(code)`/exception model (§7) — no shipped precedent exists
-   yet anywhere in the codebase to defer to.
+3. `hal_error(code)`/exception model (§7) — **partially addressed,
+   deliberately not fully, M17** (`DEVELOPING.md` §9): a classic
+   `ABORT` (empty the data stack, unwind to a clean prompt) now exists.
+   A full `THROW`/`CATCH` exception model was scoped in detail and then
+   explicitly tabled — this project doesn't need to track ANS Forth
+   conformance closely, and none of that machinery has a real consumer
+   without `CATCH` itself. Revisit only if a concrete need for
+   catchable errors shows up.
 4. Whether the bank table itself needs to move into arena-resident memory
    for Forth to walk it via raw address arithmetic (a primitive like a
    hypothetical `BANK@`), or whether API-mediated access (primitives that

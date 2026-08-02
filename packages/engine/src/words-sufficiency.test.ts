@@ -19,13 +19,21 @@ const WORDS_DEFINITION =
   ': WORDS LATEST BEGIN DUP WHILE DUP 4 + C@ 31 AND OVER 5 + SWAP TYPE 32 EMIT @ REPEAT DROP ;';
 
 /** With ~90 words in the dictionary by now, the printed list wraps
- * across many screen rows — read the whole screen, not just row 0. */
+ * across many screen rows — read the whole screen, not just row 0.
+ * Joined with no separator, not a space: a row boundary is purely a
+ * cursor-wrap artifact (screen.ts's advanceCursor, "wrap only, no
+ * scroll"), not a character actually written to the stream — WORDS's
+ * own definition already emits a real space between words, so
+ * inserting a second one here can (and, once the dictionary grew past
+ * a row boundary at just the wrong offset, did) fracture a word that
+ * happened to wrap exactly mid-name, e.g. "SWAP" read back as "S
+ * WAP". */
 function fullScreenText(m: Machine): string {
   const rows: string[] = [];
   for (let r = 0; r < m.screen.rows; r++) {
     rows.push(m.screen.readRowText(r));
   }
-  return rows.join(' ');
+  return rows.join('');
 }
 
 describe('WORDS — CORE-VOCABULARY.md §12 sufficiency check', () => {

@@ -26,6 +26,16 @@ export class DataStack {
     return (this.bank.base + this.bank.size - this.sp) / CELL;
   }
 
+  /** DEVELOPING.md §9, M17: empties the stack — `ABORT`'s own effect,
+   * and `replLoop`'s recovery from any uncaught error (both data stack
+   * and, separately, `rstack` — the same fix, applied to whichever
+   * `DataStack` instance it's called on). Doesn't touch the underlying
+   * arena bytes, only `sp` — same "popped values aren't cleared, just
+   * abandoned" contract `pop()` already has. */
+  clear(): void {
+    this.sp = this.bank.base + this.bank.size;
+  }
+
   push(value: number): void {
     const next = this.sp - CELL;
     if (next < this.bank.base) {

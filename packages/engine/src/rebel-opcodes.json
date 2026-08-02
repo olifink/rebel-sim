@@ -118,7 +118,9 @@
 
     { "id": 96, "name": "EXECUTE", "note": "( xt -- ) pops a code-field address and runs it exactly as if it had been called directly — DOCOL threading, DOVAR/DOCON/DODOES dispatch, breakpoints, and a blocking word (KEY/ACCEPT) inside it all behave identically to a normal call. Special-cased in inner.ts's dispatch(), never reaches primitives.ts's switch, because it needs to recurse into executeXT() itself (generator-level access a plain stack-effect primitive doesn't have), the same reason ACCEPT is handled there instead of here." },
 
-    { "id": 97, "name": "PAD", "note": "( -- addr ) DEVELOPING.md §7, M16: pushes the base address of the PAD bank — the fixed, overwritten-on-next-use scratch region S\" now copies interpreted-mode string text into. A free addition mirroring the HERE/LATEST precedent: PAD already needed to exist as a bank for S\" to work, so exposing its address to Forth source costs nothing extra." }
+    { "id": 97, "name": "PAD", "note": "( -- addr ) DEVELOPING.md §7, M16: pushes the base address of the PAD bank — the fixed, overwritten-on-next-use scratch region S\" now copies interpreted-mode string text into. A free addition mirroring the HERE/LATEST precedent: PAD already needed to exist as a bank for S\" to work, so exposing its address to Forth source costs nothing extra." },
+
+    { "id": 98, "name": "ABORT", "note": "( -- ) DEVELOPING.md §9, M17: empties the data stack and throws a plain Error('ABORT'), surfacing via the same uncaught-error path every other error already uses (prints '? ABORT' at the top-level REPL). Deliberately NOT built on THROW/CATCH — that fuller exception model was scoped and then explicitly tabled ('probably not, unless a real need shows up'); this is the classic-Forth-useful subset of it that doesn't need any of that machinery." }
   ],
 
   "bankTags": {
