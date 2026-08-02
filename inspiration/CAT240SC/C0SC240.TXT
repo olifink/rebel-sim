@@ -1,0 +1,3267 @@
+( disk C, side 0)
+
+: version#  2040 ;         ( a machine readable form of the version number )
+-1 languages to            ( so "mkmsg" writes in the rom token table )
+tvocabulary message        ( a preliminary attempt to force messages into ROM1 )
+taddto message             ( all messages and strings go into this vocabulary )
+
+;s                         ( reverse position of code around ;s for d disk )
+                           ( remove all spell check code for disk D )
+
+startmsgrom                ( initialize shadow ram for sv message format )
+italy newmsgs              ( create a new annex )
+
+mkmsg defmsg
+{ Canon Cat       Copyright   1988 by Canon Inc.  All rights reserved.
+Copyright   1988 by Information Appliance Inc.  All rights reserved.
+Protected by one or more patents or patents pending.   Version: 2.40
+To type, just type.  All typed text is inserted.  Line endings and page
+   endings are automatic.  Use [RETURN] to end paragraphs.  [PAGE] forces a
+   page to end.  [SHIFT]-[DOCUMENT] begins a new document.  If you make a
+   mistake, press [ERASE] to backspace over it.  The blinking cursor shows
+   you where text will be inserted; the solid highlight accompanying the
+   cursor shows what [ERASE] will erase.
+To move the cursor, hold down a LEAP key, type whatever you want the cursor to
+   find -- a character, a word or phrase -- let go of the LEAP key after
+   cursor leaps.  After cursor movement, [ERASE] erases text to the right of
+   the cursor.  [UNDO] can undo leaping, erasing and most commands.
+To highlight some text you want to do something with (such as print or erase),
+   leap from one end of it to the other, then press both LEAP keys.  To
+   unhighlight, press and release either LEAP key.  To adjust the highlight,
+   tap either LEAP key repeatedly as needed, then press both LEAP keys again.
+Commands do things to highlighted text.  For example, highlighted text
+   disappears if you press [ERASE].  Labels on key fronts show other commands.
+   To use these, hold down [USE FRONT], and, while you hold it, press command.
+For more information:  Hold [USE FRONT], press [EXPLAIN], and then the key you
+   want to know about.  For example, to find out about "COPY", hold 
+   [USE FRONT], and while holding it, press [EXPLAIN] and then [COPY].}
+
+;s
+
+#1 General Leap Screen
+#3 leap again
+#4  creep
+#5 scrolling
+#10 highlighting
+#11a collapse forward
+#llb collapse backward
+
+mkmsg leapmsg
+{ THE LEAP KEYS:  LEAP BACKWARD [<-LEAP] and LEAP FORWARD [LEAP->]
+
+To move the cursor, hold down a LEAP key and type what you want to find.  Leap
+   to a single character or use longer patterns (words, phrases).  If the
+   cursor cannot leap to what you type, it rebounds to its starting point and
+   stays there.  Let go and start over.  Left LEAP key leaps "backward" -- to
+   text you would read before you came to the cursor.  Right LEAP key leaps
+   "forward" -- to text that comes after cursor.  If the first instance of
+   what you leap to is not the one you want, keep holding [LEAP] (or hold it
+   again if you've let go), and press either [USE FRONT].  The cursor will LEAP
+   AGAIN to the next example of pattern (from "e" to "e", for example).
+To creep character-by-character, tap repeatedly on a single LEAP key.
+To extend the highlight, press both LEAP keys after leaping.  Unhighlight at
+   the beginning or end of highlighted area by pressing and releasing [<-LEAP]
+   or [LEAP->].  To adjust the borders of the highlight, creep, rehighlight.
+To move text, highlight it, leap to new location, then let go of LEAP key.
+   Highlighted text leaps to the new cursor position.  If the move is not OK,
+   leap to better location or press [UNDO].  When you are satisfied with the
+   move, press and release a LEAP key to unhighlight.
+To scroll, leap to [RETURN]-[RETURN] and use LEAP AGAIN, or scroll one line at a
+   time by holding [SHIFT] and tapping a LEAP key.  Scroll once, then use LEAP
+   AGAIN (hold LEAP key, press [USE FRONT]) to scroll continuously.
+If you leap to the wrong place, let go of the LEAP key, then press [UNDO].}
+
+
+mkmsg nocopy
+{ NO PLACE TO PUT YOUR COPY
+
+The copied text can only appear in an unlocked document at the end of the
+   locked document, but there are no unlocked documents between the cursor and
+   the end of text.  Unlock one of these documents, or create an unlocked
+   document by unlocking one document, typing a document character, then
+   locking the document again.}
+
+
+mkmsg copyuplock
+{ COPYING UP INTO LOCKED DOCUMENT
+
+The cursor is positioned in a locked document on the disk you are trying to
+   play back.  Since you cannot insert text into a locked document, you cannot
+   copy up your text until you change the position of the cursor or unlock the
+   document and use DISK to record the change.}
+
+
+
+
+mkmsg romcopyup
+{ CAN'T COPY UP -- DISK CREATED ON DIFFERENT CAT
+
+The disk you are trying to copy up to was created on a different version of the
+   Cat.  Play back the disk first, without attempting to copy up, then record
+   it.  You should now be able to copy up.}
+
+mkmsg verifyerror
+{ THERE WAS A PROBLEM RECORDING ON THIS DISK
+
+Try the DISK command again.  If you still get an error, the disk is probably
+   bad and should not be used anymore.}
+
+
+mkmsg mCRSS
+{ CAN'T READ SETUP OR USER DICTIONARY FROM DISK
+
+There is a problem trying to read the Setup or User Dictionary from the disk.
+   You might try removing and re-inserting the disk, or another disk with the
+   same Setup or User Dictionary saved on it.}
+
+mkmsg notanswer
+{ THE FUNCTION YOU REQUESTED IS NOT AVAILIBLE
+
+You have tried to activate a function that is not installed on this disk. 
+   The function name may have been misspelled, or the function may need to be
+   installed.  Refer to the documentation that came with the function disk.}
+
+
+mkmsg titlemsg
+{ PAGE CHARACTER, DOCUMENT CHARACTER, TITLES COMMAND
+
+A page character, the lowercase character on this key, forces a new
+   page to begin.  You can also type it at the beginning of a paragraph to
+   force the paragraph onto the next page.
+A document character, the uppercase character on this key, begins new
+   documents.  Document characters cause page numbers after them to start over
+   (1,2,3, etc).  Page and document characters can be erased or leaped to.
+The TITLES command allows you to view the titles of all documents in the Cat.
+   First, type the title, then a page character, then use the SETUP command to
+   set the "First page number" to 0.  Begin typing the document itself after
+   the page character (or, if you are not titling the document, directly after
+   the document character).  When you use TITLES, as many titles as will fit
+   appear on-screen as long as you continue to hold [USE FRONT].  Scroll
+   through the titles by tapping a LEAP key while you hold [USE FRONT].
+[DOCUMENT/PAGE] is very useful in leaping.  Leap to another page by pressing
+   and holding [<-LEAP] or [LEAP->] and pressing [PAGE].  Use LEAP AGAIN to
+   leap page-by-page.  Leap to another document by pressing and holding
+   [<-LEAP] or [LEAP->] and pressing [DOCUMENT].  Use LEAP AGAIN to leap
+   document-by-document.
+To leap to the beginning or the end of the entire text, hold the appropriate
+   LEAP key and tap [PAGE] a few times (usually two or three).}
+
+mkmsg kbdmsg
+{ KEYBOARD I/II
+
+Certain keys have four characters.  KEYBOARD I makes the left-hand pair
+   available, KEYBOARD II makes the right-hand pair available.
+
+While holding [USE FRONT], press [KEYBOARD I/II] to switch back and forth
+   between the two keyboard sets.
+
+The "I/II" signs on the ruler indicate which keyboard you are using.
+
+[UNDO] restores the keyboard to the way it was before you used the command.}
+
+mkmsg copymsg
+{ COPY
+
+COPY duplicates the text covered in your last leap.  Leap from one end to the
+   other of the text you want to copy, then use COPY.  The text covered in
+   your leap will highlight automatically and the copy will appear.
+
+The copy remains highlighted so you can move it elsewhere (by leaping to a new
+   location and letting go of the LEAP key).  After you move the text,
+   unhighlight it by pressing and releasing either LEAP key.
+
+If you copy text with calculations, the copied calculations will not be
+   active (you will not be able to unpocket the underlying expressions, and the
+   values will not change when you use CALC).  But if you highlight and CALC the
+   results, unpocketing the underlying expressions before copying the text, the
+   copied calculations will be active, that is, they will respond to new
+   calculation values.
+
+[UNDO] makes the copy disappear.  You can bring the copy back again by pressing
+   [UNDO] a second time.}
+
+mkmsg capsmsg
+{ CAPS
+
+CAPS can capitalize or uncapitalize your text.  Leap from one end to the other
+   of the text you want to capitalize, then use the CAPS command.  You can use
+   [LOCK] if you want to type all-capital letters.  Press [SHIFT] to turn off
+   [LOCK] when you are done.
+
+Highlighting is automatic.  As soon as you use the command, the text covered
+   in your leap will highlight and change to uppercase characters, whatever
+   case they were before.
+
+If you want to make all the characters lowercase, use the CAPS command again.
+
+To add capitalized text in the middle of other text, capitalized or not:
+   1  Leap to the point you want to add the text.
+   2  Type the new text (it will not be capitalized).
+   3  Use the CAPS command.  The text you just typed will highlight and become
+      capitalized.
+
+[UNDO] restores the text to the way it was before you used the command.}
+
+mkmsg underlinemsg
+{ UNDERLINE
+
+UNDERLINE can underline or remove underlining from your text.  Leap from one
+   end to the other of the text you want to underline, then use the UNDERLINE
+   command.
+
+Highlighting is automatic.  As soon as you use the command, the text covered
+   in your leap will highlight and become underlined.
+
+If you want to remove underlining, use the UNDERLINE command again.
+
+Any text you type in the middle of other underlined text is automatically
+   underlined.
+
+[UNDO] restores the text to the way it was before you used the command.}
+
+mkmsg boldmsg
+{ BOLD
+
+BOLD can add or remove boldface emphasis to your text.  Leap from one end to
+   the other of the text you want to make boldface, then use the BOLD command.
+
+Highlighting is automatic.  As soon as you use the command, the text covered
+   in your leap will highlight and become bold.
+
+If you want to remove the boldface, use the BOLD command again.
+
+Any text you type in the middle of other bold text is automatically bold.
+
+[UNDO] restores the text to the way it was before you used the command.}
+
+mkmsg marginmsg
+{ HOW TO CHANGE MARGINS AND INDENTS
+
+1  Highlight the paragraphs you wish to affect (no highlighting is necessary
+   if you only want to adjust the paragraph the cursor is in).
+2  Use LEFT MARGIN, RIGHT MARGIN and INDENT commands.  A vertical line appears
+   and remains on-screen as long as you continue to hold down [USE FRONT].
+   Hold down [USE FRONT] throughout the time you use the commands.  You can use
+   several commands before you let go.
+3  While you hold [USE FRONT], tap repeatedly on a LEAP key to move the line
+   left or right.  To speed up the movement of the line, press and hold the
+   LEAP key.  The ruler shows the character position of your setting.
+4  When you're happy with the position of the line, release the LEAP key, then
+   press the next command key you want to use.  The highlighted text instantly
+   matches the line as you go on to adjust the indent or the other margin.
+5  When you release [USE FRONT], the highlight goes away and you are done.
+
+One paragraph can be the model for the paragraphs above it:  Set up the last
+   paragraph in the group exactly the way you want it, highlight all
+   paragraphs (the model paragraph last), then hold [USE FRONT], press and
+   release each MARGIN key, then release [USE FRONT].
+
+[UNDO] returns the text to the way it was before you used the command.}
+
+mkmsg stylemsg
+{ PARAGRAPH STYLE
+
+Use this command to switch between Left Flush, Centered, Right Flush, or
+   Justified text.  The style of the paragraph containing the cursor
+   is indicated on the ruler (below the "5").  To use this command:
+
+1  Highlight the paragraphs you wish to affect (no highlighting necessary if
+   you only want to change the paragraph the cursor is in).
+
+2  Use the   STYLE command and all highlighted paragraphs change style to match
+   the style of the last paragraph.
+
+3  Press the   STYLE key again and all paragraphs will change to the next
+   style.
+
+If you continue holding [USE FRONT], you can use LEFT MARGIN, RIGHT MARGIN,
+   INDENT, SET/CLEAR TAB, and LINE SPACE.  When you release [USE FRONT], the
+   highlight goes back to normal.
+
+[UNDO] restores the text to the way it was before you used the command.}
+
+mkmsg tabmsg
+{ TAB and SET/CLEAR TAB
+
+When you press TAB, the cursor moves to the next tab stop and a tab character
+   fills the space.  You can leap to tab characters, erase them, or move them.
+   Use tab stops to align text in vertical columns.  Regular tabs (small
+   triangle on ruler) align the text along the first characters in the column.
+   Decimal tabs (dot) align text along the last characters or decimal points.
+
+The SET/CLEAR TAB command sets and clears tab stops.  The command affects
+   the paragraph the cursor is in, or, if the highlight is extended, all the
+   highlighted paragraphs.  Use the SET/CLEAR TAB command and keep holding
+   [USE FRONT] when the set line appears.
+   Set tab stop:  Use the LEAP keys to move the set line to the desired column,
+   then press [SET/CLEAR TAB] as needed to set normal, decimal, and clear stop.
+   Clear tab stop:  Press [SPACE BAR] to position the set line on the desired
+   tab stop.  Press [SET/CLEAR TAB] to clear the tab stop.
+
+To clear all tabs, let go and hold [USE FRONT], press [SET/CLEAR TAB], [ERASE].
+To reset to initial tab stops, hold [USE FRONT] and [SHIFT], and, while you
+   hold, press [SET/CLEAR TAB].
+
+[UNDO] restores tab settings to the way they were before you used the
+   SET/CLEAR TAB command, no matter how many tabs you have changed.}
+
+mkmsg spacingmsg
+{ LINE SPACE
+
+LINE SPACE sets single, 1-1/2, or double-spaced text.  You can also use it to
+   set the line spacing on text you haven't yet typed.  The line spacing is
+   indicated on the ruler (under "6").  To use this command:
+
+1  Highlight the text you wish to affect (no highlighting necessary if you
+   only want to change the paragraph the cursor is in).  If you want to set
+   the line spacing for text that you have not typed yet, prepare by typing
+   a return character.
+2  Use the LINE SPACE command and all highlighted paragraphs change.  If
+   more than one type of line spacing is present in the highlighted text, all
+   paragraphs change to match the line spacing of the last paragraph.
+3  Press the LINE SPACE command again and all paragraphs will change to the
+   next spacing.
+
+When you release [USE FRONT], the highlight goes back to normal.
+
+Once you set the line spacing in one paragraph, or even the return character
+   on a blank line, you can continue typing with the same line spacing in that
+   paragraph or on that line.  Pressing [RETURN] will start a new paragraph
+   with the same line spacing as the one you are in.
+
+[UNDO] restores the line spacing to what it was before you used the command.}
+
+mkmsg printmsg
+{ PRINT
+
+To print, highlight the text you want to print, then use the PRINT command.
+   You can carry on with your writing as soon as the highlight and the "PRINT"
+   indicator on the ruler disappear, even while the printer is running.
+
+To stop printing while the "PRINT" indicator is still on, press a SHIFT key.
+   If the indicator and the highlight are off, stop printing by using the
+   PRINT command again.
+
+To restart printing after stopping it, press [UNDO].
+
+If you have attached two printers, use the SETUP command to tell the Cat what
+   kind of alternate printer you have.  Print on the alternate printer by
+   holding [USE FRONT] and [SHIFT], and, while holding them both, pressing the
+   PRINT key.}
+
+mkmsg sendmsg
+{ SEND
+
+You can send text over phone lines to other Cats or computers and data services
+   using SEND.  To establish the connection, use the PHONE command (PHONE dials
+   numbers and answers incoming calls).  When you are connected, use the SEND
+   command to transmit your text.
+During an electronic conversation, the text being sent to you appears
+   line-by-line on your screen.  You can type your reply while text is coming
+   in.  Avoid leaping while receiving -- this will cause the incoming text to
+   appear in the middle of yours.  If you are conversing with another Cat, type
+   a return at the beginning of outgoing messages in order to improve the
+   appearance on the receiver's screen.
+When it's your turn to send, simply use the SEND command.  Highlighting is
+   automatic.  The highlight will extend over what you have typed since your
+   last leap.  If you leaped while typing your reply, you should specify
+   the text you want to send by leaping from one end of it to the other before
+   you use the SEND command.
+To stop a SEND in-progress, press any key.  Use the SEND command to restart.
+   [UNDO] has no effect on the SEND command.}
+
+mkmsg phonemsg
+{ PHONE
+PHONE is used to dial phone numbers, and to answer or hang up on calls from
+   other Cats or computers.
+To dial a number, type or leap to it, highlight it, then use the PHONE
+   command; a comma in the number causes a 1/2-second pause in dialing
+   ("9,555-5555," for example); underline the number to pulse-dial it.
+To use the Cat as an automatic telephone dialer, highlight the number and use
+   the PHONE command.  The Cat dials the number.  After dialing, you can pick
+   up the phone if you intend to talk.  If you are calling another computer,
+   the Cat will automatically connect you when the remote computer answers.
+When another computer answers, the Cat makes a low-pitched "confirm tone" to
+   indicate that a connection is established.  If there is no answer, the Cat
+   hangs up after 30 seconds.  You can adjust this time with the SETUP command.
+To answer a person, just pick up the telephone as usual.  When you think a
+   machine is calling you, use the PHONE command to answer with your Cat.  To
+   switch from voice to machine communication in the middle of a voice call,
+   you and the other person should both use the PHONE command at about the same
+   time.  While you are away from the machine, use the SETUP command to turn on
+   autoanswer.  The Cat will answer calls automatically and receive text.
+To hang up at the end of a communications session, use the PHONE command.  You
+   can continue with a voice conversation by picking up the phone immediately.}
+
+mkmsg controlmsg
+{ SEND CONTROL
+
+SEND CONTROL can send control characters -- special characters used to control
+   computer communications.
+
+Use the SEND CONTROL command, and continue to hold [USE FRONT]:  Every letter
+   key pressed now sends a control character.  Release [USE FRONT] to continue
+   with normal typing.  [SPACE BAR] sends a "break;" [TAB] sends "ESC".
+
+This command does nothing unless a connection has been established with
+   another machine that uses control characters.
+
+If you are connected to another Cat, sending a CONTROL-E character will
+   prompt the other Cat to identify itself, thus verifying the connection.
+
+Sending a CONTROL-S will cause many computers to stop sending text.  Sending a
+   CONTROL-Q will make them resume sending.
+
+Sending a CONTROL-G will cause the Cat and most computers to "beep."  The beep
+   can be used to get the attention of the person at the other end of the line.}
+
+mkmsg diskmsg
+{ DISK
+
+DISK records or plays back information on disks and always chooses the right
+   operation automatically (if you've used computers, record and playback
+   correspond to "save" and "load").  Everything will work perfectly if you
+   do the following:  Always use the DISK command before you take a disk out of
+   the drive (recording your text); always use the DISK command when you put a
+   new disk in the drive (plays back the new text).
+If you get a beep when using DISK, use EXPLAIN to find out why.  When the
+   disk in the drive differs from the text on the screen, you will see a
+   sample of what's on the disk as long as you hold down [USE FRONT].  It's a
+   good idea to use DISK frequently while you work to keep your disk up-to-date.
+To transfer text between disks (copy up), use DISK to record the text,
+   then highlight the text you want to transfer.  Change disks in the drive and
+   use the DISK command to play back.  The new text appears on-screen with a
+   copy of the highlighted text from first disk.  Unhighlight, then use the DISK
+   command to record the combined text on the second disk.
+To create a backup disk as an insurance policy against loss or damage, place a
+   blank disk in the drive, then hold [USE FRONT] and [SHIFT], and, while
+   holding them both, press [DISK].  Make as many backup disks as you like.
+To erase a disk, place it in the drive and press [USE FRONT]-[SHIFT]-[DISK].
+   Some of the text will show on the screen.  If you are sure you want
+   to make that disk blank, press [ERASE].  The old text will be destroyed.
+WARNING: NEVER UNPLUG, POWER-OFF, OR REMOVE A DISK WHILE THE DISK LIGHT IS ON!}
+
+mkmsg sortmsg
+{ SORT
+
+SORT enables you to rearrange text in numerical and alphabetical order.
+
+To sort, highlight all of the text you want to sort (from the first character
+   of the first line to the last return), and give the SORT command.
+
+To sort on other than the first column, the last character of the highlight
+   should be in the desired column, then use SORT.  [USE FRONT]-[SORT] sorts in
+   numerical and alphabetical order (largest last).  For example: 1, 2, 3, ...
+   a, b, c, ...  [USE FRONT]-[SHIFT]-[SORT] sorts in reverse numerical and
+   alphabetical order (largest first). For example:  z, y, x,... 3, 2, 1.
+
+The SETUP command can be used to change the definition of an item you want to
+   sort.  You can sort addresses instead of lines in a table, for example, after
+   adjusting the "Breaks between records" to "2" with SETUP.
+
+[UNDO] restores the text to its original, unsorted order.}
+
+mkmsg learnmsg
+{ LEARN
+
+Enables you to "teach" the Cat to perform a set of keystrokes.  The keystroke
+   sequence is assigned to a number key and re-enacted each time you hold
+   [USE FRONT] and tap that number.  Here's how to set up a LEARN command:
+   1  Press [USE FRONT]-[LEARN], and then a single-digit number (1,2,3,...,0).
+   2  Release [USE FRONT] and do an example of what you want the Cat to do.
+   3  Press [USE FRONT]-[LEARN] to end the learning process.
+   4  To re-enact the learned keystrokes, hold [USE FRONT], tap the number key.
+
+To repeat the learned sequence automatically over and over, omit Step 3.
+   Example:  To replace "cat" with "dog" in the entire text:
+   1  Press [USE FRONT]-[LEARN]-[1].
+   2  Do it once:  Leap to "cat ", [ERASE], [ERASE], [ERASE], type "dog".
+   3  Press [USE FRONT]-[1].
+   The Cat re-enacts the keystroke sequence over and over until it reaches the
+   end of the text or runs out of cats to replace.
+
+To store text:
+   1  Highlight the text you want the Cat to learn.
+   2  Press [USE FRONT]-[LEARN]-[digit]-[LEARN].
+   3  To insert the phrase in the text, press [USE FRONT]-[digit].
+
+To interrupt the Cat while it is re-enacting, press [SHIFT].}
+
+mkmsg undomsg
+{   [UNDO] (top of the key)
+
+UNDO cancels the last operation.  Use it to undo a leap, a text erasure, a
+   text move, and most commands.  UNDO can itself be undone.  The effect of
+   UNDO is described in relation to each command.
+
+SPELL CHECK LEAP (front of the key)  
+
+This command searches for misspelled words using the Cat's 90,000-word spelling
+   dictionary and any other words you add to your personal spelling dictionary
+   with the ADD SPELLING command.
+
+Hold down a LEAP key, then press [SPELL CHECK LEAP].  The machine will scan
+   your text in the direction indicated by the LEAP key until it comes to a
+   possible misspelled word.  The cursor stops on any questionable word.
+
+To erase the word you've leaped to, press both LEAP keys, then [ERASE].
+
+Note that you cannot add letters to the leap pattern when a SPELL CHECK LEAP
+   is in progress.  SPELL CHECK LEAP can take time.  To interrupt it, press
+   any key.}
+
+mkmsg addspellmsg
+{ ADD SPELLING
+
+ADD SPELLING can add or erase words in your personal spelling dictionary.
+
+To add a word, highlight it and press [USE FRONT]-[ADD SPELLING].  To add a
+   group of words, highlight the text including them and use the command.  If
+   the words in your dictionary aren't used, the Cat will eventually delete
+   them to make room for the new words you add.
+
+Because the contents of your personal dictionary would be lost whenever the
+   power went off, the Cat has a battery-powered backup memory.  A "battery
+   low" indicator appears on the ruler if this battery gets low.
+
+To remove words from the dictionary, highlight them and press
+   [USE FRONT]-[SHIFT]-[ADD SPELLING].
+
+[UNDO] cancels the command.}
+
+mkmsg setupmsg
+{ SETUP
+
+SETUP tells the Cat how to format documents and what printers or modems are
+   attached.  When you change a document setup, the changes apply to the
+   document the cursor is in, or to all highlighted documents if the highlight
+   is extended.
+
+When you press [USE FRONT]-[SETUP], a table of setup information appears
+   on-screen.  Some are numbers; others are multiple-choice.  Don't let go of
+   [USE FRONT] until you are done setting up.
+
+While holding [USE FRONT], select the item to change by tapping [SPACE BAR].
+   The selected item switches to boldface.  Press the LEAP keys to select
+   alternate choices.
+
+Setup information takes more than one screen.  If you press [SETUP] again,
+   the next list is displayed.
+
+[USE FRONT]-[SHIFT]-[SETUP] resets all setup values to their initial values.
+
+[UNDO] does not cancel adjustments made during SETUP.}
+
+mkmsg lockmsg
+{ [LOCK] (top of the key)  
+
+To type all-capital letters, press the LOCK key, then type.  Press [SHIFT]
+   to turn [LOCK] off.  See the CAPS command for more information.
+
+DOCUMENT LOCK (front of the key)  
+
+Enables you to prevent one or more documents from being changed.  You can move
+   the cursor around in a locked document, or move the text as a whole, but
+   you cannot add, erase, or move text within its boundaries.  You can copy
+   the text in a locked document, but the copy will appear at the first
+   unlocked place after the document, not inside it.
+
+To lock a document, use the DOCUMENT LOCK command while the cursor is inside
+   the document you want to lock.  Locked documents have a gray border.
+
+To lock several documents, extend the highlight, then use DOCUMENT LOCK.  Only
+   part of a document needs to be highlighted in order to lock it.
+
+To unlock, place the cursor in the locked document, or highlight several locked
+   documents, and use the DOCUMENT LOCK command.
+
+[UNDO] cancels the command.}
+
+mkmsg localmsg
+{ LOCAL LEAP
+
+LOCAL LEAP keeps the cursor from leaping outside of one or more selected
+   documents.  Global leap (the usual range of leaping) sets no limits.  Using
+   LOCAL LEAP switches local leaping on and off.  "LOCAL" appears on the ruler
+   while LOCAL LEAP is on.
+
+With LOCAL LEAP on, it is impossible to leap beyond the document characters at
+   either end of the document or documents forming the local leap region.
+
+To limit cursor movement to one document, use the LOCAL LEAP command while
+   the cursor is inside the document.  To confine the cursor to several
+   documents, extend the highlight, then use the command.  The cursor will be
+   limited to the documents touched by the highlight.
+
+LOCAL LEAP is useful in conjunction with the LEARN command to prevent LEARN
+   re-enactments from going beyond the document you want to change.
+
+CAUTION!  Be careful not to use leaping for information retrieval when LOCAL
+   LEAP is on.  You may fail to find what you are looking for and mistakenly
+   conclude that it is not there!  Shut off LOCAL LEAP right after using it.
+
+[UNDO] cancels command.}
+
+mkmsg calcmsg
+{ CALC
+This command lets you do calculations right in the middle of your text.  Type
+   the problem, highlight it, and use the CALC command.  Results of
+   calculations have a dotted underline to distinguish them from ordinary typed
+   text (the underline doesn't print).  You can retrieve the calculations
+   underlying the result by placing the cursor anywhere on the underlined result
+   and using the CALC command.  This is called "unpocketing."
+CALC can do + (addition), - (subtraction), * (multiplication), / (division), %
+   (percent), sqrt (square root), sum (add a tabbed column of numbers),
+   avg (average a tabbed column of numbers).  Use parentheses to ensure that
+   certain operations are performed first. For example: (25%*100)*(16/4)-25 = 75
+Named variables may be used to link calculations.  For example, if you type,
+   highlight and CALC:  price:5.95  , the word "price" can be used in
+   calculating various quantities:  price*10 = 59.50, for example.  To change
+   "price", place the cursor on the original underlined 5.95, and use the CALC
+   command.  The variable name and number "price:5:95" pops out.  Alter the
+   number, then highlight and CALC the entire resulting expression.  All
+   calculations affected by "price" will change.
+Use "use( )"  to identify the positions of entries in a table by column and
+   row (relative to the column and row of the calculation).  For example,
+   use(2 -1) * use(3 0) means "multiply the number in the 2nd column to the
+   right and the first row up by the number in the 3rd column in the same row."
+
+[UNDO] has no effect on calculations.}
+
+mkmsg erasemsg
+{ [ERASE]
+
+This key always erases whatever is in the highlight (the solid portion of the
+   cursor).  If you've been typing, the cursor is wide (highlight trails
+   cursor) and [ERASE] works like [BACKSPACE] on a typewriter, except that it
+   erases the letters as it backs up.  If you've leaped or creeped, the cursor
+   is narrow (cursor and highlight on same character) and [ERASE] erases the
+   letters in front of the cursor.  [ERASE] autorepeats if held down.
+
+If you are backspacing and want to erase forward, press and release either LEAP
+   key.  If you are erasing forward and want to backspace, press [SPACE BAR]
+   (or any other typing key).
+
+To erase two or more characters at once, leap from one end to the other of
+   what you want to erase, press both LEAP keys to highlight it, then [ERASE].
+
+[UNDO] brings back whatever you have erased, but use it right after erasing
+   or you lose this option.
+
+Pressing [ERASE] after [USE FRONT]-[SHIFT]-[DISK] erases a disk.}
+
+mkmsg lexerr
+{ UNSUCCESSFUL LEAP
+
+Are you holding a LEAP key and tapping the same key over and over again in
+   order to leap from one instance of a character to the next?
+
+If that's what you want to do, use LEAP AGAIN:  Hold down a LEAP key, leap to
+   whatever you want to leap to, and, while continuing to hold [LEAP], press
+   [USE FRONT].
+
+For example, to leap from paragraph to paragraph, hold the appropriate LEAP
+   key, press [RETURN] twice, then press [USE FRONT] repeatedly.}
+
+mkmsg noroom
+{ OUT OF ROOM
+
+The text is too full to do what you want to do.  You can either erase some old
+text to make room for new, or you can use blank disks to split the text into
+two halves and put each on a separate disk.  Here's what to do:
+
+   1  Use the DISK command to record the entire text on your first disk, the one
+      you've been using.
+   2  Put a blank second disk in the drive and use the DISK command to record
+      the entire text on it.  Set this disk aside;  it's your insurance against
+      loss of information.
+   3  Put a blank third disk in the drive and use the DISK command to record
+      the entire text on it.  Highlight and erase the first half of the text,
+      then use DISK to record the second half.
+   4  Put your first disk back in the drive and use the DISK command to play
+      back the entire text.  Highlight and erase the second half of the text
+      and use DISK to record the first half.
+
+Your first disk now has the first half of your text, and the third disk has the
+last half.  You can continue working and making backups with both disks.
+Your second "insurance" disk can be filed away as history, or re-used when
+you're sure the first and the third disks are what you want.}
+
+
+;s  TEXT FULL
+
+#6b Typing when text full
+#7  Typing a page character in full text?
+#8  Typing a document character in full text?
+#14 Erase can cause text full beep if a format packet is erased, since 
+split/merge will force a new format packet to the next break as well as copying 
+the erased text to the UNDO buffer.
+#21 Trying to move text when text is full?
+#25 Using CAPS when text full
+#28 Trying to use UNDERLINE when text full
+#31 Using BOLD when text full
+#34 Using LEFT MARGIN in full text
+#37 Using RIGHT MARGIN when the text is full
+#40 Using INDENT when text is full
+#42 Using PARAGRAPH STYLE when text full
+#44 Using SET/CLEAR when text is full
+#56 Receiving text
+#72 Using SORT causes text full condition
+#74 Using LEARN causes text full condition
+
+mkmsg lockedtext
+{ LOCKED DOCUMENT
+
+This document is locked, which means you can leap to it, or move it as a whole,
+   but you can't make any changes in it, such as erasing part of it, moving
+   text around inside it, or inserting new text into it.
+
+If you are sure you want to make a change in this document, use the DOCUMENT
+   LOCK command.  When the gray border disappears, the document is no longer
+   locked.  If more than one document is locked, you can unlock them all by
+   highlighting them and using the DOCUMENT LOCK command.
+
+Using [UNDO] after using the DOCUMENT LOCK command will switch you back and
+   forth between locked and unlocked.}
+
+;s
+
+LOCKED DOCUMENT message appears in the following circumstances:
+
+#15 Attempting to erase character by character in a locked document
+#17 Attempting to erase highlighted chunk
+#19 Attempting to make a copy
+#22 Attempting to move text in a locked document
+#24 Using CAPS command in a locked document
+#27 Using UNDERLINE in a locked document
+#30 Using BOLD in a locked document
+#33 Changing LEFT MARGIN in a locked document
+#36 Using RIGHT MARGIN in a locked document
+#39 Using INDENT in a locked document
+#80 Locked text cannot be changed screen
+
+
+mkmsg nolearnroom
+{ LEARN RAN OUT OF ROOM
+
+The LEARN command didn't have enough room to record your sequence.  You might
+   try recording the second portion of your sequence with one key, and then the
+   first portion with another key.  End the LEARN command on the second key by
+   pressing the LEARN command for the first key.  This links the two LEARN
+   commands together, and they re-enact in sequence.}
+
+
+
+mkmsg nocopyuproom
+{ NOT ENOUGH ROOM TO COPY UP YOUR TEXT
+
+There is not enough room on the disk to hold the highlighted text you are
+   trying to copy up.  You might highlight less or erase some text from the
+   destination disk first.}
+
+
+mkmsg noanswer
+{ ANSWER COMMAND NOT TURNED ON
+
+The ANSWER command is used to pass information from the text to a waiting
+application program.  No such program is installed in your Cat.}
+
+
+mkmsg nodial
+{ MODEM IS IN USE
+
+The PHONE command can't be used to dial a selection, as the modem is currently
+   connected to another Cat or another computer.  If you would like to place
+   another call, use the PHONE command (without highlighting any text) to hang
+   up the phone.  Then you may place another call.}
+ 
+
+mkmsg svcorrupt
+{ PERSONAL SPELLING DICTIONARY CLEARED
+
+An uncorrectable error in your personal spelling dictionary's memory forced the
+   Cat to clear (erase) the dictionary.  To refill it, use the SETUP command
+   to load the spelling dictionary recorded on disk.}
+
+
+mkmsg interruption
+{ INTERRUPTED COMMAND
+
+You have interrupted the last command.  You can continue by pressing [UNDO].}
+
+
+
+mkmsg badtransmit
+{ TRANSMISSION DIFFICULTY
+
+Errors were detected while receiving text.  You may want to read it carefully or
+   request the other party to send it again.}
+
+mkmsg noconnect
+{ NO CONNECTION ESTABLISHED
+
+The Cat tried to send your text but was unable to connect with another machine.}
+
+mkmsg nomodem
+{ THERE IS NO MODEM TO USE
+
+You have not selected a modem to use in the SETUP command.  Either you are
+   connected with Serial port connected to SEND command or you are using the
+   Alternate Printer and don't have an internal modem.  If you think you should
+   be able to use the SEND command or the PHONE command, check your SETUP.}
+
+mkmsg carrierlost
+{ CARRIER LOST
+
+Somehow -- through the other party or a problem with the telephone line -- you
+   have lost your telephone connection.  You or the party at the other end of
+   the line will have to dial again to re-establish the connection.}
+
+mkmsg telconnect
+
+{ TELEPHONE CONNECTION CONFIRMED
+
+Another Cat or computer has established a connection with your Cat.}
+
+mkmsg writeprotect
+{ WRITE-PROTECTED DISK
+
+The disk in the drive is write-protected, which means you can't record on it.
+
+If you're sure you want to record on this disk, remove it from the drive and
+   switch off the write-protection.  The write-protect tab is a small
+   sliding plastic square in the corner of the disk.  To permit recording,
+   slide this plastic square so that it covers the little window below it.}
+
+mkmsg nodisk
+{ NO DISK IN DRIVE
+
+The disk drive is empty.  To record your text, insert a blank disk, or the
+   disk from which this text was played back, or a previously created backup
+   disk, then use the DISK command.}
+
+mkmsg noprinter
+{ NO PRINTER ATTACHED
+
+Your Cat does not have a printer attached to the port you selected for the last
+   PRINT command.  You may have accidentally directed the printing to the
+   alternate printer.
+
+To print on the main printer, use the PRINT command -- don't press [SHIFT]
+   while giving the PRINT command.
+
+If a printer is connected, use the SETUP command to inform the Cat where
+   it is connected and what kind of printer it is.}
+
+mkmsg riskytext
+{ TEXT AT RISK
+
+The text on the screen has been changed, but the Cat cannot record it because
+   the on-screen text did not come from the disk now in the drive.  To record
+   or play back now might cause you to lose valuable information.  For your
+   protection the DISK command will not do anything unless you either record
+   the text now on the screen or deliberately erase it.
+
+To record the on-screen text
+   1  Place one of the following disks in the drive: the disk from which the
+      text originally came, a backup disk, or a blank disk.  (You can make a
+      blank disk by erasing it as described on the EXPLAIN screen for DISK.)
+   2  Use the DISK command to record the text.
+
+To throw out the entire on-screen text and play back
+   First make sure LOCAL LEAP is off.  This procedure won't work if it is on.
+   1  Leap to the first document character (to do this, hold [<-LEAP], press
+      [PAGE] about three times).  Let go.
+   2  Leap to the last document character (hold [LEAP->], press [USE FRONT]).
+   3  Press both LEAP keys to highlight the entire text.  Let go.
+   4  Press [ERASE].  You now have an empty text.
+   5  Use the DISK command again.  The new disk should now play back.}
+
+mkmsg nodiskroom
+{ NOT ENOUGH ROOM TO COPY UP
+
+There isn't enough room to combine the text you are trying to play back and
+   the text you are trying to copy up.  You can either copy up less text by
+   reducing the amount you have highlighted, or erase some text on the disk
+   you are playing back.
+
+To erase text on the disk you are trying to play back
+   1  Unhighlight the copy-up text (just press and release a LEAP key).
+   2  Make sure the cursor is still blinking rapidly -- if it isn't, record
+      the text on-screen (put its disk in the drive and use the DISK command).
+   3  Play back the disk that will be receiving the copy-up text (put it in
+      the drive and use the DISK command).
+   4  Highlight and erase some text you no longer need.
+   5  Press and release a LEAP key (this clears the Cat's memory of the text
+      you just erased -- an important step).
+   6  Use the DISK command to record the reduced text.
+   7  Now you've got more room.  Change disks and try copying up again.}
+
+mkmsg nontextdisk
+{ UNRECOGNIZED DISK
+
+The disk in the drive is a non-Cat disk.  Use another disk or erase this one
+   as follows:
+
+1  Make sure it's not write-protected.  Remove the disk from the drive and, if
+   necessary, slide the plastic write-protect tab so that the it covers the
+   little window below it.  Put the disk back in the drive.
+
+2  Hold [USE FRONT] and [SHIFT], and while you hold them, press [DISK], then
+   press [ERASE].
+
+   WARNING! This completely erases the disk.  Before you go through with this,
+   make sure you are not losing valuable information.
+
+You now have a blank disk.  You can use it as you would a new disk.}
+
+
+mkmsg blankdisk
+{ TEXT EMPTY, DISK BLANK
+
+This is a completely blank disk.  You may use the DISK command to record
+   any text on it, but you can't record an empty text, like you have now.}
+
+mkmsg funkydisk
+{ HAVING TROUBLE PLAYING BACK THIS DISK
+
+Either the disk or the disk drive is defective.  If you can play back other
+   disks without difficulty, the problem is probably in the disk.  Sometimes
+   removing the disk, gently shaking it, and trying again will correct the
+   problem.
+
+If the text played back in spite of everything (that is, if you have the new
+   text on-screen now), it may have errors, particularly erroneous " ? " marks.
+   Scan the text for these using LEAP, erase them, and correct the text.  Record
+   the corrected text on a blank disk.
+
+It is sometimes possible to salvage a defective disk.  Your Canon dealer may
+   be able to help.  Always make backup disks and paper printouts of important
+   texts.
+
+WARNING!  NEVER UNPLUG, POWER-OFF, OR REMOVE A DISK WHILE THE DISK LIGHT IS ON!}
+
+mkmsg notsorted
+{ SORT NOT COMPLETED
+
+Either you have interrupted the SORT command or more text was highlighted than
+   could be be sorted.  In the latter case, SORT will probably work if you
+   highlight less and try again.
+
+The text has been restored to its original condition.}
+
+
+( calculation error messages )
+
+mkmsg notcalculated
+{ CALC NOT COMPLETE
+
+You have interrupted the CALC command.  Some of the numerical results in the
+   text may not be up-to-date.  To bring all calculations results up-to-date,
+   use CALC again without extending the highlight.}
+
+
+mkmsg longname
+{ THE NAME OF A VARIABLE IS TOO LONG
+
+Variable names must be 31 characters or less.}
+
+
+mkmsg notokens
+{ NO MORE DEFINITIONS POSSIBLE
+
+The expression the cursor is on can't be processed by CALC because there are
+   too many definitions of variables in the text.  The solution is to transfer
+   several of your definitions, including the one the cursor is on, to another
+   disk, then erase them from this disk.
+
+If this expression was created by copying or copying-up, you will probably have
+   to erase the copy and start over with a smaller copying job.}
+
+mkmsg needsglobal
+{ NEEDS GLOBAL LEAPING
+
+Please turn the LOCAL LEAP command off and try giving this command again.}
+
+mkmsg reservedname
+{ RESERVED NAME
+
+The name of your expression is also the name of a function.  Please select
+   another name.}
+
+
+mkmsg usedname
+{ VARIABLE NAME ALREADY IN USE
+
+Choose another name for your variable.  This one is already in use.}
+
+
+mkmsg badname
+{ UNRECOGNIZABLE SPELLING
+
+The character highlighted by the cursor isn't allowed in a variable name.
+   Avoid using accented characters and permanent spaces when naming variables.}
+
+
+mkmsg extradigits
+{ TOO MANY DIGITS IN A NUMBER
+
+Numbers used in calculations are limited to 12 digits before and 10 digits
+   after the decimal point.}
+
+
+mkmsg recursing
+{ TOO MANY PARENTHESES OR SIGNS OR TOO LARGE AN EXPRESSION
+
+Rearrange your expression to minimize parentheses and signs.  You are limited
+   to the use of about 10 parentheses, and even fewer if you are using a sign
+   (+, -, or ~) as a unary operator, for example: ~(+2*-3).
+
+OR
+
+   Your expression is too large.  Break it up into several smaller expressions.
+   Give each expression a unique name and use these names appropriately in
+   a new expression.}
+
+
+mkmsg syntaxerr
+{ CAN'T MAKE SENSE OF THIS
+
+Apparently there is a syntax error in the calculation (a syntax error is like
+   a grammatical or spelling error in a sentence -- something is written
+   incorrectly or out of order, so the Cat cannot make sense of it as it is
+   written).
+
+Check for extra, missing, or misplaced parentheses, brackets, or operations
+   (+,-,/, etc.), or misspelled variable names.
+
+Relative addresses must contain one number (identifying the column) or two
+   numbers (the column and row separated by a space); they cannot contain
+   operations or names.}
+
+
+mkmsg toomanyrefs
+{ YOU HAVE REFERED TO A CALCULATION TOO MANY TIMES
+
+You can refer to an expression a maximum of 2000 times.  You might want to
+restructure your calculations.}
+
+
+mkmsg trykillagain
+{ ERASE THE DISK OPTION
+
+You have just attempted to record a backup disk.  A backup disk can only be
+   recorded on a blank disk, but the disk in the drive is not blank.
+
+If you want to erase the disk, press [USE FRONT]-[SHIFT]-[DISK] again.
+   Continue to hold [USE FRONT]-[SHIFT], wait for the beep, and press [ERASE].}
+
+mkmsg nosort
+{ CAN'T SORT
+
+Can't sort the highlighted text because either (1) it does not contain two or
+   more records or (2) the last record wasn't complete.  Did you remember to
+   highlight the text?  SORT will not work unless you extend the highlight
+   before giving the command.  Did you remember to end each record (including
+   the last) with enough return characters?
+
+If you did extend the highlight, then the highlighted text contains only
+   one record, or the last record isn't complete.  Use the SETUP command to
+   check the setting for SORT record separator.  The setting 1 break is
+   correct for most sorting.}
+
+
+mkmsg ambiguity
+{ NO WORD HIGHLIGHTED
+
+The highlighted text doesn't contain a word that can be added to or removed
+   from your personal spelling dictionary.  Have you extended the highlight?}
+
+
+mkmsg syserror
+{ SYSTEM ERROR
+
+An unrecoverable system error has occurred.}
+
+
+mkmsg unimplement
+{ NOT IMPLEMENTED}
+
+
+mkmsg getfwdmsg
+{ DISK TRANSFER
+
+The disk in the drive was recorded on a different version of the Cat.  Your
+   text has been transferred to this Cat without changes.
+
+Stored LEARN sequences are not transferred.  Also, the CALC command may take
+   longer than usual the first time you use it.}
+
+
+mkmsg nonblankdisk
+{ DISK NOT BLANK
+
+Your disk is neither a blank disk nor a Cat disk (it may have come from another
+   computer or word processor).  This operation requires a blank disk or a
+   backup disk.}
+
+mkmsg explainmsg
+{ ON-LINE DOCUMENTATION
+
+The Cat provides you with an explanation of each available command.
+
+To read it, simply continue to hold down [USE FRONT] and tap the key of
+   interest.  Repeat this with as many keys as you like.}
+
+( SETUP command)
+
+mkmsg mCCat     {                        Canon Cat - The SETUP Command
+
+o  Press the SPACE BAR to move from line to line on the list you see below.
+o  When you get to the line you want, press either LEAP key to change the
+     setting (for numbers, holding down the LEAP key speeds up the change).
+o  Press the SETUP key to move to the next SETUP screen.}
+
+mkmsg mPER      { (in use, can't change now)}
+mkmsg mMCP      { (must be Cat 180 printer)}
+mkmsg mLet      { Letter (11")}
+mkmsg mLeg      { Legal (14")}
+mkmsg mA4       { A4 (297mm)}
+mkmsg mB5       { B5 (257mm)}
+mkmsg mHL       { Half-letter (5.5")}
+mkmsg mSta      { Statement (8.5")}
+mkmsg mA5       { A5 (210mm)}
+mkmsg mB6       { B6 (182mm)}
+
+mkmsg m2/4      { 1/2 inch}
+mkmsg m3/4      { 3/4 inch}
+mkmsg m4/4      { 1 inch}
+mkmsg m5/4      { 1-1/4 inches}
+mkmsg m6/4      { 1-1/2 inches}
+mkmsg m7/4      { 1-3/4 inches}
+mkmsg m8/4      { 2 inches}
+
+mkmsg mUS       { United States}
+mkmsg mCA       { Canada}
+mkmsg mLA       { Latin America}
+mkmsg mDN       { Denmark}
+mkmsg mNW       { Norway}
+mkmsg mD/N      { Denmark/Norway}
+mkmsg mS        { Sweden}
+mkmsg mNL       { Netherlands}
+mkmsg mD        { West Germany}
+mkmsg mCH       { Switzerland}
+mkmsg mF        { France}
+mkmsg mUK       { United Kingdom}
+mkmsg mIB       { Spain}
+mkmsg mI        { Italy}
+mkmsg mSA       {      }
+                ( South Africa)
+mkmsg mJ        { Japan}
+mkmsg mAS       { ASCII}
+mkmsg mDV       { Dvorak}
+
+mkmsg m3LANG    { Sprache?  Lingua?  Langue?}
+mkmsg mGERM     { Deutsch}
+mkmsg mITAL     { Italiano}
+mkmsg mFREN     { Franais}
+( setup strings, continued)
+
+mkmsg mBoW      { Black-on-white}
+mkmsg mWoB      { White-on-black}
+
+mkmsg mBp       { Beep}
+mkmsg mV        { Flash}
+mkmsg mBaV      { Beep and Flash}
+
+mkmsg mon       { On}
+mkmsg moff      { Off}
+mkmsg mrgs      { Slow}
+mkmsg mrgm      { Medium}
+mkmsg mrgf      { Fast}
+mkmsg mrgsf     { Slow and Flash}
+mkmsg mrgmf     { Medium and Flash}
+mkmsg mrgff     { Fast and Flash}
+
+mkmsg mDA       { Don't autoanswer}
+mkmsg m1rg      { 1 ring}
+mkmsg m3rg      { 3 rings}
+mkmsg m5rg      { 5 rings}
+mkmsg m7rg      { 7 rings}
+
+mkmsg m1m       { 1 minute}
+mkmsg m3m       { 3 minutes}
+mkmsg m5m       { 5 minutes}
+mkmsg m15m      { 15 minutes}
+mkmsg m30m      { 30 minutes}
+mkmsg m60m      { 60 minutes}
+mkmsg mInf      { Never}
+mkmsg mYes      { Yes}
+mkmsg mNo       { No}
+mkmsg mYes1     { Yes (once)}
+
+mkmsg mcd       { 1,000,000.00}
+mkmsg mdc       { 1.000.000,00}
+mkmsg mad       { 1'000'000.00}
+
+mkmsg m1rt      { 1 break}
+mkmsg m2rt      { 2 breaks}
+mkmsg m3rt      { 3 breaks}
+
+mkmsg mChP      { Characters per inch}
+mkmsg mLMO      { Left margin offset}
+mkmsg m10p      { 10-pitch}
+mkmsg m12p      { 12-pitch}
+mkmsg m15p      { 15-pitch}
+mkmsg m16.3p    { 16.3-pitch}
+mkmsg m16.8p    { 16.8-pitch}
+
+mkmsg mBid      { Bidirectional}
+mkmsg mUnid     { Unidirectional}
+
+( setup strings, continued)
+
+mkmsg mGot      { Gothic}
+mkmsg mPic      { Pica}
+mkmsg mEli      { Elite}
+mkmsg mCou      { Courier}
+
+mkmsg mA        { A}
+mkmsg mB        { B}
+mkmsg mA+B      { A then B}
+
+mkmsg mStd      { Standard}
+mkmsg mSec      { Secondset}
+
+mkmsg m110      { 110}
+mkmsg m300      { 300}
+mkmsg m600      { 600}
+mkmsg m1200     { 1200}
+mkmsg m2400     { 2400}
+mkmsg m4800     { 4800}
+mkmsg m9600     { 9600}
+mkmsg m19200    { 19200}
+mkmsg m38400    { 38400}
+mkmsg mAUTO     { Autoselect 300 or 1200}
+
+mkmsg m7b       { 7 bits}
+mkmsg m8b       { 8 bits}
+
+mkmsg m1b       { 1}
+mkmsg m1.5b     { 1.5}
+mkmsg m2b       { 2}
+
+mkmsg mNon      { None}
+mkmsg mEve      { Even}
+mkmsg mOdd      { Odd}
+
+mkmsg mPP       { Parallel port}
+mkmsg mSP       { Serial port}
+
+mkmsg mCR       { CR}
+mkmsg mCL       { CR/LF}
+
+mkmsg m2s       { 2 seconds}
+mkmsg m30s      { 30 seconds}
+mkmsg m60s      { 60 seconds}
+mkmsg m180s     { 180 seconds}
+
+mkmsg mDDS      { Initial Document Setup}
+mkmsg mDS       { Document Setup}
+mkmsg mFP#      { First page number}
+mkmsg mPP#      { First page number that prints}
+mkmsg mPL       { Page length}
+mkmsg mTM       { Top margin}
+mkmsg mBM       { Bottom margin}
+
+( setup strings, continued)
+
+mkmsg mBMS      { Machine Setup}
+mkmsg mKbd      { Keyboard}
+mkmsg mTYM      { Typewriter mode}
+mkmsg mCSM      { Display}
+mkmsg mEI       { Problem signal}
+mkmsg mSBT      { Time before display goes dark}
+mkmsg mLSpD     { Load spelling from disk}
+mkmsg mLSeD     { Load setup from disk}
+mkmsg mDNP      { Decimal and number style}
+mkmsg mDiC      { Decimal places in calculations}
+mkmsg mSRS      { SORT record separator}
+mkmsg mDPX      { Communications mode}
+mkmsg mFD       { Full-duplex}
+mkmsg mHD       { Half-duplex}
+mkmsg mCC       { Cat-to-Cat}
+mkmsg mCCITT21  { CCITT V.21 (300 baud)}
+mkmsg mBELL1    { Bell 103 (300 baud)}
+mkmsg mMS       { Modem standard}
+mkmsg mEM       { External Modem}
+mkmsg mEMS      { External Modem Setup}
+
+mkmsg mpc.0     { Cat180}
+mkmsg mpc.1     { VP3103II}
+mkmsg mpc.2     { New AP Series}
+mkmsg mpc.3     { AP400 Series}
+mkmsg mpc.4     { AP300 Series}
+mkmsg mpc.5     { AP100 Series}
+mkmsg mpc.6     { BubbleJet Printer}
+mkmsg mpc.c     { Common Printer}
+mkmsg mpc.n     { No Printer}
+
+mkmsg m180      { Cat180 Setup}
+mkmsg mDW       { Daisy wheel}
+                ( 6 spaces by x parameter to mDWchoice)
+mkmsg mPM       { Print mode}
+mkmsg mCSF      { Cut sheet feeder}
+                ( 6 spaces by x parameter to myesno)
+mkmsg mTS       { Tray selection}
+mkmsg mPBS      { Pause between sheets}
+                ( 6 spaces by x parameter to myesno)
+
+( setup strings, continued)
+
+mkmsg mLB       { VP3103II Setup}
+mkmsg mFX       { Common Printer Setup}
+mkmsg mITLC     { Underline prints as italics}
+                ( 6 spaces by x param to myesno)
+mkmsg mCF       { Character font}
+mkmsg mChS      { Character set}
+mkmsg mAP4      { AP400 Series Setup}
+mkmsg mAP3      { AP300 Series Setup}
+mkmsg mAP1      { AP100 Series Setup}
+mkmsg mNAP      { New AP Series Setup}
+mkmsg mBJ       { BubbleJet Printer Setup}
+mkmsg mSPS      { Serial Port Setup}
+mkmsg mBR       { Baud rate}
+mkmsg mDBL      { Data word length}
+mkmsg mPty      { Parity}
+mkmsg mSB       { Stop bits}
+mkmsg mMPS      { Main Printer Setup}
+mkmsg mCT       { Connected to}
+mkmsg mPT       { Printer type}
+mkmsg mSPC      { Serial Port Connection}
+mkmsg mAP       { Alternate Printer}
+mkmsg mAPS      { Alternate Printer Setup}
+mkmsg mAPP      { Alternate Printer (On Parallel Port)}
+mkmsg mSC       { SEND Command}
+mkmsg mSSU      { SEND Command Setup}
+mkmsg mABK      { Answerback}
+                ( 3 or 6 spaces by x parameters to myesno)
+
+mkmsg mLT       { Line terminator}
+mkmsg mRING     { Ring sound}
+mkmsg mRA       { Rings before autoanswer}
+mkmsg mIMS      { Internal Modem Setup}
+mkmsg mNCT      { Wait before hangup}
+mkmsg mSPKR     { Monitor Speaker}
+mkmsg mPRO      { Protocol}
+mkmsg mMNP      { MNP}
+
+mkmsg mCFC      { Characters for communication}
+mkmsg mascii    { ASCII}
+mkmsg mibm      { IBM}
+mkmsg mP/L      { Page orientation}
+mkmsg mPORT     { Portrait}
+mkmsg mLAND     { Landscape}
+
+;s
+mkmsg mSM1200   { External Smartmodem 1200 setup}
+mkmsg mDTL3000  { External DTL3000 modem setup}
+mkmsg mSRT8333  { External SRT8333 modem setup}
+mkmsg mSM120    { External SM120 modem setup}
+mkmsg mNOKIA    { External NOKIA modem setup}
+mkmsg mSM2400   { External Smartmodem 2400 setup}
+mkmsg mBELL2    { Bell 212A (1200/300 baud)}
+mkmsg mCCITT22  { CCITT V.22 (1200 baud)}
+mkmsg mCCITT22b { CCITT V.22 bis (2400 baud)}
+mkmsg mCCITT23  { CCITT V.23 (1200+75 baud)}
+
+mkmsg m7&1      { 7 data, 1 stop}
+mkmsg m7&1.5    { 7 data, 1.5 stop}
+mkmsg m7&2      { 7 data, 2 stop}
+mkmsg m8&1      { 8 data, 1 stop}
+mkmsg m8&1.5    { 8 data, 1.5 stop}
+mkmsg m8&2      { 8 data, 2 stop}
+( United States spelling checker code )
+
+: nativerom  [ usa ] literal ;          ( identification of ROM1 )
+
+code compatibility  nx ) jsr,  ;c       ( keyboard compatibility table )
+ usa           c,  uk            c,  japan         c,  norway        c,         
+ denmark       c,  sweden        c,  netherlands   c,  spain         c,         
+ italy         c,  latinamerica  c,  safrica       c,  -1            c,
+
+code spellcode  nx ) jsr, ;c                    ( Received from Canon in May )
+,s
+60000012 60000060 60000074 60000088 600000AE 48E77FFF 284BD9FC 00000028 
+1940000B 103C00F0 2A4B4281 122C000B 0C010020 63027220 1941000B 53411AD8 
+51C9FFFC 2949000E 294A0012 6100009C 42800C2C 00FF000D 6706203C FFFFFFFF 
+4CDFFFFE 4E7548E7 7FFF284B D9FC0000 00281940 000B103C 00F16000 FFAC48E7 
+7FFF284B D9FC0000 00281940 000B103C 00F26000 FF9448E7 7FFF284B D9FC0000 
+0028294A 00126100 08884280 0C2C00FF 000D6706 203CFFFF FFFF4CDF FFFE4E75 
+48E77FFF 284BD9FC 00000028 294A0012 610008A8 42800C2C 00FF000D 6706203C 
+FFFFFFFF 4CDFFFFE 4E750400 00F36124 197C00FF 000D5200 67145200 670A5200 
+66106100 00D8600A 61000382 60046100 03924E75 2F00422C 000C142C 000B675A 
+224B2A49 72066100 008C4A00 6608532C 000B6746 52892749 00242A49 4281122C 
+000BDBC1 538D7205 616A4A00 6606532C 000B6726 4281122C 000B5341 61000020 
+528951C9 FFF80C2C 0001000C 660C0C15 00696606 197C00FF 000C201F 4E752F01 
+14112A49 7203612C 4A00671C 0C020030 651E0C02 00396310 020200DF 0C020041 
+650E0C02 005A6208 062C0001 000C4242 221F4E75 48E76008 4200611E 213F222C 
+272F2E20 285F1415 B41C6708 51C9FFF8 103C00FF 4CDF1006 4E7560E8 0C2C0001 
+000C6300 0098197C 00FF000A 61000150 4A2C000D 67000084 610000B4 4A04667A 
+197C0001 000A6100 01364A2C 000D676A 422C000A 196C000B 0009532C 0009226B 
+00245289 123C00FF 0C11002D 6754616A 5289532C 000966F0 4A01660A 61000100 
+4A2C000D 6734226B 0024614E 660A6100 00EE4A2C 000D6722 196C000B 0009532C 
+00095289 123C00FF 61305289 532C0009 66F64A01 66046100 00C64E75 422C000D 
+4E755289 532C0009 67AE6100 FEF266F2 5289532C 00096690 609E0C11 0041650C 
+0C11005A 62060611 00204241 4E75183C 00FF4281 122C000B 226B0024 0C110041 
+65380C11 005A633A 0C11007A 622C5341 67685289 0C110041 65200C11 005A6318 
+53416756 52890C11 002767F4 0C110041 65080C11 005A62E8 4E755341 673C5289 
+60BA5341 67345289 0C110041 65EC0C11 007A62EE 0C11005A 62C65341 671C5289 
+0C110027 67F40C11 004165CE 0C11005A 63E80C11 007A62E2 4E754204 4E752F09 
+4282142C 000B226B 0024D3C2 0C21002E 6610532C 000B6110 522C000B 4A2C000D 
+67026104 225F4E75 0C2C00FF 000A6716 196C000B 0008611A 4A2C000D 67120C2C 
+0001000A 670A196C 000B0008 61000222 4E75422C 0006226B 00244282 142C0008 
+D3C21221 0C010027 66101221 020100DF 0C010053 663E5542 60340201 00DF0C01 
+00536630 53421221 0C010027 66205302 12210201 00DF0C01 00536618 53426768 
+12210201 00DF0C01 00536702 5242197C 00400006 19420008 610000B0 42461C2C 
+0004E44E 42857A02 362C0004 42AB0020 024303FF 3E03E24B 17430022 E04B1743 
+00213607 1403E21A 02020080 17420023 1406E90A 852B0023 42847808 6100015A 
+39430002 04433FFF 6740362C 00020243 3FFF966C 0000671A 542B0023 534466DC 
+53456726 162C0001 024300FF D6475643 609A122C 00020801 0007660A 02410040 
+B22C0006 6604422C 000D4E75 61066310 6000024C 196C000B 00080C2C 0001000C 
+4E7561F0 63FA6000 02E86100 00D43946 00040C05 00016338 36065305 67325289 
+EC4B3803 12061406 0201003E E209E21A 02020080 84113601 E14B1602 D6440443 
+1FFF6404 06431FFF 39430004 3C0360CA 6100008E 39460000 0C050001 633A3606 
+53056734 5289EE4B 61000086 12061406 0201007E E209E21A 02020080 84113601 
+E14B1602 D6440443 3FFD6404 06433FFD 39430000 3C0360C8 4E756100 00443946 
+00040C05 000163A8 36065305 67A25289 E64B613C 12061406 02010006 E209E21A 
+02020080 84113601 E14B1602 D6440443 03FD6404 064303FD 39430004 3C0360CA 
+42851A2C 00084246 226B0024 1C114E75 3803E34B D8434E75 262B0020 E38B2443 
+D5EC000E 528A1612 E14B548A 16124E75 2A6C0012 611C4A2C 000D660E 342C0016 
+02420040 66066100 00A64E75 422C000D 60F8022C 003F0016 6100FF60 302C0004 
+024000FF 3A00303C 00039045 3800302C 0004E348 39400004 363C0012 306C0004 
+610002F6 342C0000 B0426752 34000C42 3FFF6750 0C423FFE 6618142C 00160202 
+0080660E 302C0004 39400018 002C0080 00165343 67183004 D045D045 3800E348 
+D06C0004 024007FF 39400004 60AE142C 00160202 0080660C 002C0040 0016422C 
+000D4E75 143C00FF 1942000D 60F4306C 00046100 028A3940 002245ED 2710050A 
+00009042 674C302C 00226100 01C03940 0024C188 6100026E C1886100 02621039 
+00850000 02000001 67F4302C 00226100 026AC188 306C0022 61000266 302C0024 
+306C0004 61000254 C188306C 00246100 02504E75 103C00FF 1940000D 60F42A6C 
+00126100 FEEE4A2C 000D6700 009E1039 00850000 02000001 67F445ED 2708050A 
+00000C42 01C2671A 06420001 058A0000 45ED2710 010A0000 61000132 018A0000 
+603845ED 270C010A 000045ED 2710018A 00006100 011845ED 270C018A 000045ED 
+2710050A 00003042 610001BA C188303C 3FFE6100 01C06100 01C2142C 00160202 
+00806706 302C0018 6004302C 000445ED 2710050A 00003042 610001A6 C1886100 
+019A302C 00006100 018C422C 000D4E75 2A6C0012 6100FE3C 4A2C000D 660000A8 
+142C0016 02020040 660000A0 306C0004 6100014C 3600E04B 39400022 45ED270C 
+010A0000 906C0022 64040640 0384E448 020000FE 39400020 302C0022 E14B1600 
+30033940 001C43EC 0028616A 61686166 45ED270C 010A0000 61621039 00850000 
+02000001 67F46100 008E306C 0004303C 3FFE6100 01066100 00FC45ED 270C050A 
+00003042 610000FA 45ED270C 010A0000 611A018A 000045ED 2708010A 00000440 
+0001018A 0000422C 000D4E75 55406404 303C0382 4E75302C 001C612A 2649C188 
+61503940 001EC188 6168302C 001CC188 302C001E 617CC188 6178302C 001C6106 
+3940001C 4E75D06C 00200440 03846404 06400384 4E7543EC 00286108 61066104 
+61024E75 30193059 61763019 3059616A 4E7545EC 0028B7CA 670EB0EB FFFA670C 
+97FC0000 000860EA 613A6004 302BFFF8 4E7545EC 0028B7CA 670EB0EB FFFE670C 
+97FC0000 000860EA 61146004 302BFFFC 4E7532C0 32C84E75 45ED0000 600A45ED 
+10006004 45ED2000 2C48DDCE D5CE010A 00004E75 45ED0000 600A45ED 10006004 
+45ED2000 2C48DDCE D5CE018A 00004E75 2A6C0012 45ED0000 47ED2708 343C3FFF 
+058A0000 588AB5CB 66F645ED 2714343C AA55058A 000045ED 27084242 058A0000 
+45ED2710 058A0000 45ED270C 343C0382 058A0000 422C000D 4E752A6C 001245ED 
+2708050A 00004A42 6706422C 000D4E75 143C00FF 1942000D 60F40000
+
+( German Spelling code )
+;s
+
+: nativerom  [ wgermany ] literal ;             ( identification of ROM1 )
+
+code compatibility  nx  ) jsr,  ;c      ( keyboard compatibility table )
+ wgermany      c,  switzerland   c,  norway        c,  denmark       c,         
+ sweden        c,  netherlands   c,  spain         c,  italy         c,         
+ latinamerica  c,  safrica       c,  -1            c,
+
+code spellcode  nx ) jsr, ;c            ( Received from Canon in August )
+,s
+60000012 60000078 6000008C 600000A0 600000C6 48E77FFF 284BD9FC 00000088 
+19400094 103C00F0 42020201 007F0C01 00026702 74011942 00012A4B DBFC0000 
+005A4281 122C0094 0C01002D 6302722D 19410094 53411AD8 51C9FFFC 29490096 
+294A009A 6100009C 42800C2C 00FF001A 6706203C FFFFFFFF 4CDFFFFE 4E7548E7 
+7FFF284B D9FC0000 00881940 0094103C 00F16000 FF9448E7 7FFF284B D9FC0000 
+00881940 0094103C 00F26000 FF7C48E7 7FFF284B D9FC0000 0088294A 009A6100 
+00664280 0C2C00FF 001A6706 203CFFFF FFFF4CDF FFFE4E75 48E77FFF 284BD9FC 
+00000088 294A009A 61000076 42800C2C 00FF001A 6706203C FFFFFFFF 4CDFFFFE 
+4E750C00 00F16606 61000092 60160C00 00F26606 61000098 600A0C00 00F06604 
+6100009E 4E75226C 009A2A49 4241363C FFFF0789 00005849 58410C41 270866F2 
+303C0382 018D270C 4240018D 2710018D 2708303C AA55018D 272E422C 001A4E75 
+2A6C009A 422C001A 010D2708 6706197C 00FF001A 4E756100 020A422C 0006196C 
+00030007 532C0007 61000D52 1941000B 0C010005 67046100 104C4E75 122C0094 
+6606422C 001A4E75 61CC6000 1C3E122C 00946606 422C001A 4E7561BA 60001D1E 
+422C008F 196C0094 00906100 00F84A2C 001A67C6 422C008E 422C0092 422C0093 
+422C008F 224BD3FC 0000005A 4282142C 008E1942 0090B42C 00946700 0090D3C2 
+12110C01 00E1671A 0C010020 63620C01 00A8645C 0C01002F 67566100 01024A02 
+660A522C 0092522C 00936058 4A2C0093 66180C01 002D6712 0C010030 65060C01 
+003963E2 522C008F 603A522C 00935389 0C01002D 6604B211 67120C01 002E6624 
+B211670C 12110C01 002D6618 532C0090 611A196C 008E008F 522C008F 122C001A 
+67024E75 522C008E 6000FF5A 0C2C0002 00926406 422C001A 6020224B D3FC0000 
+005A4282 142C0090 D3C21221 61584A02 6706532C 009060E2 610A422C 0092422C 
+00934E75 61000092 224BD3FC 0000002D 4282142C 0002D3C2 0C21002E 6610532C 
+0002610A 4A2C001A 671A522C 00026100 00B66100 10944A01 6606197C 00FF001A 
+61001E04 4E750C01 002E6742 0C01002D 673C0C01 0030653A 0C010039 63300C01 
+00E1672A 0C010041 65280C01 005A631E 0C010061 651C0C01 007A6312 0C010080 
+65100C01 009A6306 0C0100A0 65044202 4E75143C 00FF4E75 142C008F 4241224B 
+D3FC0000 005A244B D5FC0000 002DB42C 00906708 14D95241 520260F2 19410002 
+4E754242 142C0094 19420003 224BD3FC 0000005A 244BD5FC 00000000 534214D9 
+51CAFFFC 4E754201 42026100 0ED06100 00044E75 42AC0010 422C0006 122C0003 
+670000A2 53011941 00076100 0B101941 000B142C 00011942 0021660C 0C010002 
+6606197C 00010001 3F2C0006 610C395F 0006196C 00210001 4E750C01 0005660A 
+610018FC 4A2C001A 67624A2C 000B6704 61000DD2 610018E8 4A2C001A 674E197C 
+00010018 61000222 4A2C001A 66024E75 522C0018 61000212 4A2C001A 66024E75 
+224B4282 142C0006 D3C21211 0C01002D 672E122C 0007142C 00066100 0A5E4A02 
+66000086 197C00FF 001A4E75 42AC000C 426C0008 002C0002 0008422C 001A4E75 
+522C0006 196C000B 0020197C 00010018 197C0001 000B6100 01B0196C 0020000B 
+4A2C001A 6616422C 000A4A2C 000B660C 4A2C0019 6706426C 000860BE 61001840 
+0C2C00F1 001A6718 0C2C0001 000A6610 4A2C000B 660A422C 000A42AC 000C609A 
+426C0008 6000FF7E 53021942 0007426C 000842AC 000C196C 000B0020 197C0001 
+000B197C 00030018 6100013E 4A2C001A 66064A2C 00196646 224B4282 142C0007 
+D3C21211 0C010073 6618532C 00076100 0118522C 00074A2C 001A6606 4A2C0019 
+661C6100 17BA0C2C 00F1001A 67080C2C 0001000A 6708196C 0020000B 607A196C 
+0020000B 296C000C 001C42AC 000C224B 4282142C 0007D3C2 12110C01 00736724 
+61000B7A 610014EE 4A2C001A 6656102C 00080200 0002674C 102C0008 02000001 
+67426034 532C0007 61000B52 522C0007 610014C2 4A2C001A 662A102C 00080200 
+00026720 102C0008 02000001 6616102C 00090200 0080660C 426C0008 197C00FF 
+001A4E75 426C0008 122C0007 5401B22C 00036610 123C0004 4601C32C 0008426C 
+001A4E75 122C0007 54011941 0006122C 00035301 19410007 6100002E 4A2C001A 
+67146100 16DA0C2C 00F1001A 67AE0C2C 0001000A 66A6002C 00080008 197C0003 
+000A422C 001A4E75 422C006B 122C0007 B22C0006 64046000 010A42AC 0010426C 
+0008296C 000C0022 610001DA 4A2C001A 6636143C 00040002 0080C42C 0008122C 
+000AB22C 000B6604 600000CE 122C000A 1941002C 1942002A 196C0008 002B296C 
+000C0026 522C006B 122C0007 B22C0006 6F0000B0 296C0022 000C102C 00193F00 
+610004B6 301F1940 00194A2C 001A661C 102C0009 02000008 6706197C 00010019 
+123C0008 4601C32C 00096070 296C0022 000C426C 0008102C 00193F00 61000628 
+301F1940 00194A2C 001A6750 122C0018 02010002 6728123C 00040001 0080C32C 
+0008296C 0022000C 102C0019 3F006100 1326301F 19400019 4A2C001A 671E4A2C 
+006B671E 196C002C 000A396C 002A0008 296C0026 000C6004 19420008 422C001A 
+4E75197C 00FF001A 4E75422C 006C122C 0006B22C 000762EA 42AC0010 426C0008 
+296C000C 00386100 00BC4A2C 001A6630 143C0004 00020080 C42C0008 122C000A 
+B22C000B 67B2196C 000A0042 19420040 196C0009 0041296C 000C003C 522C006C 
+122C0007 B22C0006 6F98296C 0038000C 102C0019 3F006100 03A0301F 19400019 
+4A2C001A 661E102C 00090200 00086706 197C0001 0019123C 00084601 C32C0009 
+6000FF5A 296C0038 000C426C 0008102C 00193F00 61000510 301F1940 00194A2C 
+001A6718 4A2C006C 6716196C 0042000A 396C0040 0008296C 003C000C 6000FF1E 
+6000FF20 122C0018 02010001 67F2422C 00196100 08A86100 121C4A2C 001A6710 
+61001232 4A2C001A 66D6002C 00040008 122C0009 02010007 1941000A 022C00F8 
+0009102C 00090200 000867B0 197C0001 001960A8 122C0007 922C0006 52011941 
+00695502 62046000 02380C01 00166302 72161941 0064224B 4282142C 0006D3C2 
+42811211 39410088 3941008A 123C0001 19410066 B22C0064 65046000 00EC224B 
+4282142C 0066D42C 0006D3C2 61000898 426C0032 422C005E 4242142C 00890202 
+003F3942 0062196C 00620060 576C0060 362C008A 02431FFF 3943005C 362C005C 
+610012A2 122C0073 142C0072 0201003F B42C0089 6646142C 00880202 003F1942 
+0078B22C 00786634 002C0002 0032002C 00080033 002C0001 0033122C 00730201 
+00806706 002C0080 0033122C 00730201 00406706 002C0001 00326054 362C0062 
+E343D66C 00603943 0060D66C 005C0443 200064FA 06432000 3743005C 522C005E 
+122C005E 0C01000A 6300FF72 102C0032 02000001 6604522C 0066122C 0066B22C 
+00646704 6000FF18 197C00FF 001A4E75 422C008C 102C0032 02000001 671C224B 
+4282142C 0066D42C 0006D3C2 12290001 0C010073 66C0522C 008C142C 0066D42C 
+008C5202 122C0006 D2021941 0068122C 00699202 19410069 5301B22C 00666636 
+422C0078 224B4282 142C0006 D42C0078 D3C21211 4282142C 0069D42C 008CD3C2 
+B2116612 522C0078 122C0078 B22C0069 66D26000 FF62122C 0066D22C 008C1941 
+0066197C 00010018 396C0008 0034426C 0008196C 000B0036 197C0001 000B102C 
+00063F00 196C0068 00066100 FCDE301F 19400006 196C0036 000B396C 00340008 
+4A2C001A 66000054 426C0008 4A2C0019 6700FEFA 224B4282 142C0006 D42C0066 
+5302D3C2 1211B229 0001661C B2290002 6616142C 00036100 08544A2C 001A6708 
+197C00FF 001A4E75 002C0010 0008197C 0001000A 422C001A 4E75224B 4282142C 
+0006D42C 00665302 D3C21211 B2290001 66000062 14290002 61000812 4A2C001A 
+6752396C 00080034 196C000B 0036197C 0001000B 102C0006 3F00122C 00685301 
+19410006 6100FC24 301F1940 0006196C 0036000B 396C0034 00084A2C 001A6614 
+4A2C0019 670E002C 00100008 197C0001 000A6080 6000FE36 102C0007 3F006108 
+301F1940 00074E75 42AC0010 610000A6 19410067 6B00006E 67000092 122C0007 
+922C0067 19410007 B22C0006 6500007E 4242142C 00091942 00760202 00301942 
+00443942 0008660E 123C00C0 C22C0076 19410044 60346100 FC6C4A2C 001A662A 
+122C0009 C22C0044 B22C0044 661C123C 00040001 0080C22C 00081941 0008022C 
+00080009 426C001A 4E754242 142C0044 39420008 61000110 4A2C001A 660E122C 
+0009C22C 0044B22C 004467D8 197C00FF 001A4E75 197C0040 0044224B 4282142C 
+0007D3C2 12110C01 00726720 0C01006D 671A0C01 006E6714 0C010073 6600008C 
+002C0080 0009002C 00800044 002C0040 0009532C 00076100 FBCC4A2C 001A6626 
+122C0044 C22C0009 671C123C 00040001 0080C22C 00081941 0008022C 00080009 
+123C00FF 4E75102C 00440200 0080670A 4242143C 00803942 0008002C 00400009 
+61000064 4A2C001A 660A122C 0044C22C 000966CC 522C0007 224B4282 142C0007 
+D3C25389 61045201 4E755589 12290002 0C010065 662C1229 00010C01 0072660A 
+002C0020 00097202 4E751611 E14B1629 00010443 7374660A 002C0010 00097203 
+4E754201 4E753F2C 00066106 395F0006 4E75224B 4282142C 0006D3C2 61000096 
+19410065 67000056 296C000C 0046224C D3FC0000 007C4269 000232BC 4000122C 
+00656100 04EC613C D32C0006 196C000B 004A422C 000B6100 FACC196C 004A000B 
+4A2C001A 6610222C 0010C2AC 007C6706 422C001A 4E75296C 0046000C 197C00FF 
+001A4E75 611E0202 03030203 05030302 04030606 05060306 03040402 05030303 
+03020608 225F4282 142C0065 5302D3C2 12114E75 28095284 612A6162 64656668 
+6D6E8175 76777A00 000A0F14 1C204346 4A4E555B 5E000105 07080B0C 13141516 
+181A1B00 245F6172 62006E00 75660075 73FF6500 6569FF75 726368FF 696E006E 
+740072FF 6F7274FF 65720065 72617573 00657265 696E0065 72756D00 6572766F 
+7200696E 00696E65 696EFF69 74FF6163 68FF6265 72FF6D00 6E746572 FF657200 
+6F72FF65 67FF6572 00750075 7281636B 00757361 6D6D656E FFFF2A5F 121A672C 
+B21166F8 42824283 142A000D 162A001B DBC22C44 121D671E 0C0100FF 6718B21E 
+67F2121D 670A0C01 00FF66F6 42014E75 52032C44 60DE1203 4E755201 19410078 
+123C002D 224B4283 1602D3C3 B211670A 5202B42C 007866EC 42024E75 224B4282 
+142C0003 D3C24211 4202002C 00FF0078 6100010A B42C0003 66024E75 4A01670C 
+53016746 53016636 600000B4 610000EE 4A016706 022C00FE 00785301 6706022C 
+00EF0078 B42C0003 66E2102C 00780200 0001660E 102C0078 02000010 66087205 
+4E754201 4E757204 4E756100 00B00C01 00016706 4A2C0079 670A4A01 670C4A2C 
+00796706 022C00F7 00784A01 6706022C 00FD0078 4A016706 B42C0003 660A5301 
+670CB42C 00036606 022C00BF 0078B42C 000366B6 102C0078 02000002 6618102C 
+00780200 00086612 102C0078 02000040 678C7206 4E757201 4E757203 4E75613C 
+0C010002 6706022C 00FB0078 0C010001 6706022C 007F0078 B42C0003 66E0102C 
+00780200 00046610 102C0078 02000080 6700FF4C 72074E75 72024E75 002C00FF 
+0077422C 0079224B 42831602 D3C31211 0C010055 67060C01 00756626 12290001 
+0C01006E 661C1229 00020C01 00646612 12290003 67060C01 002D6606 002C0001 
+00796172 4A016706 022C00F9 00776100 008A4A01 6706022C 00FE0077 52895202 
+61544A01 6706022C 00FB0077 616C4A01 6706022C 00FC0077 B42C0003 670A1011 
+0C00002D 66D65202 102C0077 02400001 67044201 4E75102C 00770200 00026704 
+72014E75 102C0077 02000004 67047202 4E757205 4E751211 0C010061 65180C01 
+007A6314 0C010084 670E0C01 00816708 0C010094 67024201 4E751211 0C010041 
+65F40C01 005A63F0 0C01008E 67EA0C01 009A67E4 0C010099 67DE60DA 244B4282 
+142C0007 D5C2224B 4282142C 0006D3C2 42831611 39430014 39430016 5289B3CA 
+62046104 60F64E75 362C0014 E34BE04B 19430072 362C0014 0203007F 19430073 
+12111941 00744243 162C0072 E94B3943 00144243 162C0072 E34B4244 182C0072 
+D644D66C 0014102C 0073E148 102C0074 D6400C43 7FEC6304 04437FED 39430014 
+B76C0016 4E75362C 0088E34B E04B1943 0072362C 00880203 007F1943 00731211 
+19410074 4243162C 0072E94B 39430088 4243162C 0072E34B 4244182C 0072D644 
+D66C0088 102C0073 E148102C 0074D640 0C437FEC 63040443 7FED3943 0088B76C 
+008A4E75 224B4282 142C0007 D3C22449 224B4282 142C0006 D3C21211 0C010041 
+652E0C01 005A6206 06010020 60220C01 008E6606 123C0084 60160C01 009A6606 
+123C0081 600A0C01 00996604 123C0094 12815289 B3CA63C2 4E754A01 67106E04 
+4401600C 2611E28B 22835301 66F64E75 4A016710 6E044401 60E02611 E28B2283 
+530166F6 4E754A01 67106E04 440160CA 2611E28B 22835301 66F64E75 224BD3FC 
+0000002D 2A492C4B 19420073 19410075 D22C0002 19410074 19410003 601A2A4B 
+2C4B1942 00731941 0075D22C 00031941 00741941 00034E71 122C0073 B22C0074 
+6722224D 4282142C 0073942C 0075D3C2 1211224E 4282142C 0073D3C2 1281522C 
+007360D4 4E752A4B 2C4B1942 00731941 0075D22C 00031941 00741941 0003122C 
+0074B22C 00736722 224D4282 142C0074 942C0075 D3C21211 224E4282 142C0074 
+D3C21211 532C0074 60D44E75 610A8882 0880D804 10C14000 225F0C02 00A26240 
+04010061 653A1942 0078E64A 02820000 00FFD3C2 1211142C 00781941 00780282 
+00000007 61088040 20100804 0201225F D3C21411 C42C0078 6706422C 001A4E75 
+197C00FF 001A4E75 61088040 20100804 0201225F 4282142C 000BD3C2 12116108 
+E0602030 38042221 225F4282 142C000A D3C2C211 4E75142C 0007942C 00065202 
+B42C0002 6706922C 000B4E75 1941000A 61B66704 42014E75 123C00FF 4E753809 
+42802240 96446B04 528960F8 D6444E75 E343E343 3003E543 D640E543 D6404E75 
+422C006A 396C0008 00524242 142C0015 0202003F 39420062 422C005E 362C0016 
+02430FFF 3943005C 7603966C 00623943 00606100 00A44A2C 001A6602 4E754AAC 
+00106662 102C0009 02000030 6626422C 005E362C 00160243 0FFF3943 005C7603 
+966C0062 39430060 610001A2 4A2C001A 66024E75 102C0009 02400030 6628422C 
+005E362C 00160243 1FFF3943 005C363C 0003966C 00623943 00606100 020A4A2C 
+001A6602 4E754A2C 006A6724 610005E6 4A2C001A 66024E75 396C0050 0008296C 
+00800010 296C004C 000C422C 001A4E75 197C00FF 001A4E75 362C005C 610006BE 
+362C0014 02433FFF 39430078 162C0073 E14B162C 00720243 3FFF966C 00786736 
+362C0062 E343D66C 00603943 0060D66C 005C0443 100064FA 06431000 3943005C 
+522C005E 122C005E 0C010001 63AA197C 00FF001A 4E75422C 00504243 162C0075 
+E9433203 E0498203 19410051 162C0073 E14B162C 00740243 C0FFE343 64025243 
+E3436402 52436100 0670122C 00750201 003F1941 0080196C 00740081 196C0073 
+0082196C 00720083 122C0051 020100C0 660A122C 00090201 00C06660 122C0051 
+4601C22C 00090201 00306650 222C0080 4681C2AC 00106644 396C0050 0008296C 
+00800010 122C0009 02010007 6100FDE8 4A016606 422C001A 4E75197C 0001006A 
+296C0010 008042AC 0010396C 00080050 396C0052 0008296C 000C004C 362C0016 
+02430FFF 3943005C 6000FEF6 362C005C 6100059E 162C0073 E14B162C 00720243 
+7FFF966C 00146730 362C0062 E343D66C 00603943 0060D66C 005C0443 100064FA 
+06431000 3943005C 522C005E 122C005E 0C010002 63B66046 42AC0010 426C0008 
+102C0073 02400080 6706006C 00400009 42016100 FD424A01 6606422C 001A4E75 
+197C0001 006A296C 00100080 396C0008 0050396C 00520008 296C000C 004C197C 
+00FF001A 4E75362C 005C6100 05184A2C 00736606 4A2C0072 67E4362C 00140243 
+3FFF3943 0078162C 0073E14B 162C0072 02433FFF 966C0078 6730362C 0062E343 
+D66C0060 39430060 D66C005C 04432000 64FA0643 20003943 005C522C 005E122C 
+005E0C01 000A639E 609442AC 0010163C 0002E14B 163C0008 00030001 39430008 
+102C0073 02400080 6706002C 00800009 102C0073 02000040 6706002C 00010008 
+72016100 FC724A01 6606422C 001A4E75 197C0001 006A396C 00100080 396C0012 
+0052396C 00080050 396C0052 0008296C 000C004C 197C00FF 001A4E75 422C006A 
+422C005E 4242142C 00150202 000F5202 39420062 362C0016 327C0054 6100FC40 
+3949005A 3943006E E24B3943 00606174 4A2C001A 66024E75 4AAC0010 6640102C 
+00090200 00306616 422C005E 396C006E 00606100 01724A2C 001A6602 4E75102C 
+00090240 00306616 422C005E 396C006E 00606100 01EE4A2C 001A6602 4E754A2C 
+006A6718 396C0058 0008296C 00840010 296C0054 000C422C 001A4E75 197C00FF 
+001A4E75 362C0060 E5436100 03C0362C 00140243 3FFF3943 0078162C 0073E14B 
+162C0072 02433FFF 966C0078 672C362C 0062D66C 00600443 002A64FA 0643002A 
+39430060 522C005E 122C005E 0C010002 63B2197C 00FF001A 4E75197C 00040058 
+4243162C 0075E943 3203E049 19410059 872C0059 162C0073 E14B162C 00740243 
+C0FFE343 64025203 E3436402 52036100 0328122C 00750201 003F1941 0084196C 
+00740085 196C0073 0086196C 00720087 122C0059 020100C0 660A122C 00090201 
+00C0665E 122C0059 4601C22C 00090201 0030664E 262C0084 4683C6AC 00106642 
+396C0058 0008296C 00840010 122C0009 02010007 6100FAA0 4A016606 422C001A 
+4E75197C 0001006A 396C0008 0058296C 00100084 42AC0010 426C0008 296C000C 
+00546000 FF0A362C 0060E343 064300A8 6100029A 162C0073 E14B162C 00720243 
+7FFF966C 00146726 362C0062 D66C0060 04430054 64FA0643 00543943 0060522C 
+005E122C 005E0C01 000363BA 604C42AC 0010426C 0008102C 00730200 00806706 
+002C0040 0009002C 00040008 122C0009 02010007 6100FA00 4A016606 422C001A 
+4E75197C 0001006A 296C0010 0084396C 00080058 296C000C 0054197C 00FF001A 
+4E75362C 0060E343 06430150 610001FE 162C0073 E14B162C 00720243 7FFF966C 
+00146726 362C0062 D66C0060 04430054 64FA0643 00543943 0060522C 005E122C 
+005E0C01 000363BA 60B042AC 0010363C 00080003 00013943 0008002C 00040008 
+102C0073 02000080 6706002C 00800009 422C001A 4E756100 EE3C122C 001A0C01 
+000F6702 4E75122C 00645201 19410071 78016040 6100F98A 4A2C001A 66024E75 
+196C0007 00717802 602A6100 F6706100 F9704E75 6100FCE6 4A2C001A 66024E75 
+196C0007 00717803 600A6100 F6506100 FCCC4E75 4A2C0001 67000098 422C0001 
+422C0070 224B4282 142C0070 D3C21211 0C010073 6666B229 00016660 12BC00E1 
+123C00FF 52026100 F7B6532C 0007102C 00713F00 102C0070 3F005344 66066100 
+ED94600E 53446604 61806006 53446602 6198301F 19400070 301F1940 0071522C 
+0007224B 4282142C 0070D3C2 12BC0073 72016100 F7B24A2C 001A671E 522C0070 
+142C0070 B42C0071 6600FF7A 197C0001 0001197C 00FF001A 4E7542AC 0076122C 
+00705501 6512197C 00800076 224CD3FC 00000076 6100F6F0 282C0076 26044684 
+C8AC000C E28CC6AC 000C8684 2943000C 197C0001 0001422C 001A4E75 02830000 
+FFFFE543 06830001 6E006100 00A64E75 02830000 FFFFE343 06830001 4E006100 
+006E4E75 02830000 FFFFE343 06830001 0E006100 005A4E75 02830000 FFFFE543 
+06830001 AE006100 006A4E75 42823403 4283362C 005AE343 E18BD682 06830000 
+00000C83 00020000 650A0483 00020000 61404E75 612C4E75 E38B2243 D3EC0096 
+19690001 00721969 00030073 4E75E38B 2243D3EC 00961951 00721969 00020073 
+4E7561D4 19690005 00741969 00070075 4E7561DA 19690004 00741969 00060075 
+4E75326C 005C6100 04421203 E0490201 00E01B41 27280243 1FFF078D 2718010D 
+27109640 66024E75 070D2718 61000242 078D2724 C7896100 041EC789 6100040C 
+3203E049 020100E0 19410079 10390085 00000200 000167F4 070D2718 122C0079 
+E1498641 61000416 C7894280 2240010D 27183240 61000412 4283070D 2724030D 
+2728E149 8641326C 005C6100 03F0C789 42802240 010D2724 32406000 03EC2A6C 
+009A611E 122D272C 6612102C 007A0240 00806608 6100FF4C 122D272C 1941001A 
+4E75422C 007A6100 F3D4362C 0016E343 024307FF 3943005C 4243162C 00150203 
+003F3943 00627603 966C0062 39430060 197C0012 005E4280 2240326C 005C6100 
+033EB66C 00146748 0C43FFFF 67740C43 FFFE6618 102C007A 02400080 660E302C 
+005C018D 271C002C 0080007A 532C005E 6740362C 0062E343 D66C0060 39430060 
+E343D66C 005C0243 7FFF3943 005C60A6 610002F8 0243E0FF E04BE743 3203E049 
+1941000A 6100F5C2 66121B7C 00F2272C 4E75102C 007A0200 00806606 422D272C 
+4E751B7C 00F1272C 4E752A6C 009A6100 FF32122D 272C6700 00D21039 00850000 
+02000001 67F40C01 00F1672C 326C005C 61000298 3E03162C 000BE14B E64B1943 
+00793607 02431FFF 122C0079 E1498641 610002AA 60000094 61000090 010D2708 
+0C4001C2 67125240 018D2708 070D2710 617E078D 27106026 010D270C 018D2710 
+616E078D 270C010D 27103240 61000248 C789363C FFFE6100 02586100 0260102C 
+007A0200 00806706 070D271C 6004362C 005C010D 27103240 6100024E C7893E03 
+162C000B E14BE64B 19430079 3607122C 0079E149 86416100 0224362C 00146000 
+0210197C 00FF001A 4E75422C 001A4E75 04430002 6404363C 03824E75 2A6C009A 
+6100FE40 4A2D272C 66E0102C 007A0200 008066D6 61D4326C 005C6100 01AE3203 
+E0491941 00790243 1FFF078D 2718070D 270C010D 27189640 64040643 0384E44B 
+020300FE 078D2720 162C0079 E14B162D 271A3943 00726152 610000AA 610000A6 
+070D270C 610000A4 10390085 00000200 000167F4 61000128 326C005C 363CFFFE 
+6100017A 6100016A 010D270C 32406100 0178070D 270C6100 FF58078D 270C010D 
+27085340 018D2708 4E75204C D1FC0000 001C362C 00726100 00D03243 61000118 
+39430074 32436100 01020243 E0FF3203 E0491B41 2728362C 00720243 1FFF3243 
+362C0074 6100013A C789122D 2728E049 86416100 012C362C 00726100 008C3943 
+00724E75 362C0072 617E2448 3243B66A FFFA6606 362AFFF8 6012518A 200A0480 
+0000001C B9C066E6 610000AC 24483943 00743243 B66AFFFE 6606362A FFFC6010 
+518A200A 04800000 001CB9C0 66E6617A 0243E0FF 3203E049 1B412728 362C0072 
+02431FFF 3243362C 00746100 00B4C789 122D2728 E0498641 610000A6 362C0072 
+61063943 00724E75 02431FFF 010D2720 D6400443 03846404 06430384 4E75204C 
+D1FC0000 001C6108 61066104 61024E75 36183258 61523618 32586140 4E75262C 
+009A0683 00000000 6016262C 009A0683 00001000 600A262C 009A0683 00002000 
+42803009 E388D680 2443070A 00004E75 246C009A D5FC0000 00006016 246C009A 
+D5FC0000 1000600A 246C009A D5FC0000 20004280 3009E348 D5C0078A 00004E75 
+30C330C9 4E754A2C 001A661E 122C0008 02010002 6614122C 000A0C01 0005660A 
+122C0092 0C010002 62024E75 4243224B D3FC0000 002D1411 0C020041 651C0C02 
+005A6208 E3410001 0001600E 0C020061 65080C02 007A6202 E3415203 5289B42C 
+000266D2 302C0014 61340102 0406090A 0B0C0D0E 17191B22 40C00004 10161C22 
+262A2E30 32343638 3A3C3E00 01050202 02010101 00000000 00000000 00FF225F 
+613E3024 7296785C 075D7784 792F0BEE 33F70DA4 0AAE3452 058D78A8 65D970A7 
+78E33EE3 684C191F 0D331C40 2FB161C3 05C6191F 731178E3 00BE6FB0 3C07771A 
+245F4282 1619671C B00366F8 D3C24282 42831429 0010D5C2 16290021 B05A670A 
+51CBFFFA 197C00FF 001A4E75
+
+( French Spelling code)
+;s
+
+: nativerom  [ france ] literal ;       ( identification of ROM1 )
+
+code compatibility  nx  ) jsr,  ;c      ( keyboard compatibility table )
+ canada        c,  france        c,  norway        c,  denmark       c,         
+ sweden        c,  netherlands   c,  spain         c,  italy         c,         
+ latinamerica  c,  safrica       c,  -1            c,
+
+code spellcode  nx ) jsr, ;c            ( Received from Canon in August )
+,s
+60000012 6000001A 60000022 6000002A 60000032 48E77FFF 123C0000 60000032 
+48E77FFF 123C0001 60000026 48E77FFF 123C0002 6000001A 48E77FFF 123C0003 
+60000042 48E77FFF 123C0004 60000036 49EB0000 0C000020 63000004 70201940 
+00305340 2A4B1AD8 51C8FFFC 29490096 294A009A 2F016100 00B26100 04D0221F 
+6000000A 49EB0000 294A009A 6100001A 4A2C0070 6600000E 203CFFFF FFFF4CDF 
+FFFE4E75 428060F6 197C00FF 00700C01 00006700 00220C01 00016700 00220C01 
+00026700 00220C01 00036700 00220C01 00046700 00226100 06C26000 001E6100 
+117C6000 00166100 12306000 000E6100 14146000 00066100 14704E75 26106100 
+000E2443 D5EC0096 010A0000 4E750C83 00020000 6400000A E38B5283 6000000A 
+04830002 0000E38B 4E75422C 0031122C 00306700 001041EC 00006100 000A5288 
+530166F6 4E751410 0202006F 0C020041 65000018 0C02005A 6300000C 14100C02 
+00806500 0006522C 00314E75 610003DE 6100040A 4A006600 00146100 0DBA4A2C 
+00706600 00044E75 52AC0024 61000DA8 4A2C0070 66000004 60EC6100 03F4103C 
+00271940 0078247C FFFFFFFF 294A0032 103C0001 1940007D 45EC0032 294A0086 
+61000422 610003CA 103C002D 19400078 247CFFFF FFFF294A 003645EC 0036294A 
+00866100 04006100 03E2102C 00771940 00466100 0358246C 0036B5FC FFFFFFFF 
+6600003E 246C0032 B5FCFFFF FFFF6600 000C103C 00FF1940 00704E75 45EC0000 
+294A007A 246C0032 294A0076 61000422 610004CE 4A2C0070 6700009C 60000188 
+246C0036 294A0020 61000332 4A006600 00126100 04AC4A2C 00706700 001652AC 
+00246100 049C4A2C 00706600 00546000 0018226C 002445EC 000093CA 54894283 
+162C0030 B3C365DA 45EC0036 294A0086 6100029C 61000CA0 4A2C0070 66000004 
+4E75246C 0032B5FC FFFFFFFF 66000004 4E75246C 0032B5EC 00366500 00884E75 
+246C0032 B5FCFFFF FFFF6600 FF506100 027C6000 00F26100 039C4A2C 00706700 
+00044E75 6100027E 246C0032 528A294A 007A246C 0082294A 00766100 03546100 
+027C4A00 6600002C 61000C2C 4A2C0070 6600001C 226C0024 45EC0000 93CA5489 
+4283162C 0030B3C3 65000004 4E7552AC 00246100 0C024A2C 00706700 00066000 
+00864E75 45EC0000 294A007A 246C0032 294A0076 610002FA 610003A6 4A2C0070 
+67000004 4E756100 030C4A2C 00706700 00044E75 246C0032 528A294A 007A246C 
+0036538A 294A0076 610002C6 610001EE 4A006600 002C6100 0B9E4A2C 00706600 
+001C226C 002445EC 000093CA 54894283 162C0030 B3C36500 00044E75 52AC0024 
+61000B74 4E75102C 00466600 00066000 FE425300 67000050 53006700 002645EC 
+0042294A 00866100 00F44A2C 00706600 001245EC 0042294A 00866100 01326000 
+005845EC 003E294A 00866100 00D04A2C 00706600 001245EC 003E294A 00866100 
+010E6000 003445EC 00004283 162C0030 D5C3538A 294A002C 45EC003A 294A0086 
+6100009A 4A2C0070 6600001C 45EC003A 294A0086 610000D8 61000ADC 4A2C0070 
+66000004 4E7545EC 0000294A 007A246C 0036294A 00766100 01D86100 02844A2C 
+00706600 0034246C 0036528A 294A0020 246C002C 294A0024 610000E2 4A006600 
+00126100 0A924A2C 00706700 000C52AC 00246100 0A824E75 226C0024 45EC0000 
+93CA5489 4283162C 0030B3C3 65000004 4E75123C 00FF1941 00704E75 6100006E 
+246C0086 2452294A 00206100 00904A00 66000012 6100020A 4A2C0070 6700000C 
+52AC0024 610001FA 4E75226C 002445EC 000093CA 54894283 162C0030 B3C36500 
+00044E75 123C00FF 19410070 4E75246C 00862452 538A294A 007645EC 0000294A 
+007A6100 010C6100 011A4E75 43EC0000 29490020 4283162C 0030D3C3 53892949 
+00244E75 45EC0000 294A007A 4283162C 0030D5C3 538A294A 00824E75 246C0024 
+10120400 002E6600 000653AC 00244E75 61D2246C 007A226C 0082294A 00822949 
+007A203C 00000001 29400092 4E75123C 00031941 007D243C FFFFFFFF 29420092 
+45EC003A 294A0086 4E75267C FFFFFFFF 294B003A 294B003E 294B0042 61D06184 
+422C0077 4240246C 00821012 B02C0078 6700001C 246C007A B5EC0082 6700003A 
+246C0082 D5EC0092 294A0082 60D6102C 007D5300 6700002E 45EC003A 122C0077 
+67000018 45EC003E 53016700 000E45EC 00425301 67000004 4E756100 000C522C 
+007760BC 246C0086 266C0082 248B4E75 246C007A 294A0020 246C0076 294A0024 
+4E75246C 007A294A 0028246C 0076294A 002C4E75 6100FEEE 246C0032 B5EC0082 
+67000028 528A1012 0C000041 6500001C 0C000098 62000014 04000041 61000016 
+67000008 422C0070 4E75103C 00FF1940 007060F4 19400077 E6086100 00344283 
+1600D1C3 1210142C 00771941 00770202 00076100 00104283 1602D0C3 1010C02C 
+00774E75 6100051C 80402010 08040201 61000510 89820880 89820880 F9F036FF 
+61000736 302C004E 024000FF 39400050 422C0085 102C004D 02000007 19400069 
+44005600 19400063 4280102C 0051EF88 06800000 007FE388 2940005A 41EC005A 
+6100F9BA 3940006E 67000046 302C004C 906C006E 66000008 422C0070 4E75102C 
+00850C00 00026200 0028522C 0085102C 0063D02C 0069D02C 00691940 0063102C 
+0051D02C 00631940 0051422C 00506098 103C00FF 19400070 4E754A2C 00306600 
+00066000 003A6100 096C4A2C 00706700 00266100 05A64A2C 00706600 00226100 
+F9AC4A2C 00706700 000E6100 00184A2C 00706600 000A4200 19400070 4E75103C 
+00FF60F4 226C0036 B3FCFFFF FFFF6600 00066000 00C2226C 0032B3FC FFFFFFFF 
+66000006 6000014C 6100FD42 022C00CF 00716100 049C6100 0224162C 00710203 
+00106700 00126100 05F64A2C 00706600 00066000 01FA6100 FD14226C 00322949 
+008E422C 00906100 02384A2C 00706600 00066000 01DA6100 FCF4022C 00CF0071 
+6100044E 206C0032 5288B1EC 008E6300 00066000 018A6100 038E4A2C 00706600 
+00066000 01AA022C 00CF0071 206C0032 52886100 04A2162C 00710203 00206700 
+000E6100 057A4A2C 00706700 00066000 014E6000 017A226C 0032B3FC FFFFFFFF 
+66000006 60000044 6100FC82 022C00CF 00716100 03DC6100 0164162C 00710203 
+00106700 00126100 05364A2C 00706600 00066000 013A6100 FC546100 01A04A2C 
+00706700 012A6000 FF4E6100 FC40022C 00CF0071 6100039A 61000122 162C0071 
+02030010 6700000E 610004F4 4A2C0070 670000FC 6100FC16 022C00CF 00716100 
+03706100 013C4A2C 00706600 00EA6000 00DE6100 FBF8022C 00CF0071 226C0024 
+2949008E 610000D6 162C0071 02030010 67000012 610004A8 4A2C0070 66000006 
+600000AC 6100FBC6 022C00CF 0071226C 00362949 008E6100 00E84A2C 00706600 
+00066000 008A6100 FBA4022C 00CF0071 61000384 162C0071 02030020 67000038 
+206C0036 226C0024 2949008E B1EC008E 67000014 52886100 02E2B1EC 008E6700 
+00065288 60F06100 04364A2C 00706600 00066000 003A6100 FB546100 02B4022C 
+00CF0071 41EC0000 52886100 02AE5288 B1EC008E 63F441EC 00006100 01EA4A2C 
+00706700 00066000 000E6000 00024200 19400070 4E75103C 00FF60F4 41EC0000 
+122C0030 0C010001 67000034 52881210 0C01002D 67000018 0C010027 67000010 
+61000258 B1EC008E 67000014 60DEB1EC 008E6700 000A5288 B1EC008E 66CE4E75 
+41EC0000 122C0030 0C010001 6700000E 52886100 0226B1EC 008E65F4 122C0000 
+0C010043 66000006 600000EA 0C010041 66000006 60000066 0C010045 66000006 
+6000003C 0C010049 66000006 6000006C 0C01004F 66000006 6000007E 0C010055 
+66000006 60000090 6100020C 162C0071 02030020 67000006 61000324 4E756100 
+00C61210 670000AC 19410000 61000310 4A2C0070 670000A6 524860E6 610000B4 
+12106700 008E1941 00006100 02F24A2C 00706700 00885288 60E66100 00A01210 
+67000070 19410000 610002D4 4A2C0070 6700006A 528860E6 61000096 12106700 
+00521941 00006100 02B64A2C 00706700 004C5288 60E66100 00721210 67000034 
+19410000 61000298 4A2C0070 6700002E 528860E6 61000062 12106700 00161941 
+00006100 027A4A2C 00706700 00105248 60E62648 528B1213 19410000 002C0020 
+00716000 FF386100 003A6582 88898A00 65FF6100 002E6183 85890061 61000024 
+698B8C00 69FF6100 001A7581 96970075 61000010 6F93006F 61000008 63878000 
+63FF205F 4E751210 2948008E 0C010043 67000040 0C010041 6700003E 0C010045 
+6700003E 0C010049 6700003E 0C01004F 6700003E 0C010055 6700003E 6100007C 
+162C0071 02030010 67000006 610001D0 4E7561A4 60000026 6100FF78 6000001E 
+6100FF64 60000016 6100FF72 6000000E 6100FF7E 60000006 6100FF6C 12106700 
+001C2F08 206C008E 10816100 0192205F 4A2C0070 67000012 528860E0 2648528B 
+1213206C 008E1081 002C0010 007160A0 226C0024 2949008E 4E751210 0C010080 
+67000028 0C0100B0 64000026 0C010040 63000016 0C01005B 6400000E 06010020 
+002C0010 00711081 4E75123C 008760F0 04010030 60EA122C 00000C01 00806700 
+002A0C01 00B06400 00280C01 00406300 00180C01 005B6400 00100601 0020002C 
+00200071 19410000 4E75123C 008760EE 04010030 60E841EC 00001210 0C010061 
+65000016 0C01007A 6200000E 002C0020 00710401 00201081 4E756100 F7F041EC 
+00001218 0C010041 6500009E 0C01005A 6300002E 0C0100B0 64000026 B1EC0024 
+6200008E 12180C01 00416500 007C0C01 005A6300 00840C01 00B06400 007C60DC 
+B1EC0024 6200006A 12180C01 00416500 00580C01 005A6300 002E0C01 00B06400 
+0026B1EC 00246200 00481218 0C010041 65000036 0C01005A 6300003E 0C0100B0 
+64000036 60DCB1EC 00246200 00241218 0C010041 65000012 0C01005A 63E80C01 
+00B064E2 60000012 B1EC0024 6300FF54 42001940 00704E75 103C00FF 60F42F08 
+6100F72A 6100F346 4A2C0070 67000006 610002E2 205F4E75 206C0024 10101940 
+006D1940 004D206C 00202948 00821010 1940006B 1940004C 306C004C 3948004E 
+246C0082 B5EC0024 67000046 52AC0082 246C0082 294A008A 61000042 246C0020 
+D5EC0024 95EC0082 294A008A 6100002E 366C0078 394B004C 302C004E 362C0078 
+B7403940 004E246C 0082B5EC 002466BC 302C004E E6483940 004E4E75 42AC0076 
+42804A2C 006B6700 001C102C 006BE948 39400078 202C0076 4283162C 006B9083 
+29400076 206C008A 42801010 D0AC0076 4283162C 006DE18B D0832940 00764A2C 
+00776600 0012206C 0076263C 0000FFF0 B1C36300 0010202C 00760480 0000FFF1 
+29400076 122C0078 142C0079 1941006B 1942006D 4E75422C 0072206C 00241010 
+0C000073 6700000A 0C000053 66000014 102C0030 53006700 000A53AC 0024522C 
+0072246C 002495EC 0020B5FC FFFFFFFF 66000006 60000168 6100FEBE 302C004E 
+024003FF 3940005E 41EC004E 6100015E 4280302C 005EEF88 29400052 422C0085 
+522C0085 102C0085 0C00000F 66000006 60000134 103C0001 19400079 41EC004E 
+6100012A 306C004E 52483948 00504280 102C0085 5380E788 4283162C 0061D083 
+02800000 00FFD0AC 00525380 E3882940 005641EC 00566100 F1043940 006E906C 
+004C6600 00564280 102C0085 06800000 006F0280 000000FF D0AC0052 E3882940 
+005A41EC 005A6100 F0D43940 006E0280 0000FFFF 163C0010 962C0061 962C0061 
+610000CA 26000203 00026600 00920200 0001B02C 00726700 0086102C 00790C00 
+00066400 000C102C 00855300 6700002E 102C0079 0C000002 66000012 102C0085 
+0C00000C 64000006 6000FF16 102C0079 0C000006 66000006 6000FF06 522C0079 
+4280302C 004C162C 00796100 0060E088 0200001C D02C0050 19400050 04000020 
+65000006 19400050 306C0050 53483948 006041EC 00606100 00146000 FEF24200 
+19400070 4E75103C 00FF60F4 42803010 163C000A 61000016 02400007 52403940 
+00604E75 E3885303 66FA4E75 E2885303 66FA4E75 2A6C009A 61000022 4A2C0070 
+66000012 142C0071 02020040 66000008 610000B6 4E75422C 007060F8 022C003F 
+00716100 FCF4302C 004E0240 03FF3940 004E3A00 303C0003 90453800 302C004E 
+E3483940 004E363C 0012306C 004E6100 0354342C 004CB042 6700005E 34000C42 
+3FFF6700 005A0C42 3FFE6600 001C142C 00710202 00806600 0010302C 004E3940 
+00A0002C 00800071 53436700 001A3004 D045D045 3800E348 D06C004E 024007FF 
+3940004E 60A4142C 00710202 00806600 000E002C 00400071 422C0070 4E75143C 
+00FF1942 007060F4 306C004E 610002DE 394000A4 45ED2710 050A0000 90426700 
+0050302C 00A46100 01E43940 0080C188 610002C2 C1886100 02B41039 00850000 
+02000001 6700002C 302C00A4 610002BE C188306C 00A46100 02BC302C 0080306C 
+004E6100 02A8C188 306C0080 610002A6 4E75303C 00FF3940 007060F4 2A6C009A 
+6100FEDA 4A2C0070 67000178 10390085 00000200 00016700 016A422C 007045ED 
+2708050A 00000C42 01C26700 001E0642 0001058A 000045ED 2710010A 00006100 
+014C018A 00006000 003A45ED 270C010A 000045ED 2710018A 00006100 013045ED 
+270C018A 000045ED 2710050A 00003042 61000202 C188303C 3FFE6100 02086100 
+020C142C 00710202 00806700 000A302C 00A06000 0006302C 004E45ED 2710050A 
+00003042 610001EE C1886100 01E0302C 004C6100 01D04E75 2A6C009A 6100FE1E 
+4A2C0070 660000BC 142C0071 02020040 660000B0 422C0070 306C004E 6100018E 
+3600E04B 394000A4 45ED270C 010A0000 906C00A4 64000006 06400384 E4480200 
+00FE3940 00AA302C 00A4E14B 16003003 394000A6 43EC00AE 6100007E 6100007A 
+61000076 45ED270C 010A0000 61000072 10390085 00000200 00016700 00466100 
+00A6306C 004E303C 3FFE6100 01406100 013445ED 270C050A 00003042 61000136 
+45ED270C 010A0000 61000022 018A0000 45ED2708 010A0000 04400001 018A0000 
+4E75143C 00FF1942 00704E75 55406400 0006303C 03824E75 302C00A6 61000036 
+2649C188 61000068 394000A8 C1886100 0086302C 00A6C188 302C00A8 610000A0 
+C1886100 009A302C 00A66100 00083940 00A64E75 D06C00AA 04400384 64000006 
+06400384 4E7543EC 00AE6100 00106100 000C6100 00086100 00044E75 30193059 
+61000092 30193059 61000082 4E7545EC 00AEB7CA 67000012 B0EBFFFA 67000012 
+97FC0000 000860E6 6100004A 60000006 302BFFF8 4E7545EC 00AEB7CA 67000012 
+B0EBFFFE 67000012 97FC0000 000860E6 6100001A 60000006 302BFFFC 4E7532C0 
+32C84E75 45ED0000 6000000E 45ED1000 60000006 45ED2000 2C48DDCE D5CE010A 
+00004E75 45ED0000 6000000E 45ED1000 60000006 45ED2000 2C48DDCE D5CE018A 
+00004E75 2A6C009A 45ED2714 050A0000 0C42AA55 67000048 45ED0000 47ED2708 
+343C3FFF 058A0000 588AB5CB 66F645ED 2714343C AA55058A 000045ED 27084242 
+058A0000 45ED2710 058A0000 45ED270C 343C0382 058A0000 422C0070 4E75143C 
+00FF1942 007060F4 2A6C009A 45ED2708 050A0000 4A426700 0008422C 00704E75 
+143C00FF 19420070 60F4FFFF
+( Indicators for the ruler line )
+
+: symbols?     ( flag -- )
+   kbdcountry dup [ safrica ] literal =
+   over [ netherlands ] literal = or
+   over [ japan ] literal = or
+   over [ sweden ] literal = or
+   over [ denmark ] literal = or
+   over [ norway ] literal = or
+   over [ uk ] literal = or
+   swap [ usa ] literal = or 0= ;
+
+: phonelight   ( string -- )
+   <# "hold [ phone2 ] literal hold [ phone1 ] literal hold 0 #> 0 indicate ;
+
+: indphone  " " phonelight ;
+
+: ph1200    " 1200" phonelight ;
+
+: ph300     " 300" phonelight ;
+
+: phring    symbols? if <# f1 hold f0 hold 0 #>
+            else " RING" then phonelight ;
+
+: phbusy    symbols? if <# f3 hold f2 hold 0 #>
+            else " BUSY" then phonelight ;
+
+: phwait    symbols? if <# f5 hold f4 hold 0 #>
+            else " WAIT" then phonelight ;
+
+: phdial    symbols? if <# ee hold ed hold 0 #>
+            else " DIAL" then phonelight ;
+
+: indlearn# ( char -- )
+   <# hold symbols?
+      if fc hold fb hold fa hold
+      else " LEARN " "hold then
+      0 #> 1 indicate ;
+
+: indlocal     symbols? if <# f9 hold f8 hold f7 hold f6 hold 0 #>
+               else " LOCAL" then 2 indicate ;
+
+: indspell     symbols? if <# d2 hold d1 hold d0 hold 0 #>
+               else " SPELLCHECK" then 3 indicate ;
+
+: indaddspell  symbols? if <# d5 hold d4 hold d3 hold 0 #>
+               else " ADDSPELL" then 3 indicate ;
+
+: inddelspell  symbols? if <# d8 hold d7 hold d6 hold 0 #>
+               else " DELSPELL" then 3 indicate ;
+
+: indcalc      symbols? if <# 78 hold a9 hold 2d hold 2b hold 0 #>
+               else " CALC" then 3 indicate ;
+
+: indforth     " FORTH" 3 indicate ;
+
+: indprint     symbols? if <# da hold d9 hold 0 #>
+               else " PRINT" then 3 indicate ;
+
+: inderase     symbols? if <# ec hold eb hold ea hold e9 hold 0 #>
+               else " ERASE" then 3 indicate ;
+
+: inddisk      symbols? if <# dd hold dc hold db hold 0 #>
+               else " DISK" then 3 indicate ;
+
+: indbackup    symbols? if <# e8 hold e7 hold e6 hold 0 #>
+               else " BACKUP" then 3 indicate ;
+
+: indsort      symbols? if <# ff hold fe hold fd hold 0 #>
+               else " SORT" then 3 indicate ;
+
+: indrecover   symbols? if <# e5 hold e4 hold e3 hold 0 #>
+               else " DISK RECOVERY" then 8 indicate ;
+
+: indtransfer  symbols? if <# e2 hold e1 hold e0 hold 0 #>
+               else " DISK TRANSFER" then 8 indicate ;
+taddtoforth                ( close messages vocabulary )
+tdeactivate message        ( there are no names so don't waste time searching )
+
+                     (    TO MAKE DISK "D": )
+                     ( 1. Remove the 2 lines of source code, above, & ;s below )
+;s                   ( 2. Remove entire contents of the following documents )
+
+-target                    ( close shadow ram, reopen normal forth area )
+cr cr ." To save the image of the SV MESSAGE ROM, select and execute:"
+cr    ." side1 savebasis side0 save side1 loadbasis"
+cr re                      ( "re" is used to terminate compilation )
+
+( asmb68, the 68000 assembler jrs&tlh&job84-88)
+( Jonathan Sand   9 February 1988 )
+
+tactivate asmb68
+
+: ccode ( cc -- cc | Test to see if cc is a condition code)
+ dup 8 shr  0 f inrange not  over f0ff and  or
+ abort" needs condition code" ;
+
+: ?dreg ( n -1 -- n | Check for data register, 0<=n<=7)
+ -1 <>  over 0 7 inrange not  or  abort" data register necessary using" ;
+
+: ?areg ( n -2 -- n | Check for address register, 0<=n<=7)
+ -2 <>  over 0 7 inrange not  or  abort" address register necessary using" ;
+
+: ?big ( a b -- | Abort if a not in the range 0<=a<b)
+ 0 swap 1- inrange not abort" operand out of range" ;
+
+: ?lit ( 4 -8 -- | Abort if stack indicators not exactly as for immediate data)
+ -8 <> swap 4 <> or abort" source not literal" ;
+
+: ?byte ( n -- b | Check for byte sized n)
+ dup -80 ff inrange not abort" argument not byte sized" ;
+
+: ?word ( n -- w | Check for word sized n)
+ dup -8000 ffff inrange not abort" argument not word sized" ;
+
+: ?sbyte ( n -- b | check for signed byte range and mask to byte size)
+ dup -80 7f inrange not
+ abort" argument not signed byte range"  ff and ;
+
+: ?sword ( n -- w | check for signed word range and mask to word size)
+ dup -8000 7fff inrange not
+ abort" argument not signed word range" ffff and ;
+
+: dataalterable ( -- | Abort if the destination is not 'data alterable')
+ dmode 0 7 inrange  dreg 0 7 inrange or not  dmode 7 =  dreg 1 > and  or
+ dmode 1 = or  abort" destination addressing mode not 'data alterable'" ;
+
+: alterable ( -- | Abort if the destination is not 'alterable')
+ dmode 0 7 inrange  dreg 0 7 inrange or not  dmode 7 =  dreg 1 > and  or
+ abort" destination addressing mode not 'alterable'" ;
+
+: warncommon ( -- | Common code in warnings)
+ lasttok name  ."  at" here .  asmb68kill abort" assembly aborted" ;
+
+
+: .b ( -- | Set size for byte sized operation)
+ 0 <size> to ;
+
+: .w ( -- | Set size for word sized operation)
+ 40 <size> to ;
+
+: .l ( -- | Set size for long sized operation)
+ 80 <size> to ;
+
+: size ( --> s | Check and stack the operation size)
+ <size> dup 0= over 40 = or over 80 = or not abort" operation size error" ;
+
+: d0 ( -- 0 -1 | Set the addressing mode to data register 0) 
+ 0 -1 ;
+
+: d1 ( -- 1 -1 | Set the addressing mode to data register 1)
+ 1 -1 ;
+
+: d2 ( -- 2 -1 | Set the addressing mode to data register 2)
+ 2 -1 ;
+
+: d3 ( -- 3 -1 | Set the addressing mode to data register 3)
+ 3 -1 ;
+
+: d4 ( -- 4 -1 | Set the addressing mode to data register 4)
+ 4 -1 ;
+
+: d5 ( -- 5 -1 | Set the addressing mode to data register 5)
+ 5 -1 ;
+
+: d6 ( -- 6 -1 | Set the addressing mode to data register 6)
+ 6 -1 ;
+
+: d7 ( -- 7 -1 | Set the addressing mode to data register 7)
+ 7 -1 ;
+
+: a0 ( -- 0 -2 | Set the addressing mode to address register 0)
+ 0 -2 ;
+
+: a1 ( -- 1 -2 | Set the addressing mode to address register 1)
+ 1 -2 ;
+
+: a2 ( -- 2 -2 | Set the addressing mode to address register 2)
+ 2 -2 ;
+
+: a3 ( -- 3 -2 | Set the addressing mode to address register 3)
+ 3 -2 ;
+
+: a4 ( -- 4 -2 | Set the addressing mode to address register 4)
+ 4 -2 ;
+
+: a5 ( -- 5 -2 | Set the addressing mode to address register 5)
+ 5 -2 ;
+
+
+: a6 ( -- 6 -2 | Set the addressing mode to address register 6)
+ 6 -2 ;
+
+: a7 ( -- 7 -2 | Set the addressing mode to address register 7)
+ 7 -2 ;
+
+: bp ( -- 7 -1 | Set addressing mode to the data register used to hold the base 
+address of the token table)
+ d7 ;
+
+: iv ( -- 6 -1 | Set addressing mode to the data register used to hold the 
+address of the value of the integer that is current)
+ d6 ;
+
+: ct ( -- 4 -1 | Set addressing mode to the data register used to hold the 
+address of the current token in the token table)
+ d4 ;
+
+: sa ( -- 5 -1 | Set addressing mode to the data register used to hold the 
+zeroth nesting starting address)
+ d5 ;
+
+: sp ( -- 7 -2 | Set addressing mode to the address register used for the data 
+stack pointer)
+ a7 ;
+
+: rp ( -- 6 -2 | Set addressing mode to the address register used for the 
+return stack pointer)
+ a6 ;
+
+: ip ( -- 5 -2 | Set addressing mode to the address register used for the 
+interpretation pointer)
+ a5 ;
+
+: nx ( -- 4 -2 | Set addressing mode to the address register used for the 
+pointer to next)
+ a4 ;
+
+: np  ( -- 3 -2 | Set addressing mode to the address register used for the 
+pointer to nest )
+ a3 ;
+
+: vp  ( -- 2 -2 | Set addressing mode to the address register used for the 
+pointer to the code for integer )
+ a2 ;
+
+
+: )  ( r -2 -- r -3 | Set adressing mode to Address Register Indirect )
+ ?areg -3 ;
+
+: )+  ( r -2 -- r -4 | Set addressing mode to Address Register Indirect With 
+Postincrement )
+ ?areg -4 ;
+
+: -)  ( r -2 -- r -5 | Set addressing mode to Address Register Indirect With 
+Predecrement )
+ ?areg -5 ;
+
+: pc)d  ( d -- d 2 -8 | Set addressing mode to Program Counter With 
+Displacement)
+ ?sword 2 -8 ;
+
+: )d  ( r -2 d -- d r -6 | Set addressing mode to Address Register Indirect 
+With Displacement)
+ ?sword  rot rot ?areg -6 ;
+
+: pc,xw)d  ( r -1or-2 d -- xword 3 -8 | Set addressing mode to Program Counter 
+With Word Index and byte Displacement )
+ ?sbyte >r  ( save displacement )
+ over 0 7 inrange
+ over -2 -1 inrange  and not  ( test for any register )
+ abort" needs register"
+ 1+ 8000 and  swap 0c shl or  ( start extension word )
+ r> or   ( put in the displacement )
+ 3 -8 ;  ( stack indicators )
+
+: pc,xl)d  ( r -1or-2 d -- xword 3 -8 | Set addressing mode to Program Counter 
+With Long Index and byte Displacement)
+ pc,xw)d  rot 800 or  rot rot ;
+
+: xw)d  ( r -2 r -1or-2 d -- xword r -7 | Set addressing mode to Address 
+Register Indirect With Word Index and byte Displacement)
+ pc,xw)d  2drop >r ?areg r> swap -7 ;
+
+: xl)d  ( r -2 r -1or-2 d -- xword r -7 | Set addressing mode to Address 
+Register Indirect With Long Index and byte Displacement)
+ xw)d  rot 800 or  rot rot ;
+
+: #n ( -- 4 -8 | Set the addressing mode to Immediate)
+ 4 -8 ;
+
+: begin, ( -> addr 1 | note address, set security, set default operand length 
+of long )
+ here 1  .l ;
+
+: if, ( cc -- addr 2 | assemble bcc, note address, make security )
+ ccode 100 xor ( invert cc logic)  6000 or w,  begin, 1+ ;
+
+: lif, ( cc -- addr 2 | assemble bcc and nop,  note address, make security )
+ if,  4e71 w, ;   ( a nop opcode, tested for later & safe to execute too )
+
+
+: <th>  ( addr 2 -> | Resolve forward bcc, long or short )
+ 2 ?pairs  here over -  dup 0= abort" empty conditional"  swap over
+ -80 7f inrange
+ if  1- c!
+ else  dup w@ 4e71 <> abort" use long"  swap ?sword swap w!
+ then  .l ;
+
+: then, ( Resolve if, or lif,.  Remove and replace any while, or lwhile, 
+markers necessary.)
+0 >r ( stack marker)
+begin dup 3 = ( is there a while, marker on the stack?)
+   while >r >r
+again <th> ( resolve the if, or lif,)
+begin r> ( is the top of the return stack non-zero?) ?dup
+   while ( it is, replace the while, markers onto the parameter stack) r>
+again ;
+
+: else, ( addr 2 ... -- addr 2 ... | Resolve if, or lif, and assemble 
+unconditional if,.  Remove and replace any while, or lwhile, markers necessary.)
+ 0 >r ( stack marker )
+ begin  dup 3 =   ( is there a while, marker on the stack? )
+ while  >r >r  ( yes, stash it and the address on the return stack )
+ again  2 ?pairs  nt if,
+ rot swap <th> 2  ( resolve the old if, or lif, )
+   ( setup stack for this assembled short bcc )
+ begin r>  ?dup   ( is top of the return stack non-zero? )
+ while  r>  ( yes, replace while, markers onto parameter stack)
+ again ;
+
+: lelse,  ( addr 2 ... -- addr 2 ... | Resolve if, or lif, and assemble 
+unconditional if,.  Remove and replace any while, or lwhile, markers necessary)
+ 0 >r ( stack marker )
+ begin  dup 3 =   ( is there a while, marker on the stack? )
+ while  >r >r  ( yes, stash it and address on return stack )
+ again  2 ?pairs  nt lif,
+ rot swap <th> 2  ( resolve old if, or lif, )
+   ( setup stack for this assembled long bcc )
+ begin  r> ?dup   ( is top of return stack non-zero? )
+ while  r>  ( yes, replace while, markers onto stack)
+ again ;
+
+
+: until,  ( addr 1 ... cc -- | Resolve begin, and multiple while,s or lwhile,s )
+ ccode  100 xor   ( invert cc logic )
+ 6000 or w, ( fabricate and assemble branch )
+ 0 >r ( stack marker )
+ begin  dup 3 =   ( is there a while, marker on the stack? )
+ while  drop >r   ( yes, drop flag and stash addr on return stack )
+ again  1 ?pairs  ( check for the begin, )
+ here -  ( compute displacement )
+ dup -80 7f inrange  ( is the displacement byte sized )
+ if  here 1- c!   ( short displacement )
+ else  ?sword w,  ( long displacement )
+ then
+ begin  r>  ?dup  ( is top of return stack non-zero? )
+ while  2  <th>   ( yes, resolve flagless while,s; fake flag )
+ again ;
+
+: again, ( addr 1 ... -- | Assemble a branchback always, resolving begins, and 
+multiple while,s or lwhile,s)
+ nt until, ;
+
+: while, ( cc -- addr 3 | Assemble a conditional short forward branch)
+ if, 1+ ;
+
+: lwhile, ( cc -- addr 3 | Assemble a conditional long forward branch)
+ lif, 1+ ;
+
+: -until, ( addr 1 r -1 cc -- | Assemble dbcc using data reg r and cc to addr)
+ccode 50c8 or  rot rot ?dreg  or ( fabricate opcode) w,
+ 1 ?pairs here -  ?sword ( compute & check displacement) w,  .l ;
+
+: leave, ( -- addr 3 | Assemble an unconditional short branch)
+ nt while, ;
+
+: lleave, ( -- addr 3 | Assemble an unconditional long branch)
+ nt lwhile, ;
+
+
+: getcom ( x -- x 0 7 | y -- y 1 7 | z -- abs{z}-1 | Common code to both getsrc 
+and getdst.  0<=x<=7fff, 8000<=y<=fffffff4, -b<=z<=-1)
+ dup fffffff4 u<
+ if  dup 8000 u<  1+ -8 ( it is an address )
+ else  dup -8 u<  ( it is an addressing mode, which? )
+   if  0 0 rot ( a usp, sr or ccr mode; fix it for parent word )
+ then then not ;
+
+: getsrc ( n -- | # c -- | x # c -- | Get source operands ...        
+If 0<=n<=7fff, the mode is 7 and the register is 0.        
+If 8000<=n<=fffffff4, the mode is 7 but the register is 1. 
+If -5<=c<=-1 the mode is 4 to 0 and the register is #.     If 
+-8<=c<=-6 the mode is 7 to 5, the register is # and x goes to extra  If 
+-b<=n<=-9 the mode is a to 8 and the register and extra word are zeroed)
+ getcom smode to sreg to  smode 4 >  if  sxtra to  then ;
+
+: getdst ( n -- | # c -- | x # c -- | Get destination operands ...   
+If 0<=n<=7fff, the mode is 7 and the register is 0.        
+If 8000<=n<=fffffff4, the mode is 7 but the register is 1. 
+If -5<=c<=-1 the mode is 4 to 0 and the register is #.     If 
+-8<=c<=-6, the mode is 7 to 5, the register is # and x goes to extra If 
+-b<=n<=-9 the mode is a to 8 and the register and extra word are zeroed)
+ getcom dmode to dreg to  dmode 4 >  if  dxtra to  then ;
+
+: xsrc ( -- | Lay down the extra source data if source mode is 5, 6 or 7)
+ smode 4 >  ( modes of 5, 6 and 7 have extra data )
+ if  sxtra  ( stack the extra data.  How wide is it? )
+   sreg 4 =  size 80 = and  sreg 1 =  or  smode 7 = and
+   if  , ( mode=7 & reg=1  or  mode=7 & reg=4 & size=80,  32 bits wide )
+   else  w, ( otherwise it is 16 bits wide )
+ then then ;
+
+: xdst ( -- | Lay down extra destination data if dest mode is 5, 6 or 7 )
+ dmode 4 >  ( modes of 5, 6 and 7 have extra data )
+ if  dxtra dreg 4 =  size 80 = and  dreg 1 =  or  dmode 7 = and
+   if ,  ( mode=7 & reg=1  or  mode=7 & reg=4 & size=80, then do 32 bits)
+   else  w, ( otherwise it is 16 bits wide )
+ then then ;
+
+: <src> ( n -- n' | Or the source mode and source register into n)
+ smode 3 shl sreg or or ;
+
+: <dst> ( n -- n' | Or the destination mode and destination register into n)
+ dmode 3 shl dreg or or ;
+
+
+: <ea> ( ea g -- o | Make opcode o from effective address ea and generic opcode 
+g )
+ >r getdst r> <dst> ;
+
+: dst ( n -- | Put destination ea into n and compile n and any extra words)
+ <dst> w, xdst ;
+
+: rte, ( -- | Assemble a Return from Exception instruction)
+ 4e73 w, ;
+
+: rtr, ( -- | Assemble a Return and Restore Condition Codes instruction)
+ 4e77 w, ;
+
+: rts, ( -- | Assemble a Return from Subroutine instruction)
+ 4e75 w, ;
+
+: nop, ( -- | Assemble a No Operation instruction)
+ 4e71 w, ;
+
+: trapv, ( -- | Assemble a Trap on Overflow instruction)
+ 4e76 w, ;
+
+: reset, ( -- | Assemble a Reset instruction)
+ 4e70 w, ;
+
+: shift ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- )
+ ( Assemble shift or rotate instruction.  Stack diagrams represent a generic 
+opcode g and )
+ ( Dx Dy, n #n Dy or some effective addr that is not Dr, Ar, PC or immediate )
+ >r dup -2 = abort" can't shift address registers"
+ dup -1 <>
+ if  size 40 <> abort" must be word"
+   getdst  dreg 0 1 inrange not dmode 7 = and  dmode 2 7 inrange not or
+   abort" incorrect addressing mode for shifting"
+   r>  dup f100 and 0c0 or swap 18 and 6 shl or dst
+ else  drop dup 8 ?big >r 2dup -8 = swap 4 = and
+   if  drop drop dup 1- 8 ?big 7 and
+   else  ?dreg r> 20 or >r
+   then  9 shl r> or r> or size or w,
+ then  .l ;
+
+: asr,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Arithmetic Shift Right 
+instruction, see  shift )
+ e000 shift ;
+
+: asl,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Arithmetic Shift Left 
+instruction, see  shift )
+ e100 shift ;
+
+: lsr,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Logical Right Shift 
+instruction, see  shift )
+ e008 shift ;
+
+
+: lsl,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Logical Left Shift 
+instruction, see  shift )
+ e108 shift ;
+
+: roxr, ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Rotate Right W/ Extend 
+instruction, see  shift )
+ e010 shift ;
+
+: roxl, ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Rotate Left W/ Extend 
+instruction, see  shift )
+ e110 shift ;
+
+: ror,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Rotate Right 
+instruction, see  shift )
+ e018 shift ;
+
+: rol,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Rotate Left 
+instruction, see  shift )
+ e118 shift ;
+
+: sz/ea  ( ea g -- | Assemble data alterable destination of any size 
+instruction from the effective address ea and the generic opcode g)
+ <ea> dataalterable size or w, xdst .l ;
+
+: neg,  ( Negate instruction on ea, see sz/ea)
+ 4400 sz/ea ;
+
+: negx,  ( ea -- | Negate w/ Extend instruction on ea, see sz/ea)
+ 4000 sz/ea ;
+
+: not,  ( Logical Complement instruction on ea, see sz/ea)
+ 4600 sz/ea ;
+
+: tst,  ( Test instruction on ea, see sz/ea)
+ 4a00 sz/ea ;
+
+: r/ea ( ea r -1 n -- | Assemble basic opcode n with data register r and 
+effective address ea.  The ea can be one, two or three #s )
+ rot rot >r >r <ea>  dmode 1 = abort" can't be Ar addressing mode"
+ size 40 <> abort" must be word"  r> r> ?dreg 9 shl  or w,  xdst  .l ;
+
+: mulu, ( ea r -1 -- | Unsigned Multiply instruction )
+ c0c0 r/ea ;
+
+: muls, ( ea r -1 -- | Signed Multiply instruction )
+ c1c0 r/ea ;
+
+: divu, ( ea r -1 -- | Unsigned Divide instruction )
+ 80c0 r/ea ;
+
+: divs, ( ea r -1 -- | Signed Divide instruction )
+ 81c0 r/ea ;
+
+
+: chk, ( ea r -1 -- | Check Register Against Bounds instruction,
+ given effective address holds upper bound word )
+ 4180 r/ea ;
+
+: \ea  ( ea g -- | a jsr, jmp, or pea, instruction using generic opcode g and 
+given effective address )
+ <ea>  dmode 0 1 inrange  dmode 3 4 inrange or  dmode 7 = dreg 4 = and or
+ abort" must be control addressing mode"  w,  xdst .l ;
+
+: jsr,  ( ea -- | Jump to Subroutine instruction to given effective address )
+ 4e80 \ea ;
+
+: jmp,  ( ea -- | Jump instruction to given effective address )
+ 4ec0 \ea ;
+
+: pea, ( ea -- | Push Effective Address instruction )
+ size 80 <> abort" must be long"  4840 \ea ;
+
+: \\ea ( ea g -- | nbcd, or tas, instruction using generic opcode g and 
+effective addr)
+ <ea>  dataalterable  size 0 <> abort" must be byte"  w,  xdst .l ;
+
+: nbcd, ( ea -- | Negate Decimal w/ Extend instruction to effective addr )
+ 4800 \ea ; ( datalt, .b only)
+
+: tas, ( ea -- | Test and Set Operand instruction to given effective addr )
+ 4ac0 \ea ; ( datalt, .b only )
+
+: immed ( -- | make immediate using the generic opcode in immedop )
+ dataalterable  immedop  dmode 3 shl or dreg or size or w,  sxtra  size 80 =
+ if  ,   ( long size )
+ else  size 40 =
+   if  ?word   ( word size )
+   else  ?byte ( byte size )
+   then  w,
+ then  xdst ;
+
+: quick ( -- | Assemble an add or subtract 'quick' instruction using the 
+generic opcode in quickop)
+ alterable  dmode 1 = size 0= and  abort" can't be byte"
+ sxtra 8 =  if ( zero means eight) sxtra off  then
+ quickop sxtra 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst ;
+
+: address ( -- | Assemble a 'to address register' add or subtract opcode using 
+the generic opcode in addrop)
+ size 0= abort" can't be byte"
+ addrop dreg 9 shl or  smode 3 shl or  sreg or  size 1 shl or  w,  xsrc ;
+
+
+: normal ( -- | Assemble a normal add, subtract, and, or, or eor, instruction
+ using generic opcode in normalop )
+ normalop dup b100 =
+ if  ( eor,) dataalterable  smode 0 <> abort" source must be data register"
+   sreg 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst
+ else  dmode 0=   ( add, sub, and, or or, )
+   if  0000 ( assemble <ea> to Dn; bit 8 is a 0 for this one )
+   smode 1 =  size 0= and  abort" can't be byte"
+   or  dreg 9 shl or  smode 3 shl or  sreg or  size or  w,  xsrc
+   else 0100   ( assemble Dn to <ea>; bit 8 is a 1 for this one )
+   alterable  smode 0 <> abort" source must be data register"
+   or  sreg 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst
+ then then ;
+
+: fimmed ( n 4 -8 ea -- | Force assembly of an add or subtract immediate 
+instruction)
+ getdst getsrc  smode 7 <> sreg 4 <> or abort" source not immediate"
+ sxtra 1 8 inrange  asmb68warn and
+ if cr ." You may be able to use an add or subtract quick instruction after"
+   warncommon
+ then  immed .l ;
+
+: <xt> ( r -1or-5 r -1or-5 g -- | Assemble the generic opcode g into opcode 
+with data register to data register or predecremented address register memory 
+to memory addressing modes only)
+ >r rot over <> >r dup -1 <> over -5 <> and r> or
+ abort" incorrect addressing mode"  -1 =
+ if  0  else  8  then  swap 9 shl or or r> or ;
+
+: addsub ( ea r -1 -- | r -1 ea -- | ea r -2 -- | n 4 -8 ea -- | Assemble one 
+of four add or subtract opcodes depending on stack arguments.  See add, or sub, 
+)
+ getdst getsrc  smode 7 = sreg 4 = and
+ if  sxtra 1 8 inrange  ( immediate of some kind )
+   if  quick   ( a quick candidate )
+   else  dmode 1 =   ( immediate or address )
+   if  address
+   else  immed
+   then then
+ else  dmode 1 =  ( not an immediate )
+   if  address
+   else  normal
+ then then  .l ;
+
+
+: andoreor ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of four 
+instructions: and, or, or eor.  See and, or, or eor, )
+ getdst getsrc  smode 7 = sreg 4 = and
+ if  dmode 9 = ( an immediate of some kind )
+   if  isrop w, sxtra ?word w,   ( to sr )
+   else  dmode a =
+   if  iccrop w, sxtra ?byte w, ( to ccr )
+   else  immed
+   then then
+ else  smode 1 = abort" source can't be address register"
+   normal
+ then  .l ;
+
+: add, ( ea r -1 -- | ea r -2 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of 
+four add instructions depending on stack arguments.  Opcodes for preceding 
+stack diagrams are, in order: add & adda, addi, or addq, )
+ d000 normalop to d0c0 addrop to
+ 0600 immedop to  5000 quickop to
+ addsub ;
+
+: addq, add, ;
+: adda, add, ;
+
+: addi, ( n 4 -8 ea -- | Force assembly of an add immediate instruction)
+ 0600 immedop to  fimmed ;
+
+: abcd, ( r -1or-5 r -1or-5 -- | Add Decimal with Extend opcode )
+ c100 <xt> w, .l ;
+
+: addx, ( r -1or-5 r -1or-5 -- | Add Extended opcode )
+ d100 <xt> size or w, .l ;
+
+: sub, ( ea r -1 -- | ea r -2 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of 
+four subtract instructions depending on stack arguments.  Opcodes for preceding 
+stack diagrams are, in order: sub & suba, subi, or subq, )
+ 9000 normalop to 90c0 addrop to
+ 0400 immedop to  5100 quickop to
+ addsub ;
+
+: subq, sub, ;
+: suba, sub, ;
+
+: subi, ( n 4 -8 ea -- | Force assembly of an subtract immediate instruction)
+ 0400 immedop to  fimmed ;
+
+: sbcd, ( r -1or-5 r -1or-5 -- | Subtract Decimal with Extend opcode)
+ 8100 <xt> w, .l ;
+
+: subx, ( r -1or-5 r -1or-5 -- | Subtract Extended opcode)
+ 9100 <xt> size or w, .l ;
+
+
+: and, ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of four and 
+instructions depending on stack arguments.  Opcodes for preceding stack 
+diagrams are: and & andi, or and to ccr, or and to sr )
+ c000 normalop to 0200 immedop to
+ 023c iccrop to   027c isrop to
+ andoreor ;
+
+: andi, and, ;
+
+: or, ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of four or 
+instructions depending on stack arguments.  Opcodes for preceding stack 
+diagrams are: or & ori, or or to ccr, or or to sr )
+ 8000 normalop to 0000 immedop to
+ 003c iccrop to   007c isrop to
+ andoreor ;
+
+: ori, or, ;
+
+: eor, ( r -1 ea -- | n 4 -8 ea -- | Assemble one of four exclusive or 
+instructions depending on stack arguments.  Opcodes in preceding stack diagrams 
+are: eor & eori, or eor to ccr & eor to sr )
+ b100 normalop to 0a00 immedop to
+ 0a3c iccrop to   0a7c isrop to
+ andoreor ;
+
+: eori,  eor, ;
+
+: <cmpa> ( -- | Compare Address instruction, see  cmp, )
+ size 0=  abort" can't be byte sized"
+ dreg 9 shl size 80 and 2* c0 + or b000 or <src> w, xsrc ;
+
+: <cmpi>  ( -- | Compare immediate instruction, see  cmp, )
+ 0c00 size or  dmode 7 = dreg 1 > and
+ dmode 1 =  or  abort" not data alterable"
+ dmode 3 shl or  dreg or w,   ( finished with opcode )
+ sxtra  size 80 = ( stack immediate data )
+ if  ,   ( 32 bit )
+ else  size 40 =
+   if  ?word   ( 16 bit )
+   else  ?byte ( 8 bit )
+   then  w,
+ then  xdst ;
+
+: <cmpm> ( -- | Compare Memory instruction, see  cmp, )
+ smode 3 <> abort" addressing mode must be postincrement"
+ b108  dreg 9 shl or  size or  sreg or w, ;
+
+: <cmp> ( -- | Compare instruction, see  cmp, )
+ b000  dreg 9 shl or  size or  <src> w,  xsrc ;
+
+
+: cmp,  ( ea r -1 -- | ea r -2 -- | n 4 -8 ea -- | r -4 r -4 -- | Assemble one 
+of four 68000 compare opcodes depending on stack arguments.  Opcodes in 
+preceding stack diagram are, in order: cmp, cmpa, cmpi, and cmpm, )
+ getdst getsrc ( get the destination and source information )
+ dmode 1 =
+ if  <cmpa> ( can only be cmpa, )
+ else  smode 7 = sreg 4 = and
+   if  <cmpi>  ( immediate source data, must be cmpi, )
+   else  dmode 3 =
+   if  <cmpm>  ( cmpm, )
+   else  <cmp> ( cmp, )
+ then then then  .l ;
+
+: cmpa,  cmp, ;
+: cmpi, cmp, ;
+: cmpm, cmp, ;
+
+: clr, ( ea -- | Clear Operand instruction to effective address )
+ getdst  dataalterable  dmode 0=  size 80 = and  asmb68warn and
+ if  cr ." A '0 #n Dr moveq,' is faster than 'Dr clr,' ... after" warncommon
+ then  4200  dmode 3 shl or  dreg or  size or  w,  xdst .l ;
+
+: bit ( r -1 ea g -- | n 4 -8 ea g -- | Assemble one of the 'bit' instructions 
+using generic opcode g.  The stack diagrams are for: 'Dn ea' and 'n #n ea')
+ >r getdst getsrc
+ smode 7 = sreg 4 = and not
+ smode 0 <> and  abort" source must be Dr or #n"
+ r@  ( test generic opcode) 0=
+ if  ( btst) dmode 1 = abort" can't use address register"  smode 7 =
+   if  ( static) dmode 7 = dreg 4 = and abort" can't be immediate"  then
+ else  ( others) dataalterable
+ then  dmode 0=
+ if  ( Dr destination) size 80 <> abort" must be long"
+ else  ( others) size 0= not abort" must be byte"
+ then  r>  smode 0=
+ if  ( source is Dr) sreg 9 shl or  100 or  dmode 3 shl or  dreg or  w,
+ else  ( source is #n) 800 or  dmode 3 shl or  dreg or  w,
+   sxtra dup 20 ?big w,
+ then  xdst  .l ;
+
+: bchg, ( r -1 ea -- | n 4 -8 ea -- | Test Bit and Change instruction )
+ 0040 bit ; ( see 'bit')
+
+: bclr, ( r -1 ea -- | n 4 -8 ea -- | Test Bit and Clear instruction, see 'bit')
+ 0080 bit ;
+
+
+: bset, ( r -1 ea -- | n 4 -8 ea -- | Test Bit and Set instruction, see 'bit')
+ 00c0 bit ;
+
+: btst, ( r -1 ea -- | n 4 -8 ea -- | Test Bit instruction, see 'bit')
+ 0000 bit ;
+
+: lea, ( dest r -2 -- | Assemble Load Effective Address opcode)
+ ?areg 9 shl 41c0 or >r  getdst  r> dst .l ;
+
+: link, ( r -2 d -- | Assemble Link and Allocate opcode)
+ rot rot ?areg 4e50 or ( opcode) w,  ?sword ( check displacement) w, .l ;
+
+: unlk, ( r -2 -- | Assemble Unlink opcode)
+ ?areg 4e58 or w, .l ;
+
+: swap, ( r -1 -- | Assemble Swap Register Halves opcode)
+ ?dreg 4840 or w, .l ;
+
+: ext, ( r -1 -- | Assemble the sign extension opcode, word and long only)
+ size 0= abort" can't be byte size"  ?dreg  size 40 - or  4880 or  w, .l ;
+
+: (regs  0 ;
+
+: rev16  10 shl 0 swap  10 0
+ do  swap 2/ over 0<  if  8000 or  then  swap 2*  loop  drop ;
+
+: <to/fro>  0 >r
+ begin  ?dup  while  1+ ff and 1+ swap shl r> or >r  again  r> ;
+
+: to)  <to/fro> 0 ;
+: from)  <to/fro> 400 ;
+
+: movem,  getdst 4880 or size 40 xor 7f and or <dst> w,  dmode 4 =
+ if  rev16 here 2- w@ 400 and abort" reg to mem only"
+ then  w,  xdst .l ;
+
+: movep, ( disp Ar -6 Dr -1 -- | Dr -1 disp Ar -6 -- | Assemble a Move 
+Peripheral Data instruction, to or from a data register and with this 
+addressing mode only: d(Ar)
+ getdst getsrc  dmode 0=
+ if ( must be ea to data register) dreg 0 7 inrange not  smode 5 <> or
+   size 0= or  abort" incorrect addressing mode"
+   0108 dreg 9 shl or  size 40 - or  sreg or w,  xsrc
+ else ( must be data register to ea) sreg 0 7 inrange not  smode 0 <> or
+   smode 5 <> or  size 0= or abort" incorrect addressing mode"
+   0188 sreg 9 shl or  size 40 - or  dreg or w,  xdst
+then ;
+
+
+: ccr/sr>ea ( -- | ccr or sr to some ea)
+ dataalterable size 40 <> abort" must be word"  smode 0a =
+ if  42c0   ( ccr )
+ else  40c0 ( sr )
+ then  dmode 3 shl or  dreg or  w,  xdst ;
+
+: ea>ccr/sr ( -- | Some ea to ccr or sr)
+ smode 1 =  size 40 <> or  abort" source can't be Ar or not word size"
+ smode 0a =
+ if  44c0   ( ccr )
+ else  46c0 ( sr )
+ then  smode 3 shl or  sreg or  w,  xsrc ;
+
+: usp<->Ar ( -- | usp <-> Ar)
+ size 80 <> abort" must be long"
+ dmode 8 =  if  4e60 sreg  else  4e68 dreg  then  or  w, ;
+
+: sdmove ( -- | Move Data from Source to Destination)
+ dataalterable  smode 1 = size 0= and abort" can't be byte"
+ size 0=
+ if  1000   ( byte size is wierd )
+ else  size 40 =
+   if  3000 ( word size is real wierd )
+   else  2000  ( size is long )
+ then then  dreg 9 shl or dmode 6 shl or smode 3 shl or  sreg or  w,
+ xsrc  xdst ;
+
+: mquick ( -- | Move Quick)
+ asmb68warn
+ if  cr ." You may be able to use a move quick after" warncommon
+ then  sdmove ;   ( force assembly of move immediate instruction )
+ ( build moveq after getsrc/getdst: 7000 dreg 9 shl or sxtra ?byte or w,)
+
+: moveq, ( b 4 -8 r -1 -- | assemble moveq with signed byte data b)
+ ?dreg 9 shl 7000 or >r ?lit  ?sbyte  r> or w, .l ;
+
+: maddr ( -- | Move Address)
+ size 0= abort" can't be byte"
+ size 40 =
+ if  3040   ( word size is real wierd )
+ else  2040 ( size is long )
+ then  dreg 9 shl or  smode 3 shl or  sreg or  w,  xsrc ;
+
+
+: move, ( ea ea  -- | ea r -2 -- | b 4 -8 r -1 -- | -9 r -2 -- | r -2 -9 | ea 
+-a -- | -a ea -- | ea -b -- | -b ea | Assemble one of the Move instructions.  
+The various classes as indicated by the stack diagrams are: move, & movea, & 
+moveq, & move An <-> usp & move ea <-> sr & move ea <-> ccr)
+ getdst  getsrc   smode 0a =  smode 9 = or
+ if  ccr/sr>ea else  dmode 0a =  dmode 9 = or
+ if  ea>ccr/sr else  smode 8 = dmode 8 = or
+ if  usp<->Ar  else  dmode 0= smode 7 = and
+   sreg 4 = and sxtra -80 7f inrange and
+ if  mquick ( warning ) else  dmode 1 =
+ if  maddr  else  sdmove
+ then then then then then .l ;
+
+: exg,  1+
+ if  swap 1+  if  48  else  swap 88  then
+ else  swap 1+  if  88  else  40  then
+ then  swap 9 shl or or c100 or w, .l ;
+
+: trap,  dup 10 ?big 4e40 or w, ;
+
+: stop,  4e72 w,  ffff0000 and abort" argument too big" w, ;
+
+: set, ( Assemble 'Set According to Condition')
+ getdst  ccode 50c0 or  dst .l ;
+
+: rtd, ( displacement -- | Assemble 'Return and Deallocate Parameters')
+ 4e74 ( opcode) w,  ?sword ( check displacement) w, ;
+
+( labels are: low 24 bits, address; next 8, flag, if defined )
+: clr  lbls  #lbls 4 *  0 fill ; ( integer #lbls holds size )
+
+( label# -> | Defines a label named label#)
+: :l  dup #lbls ?big 2* 2*  lbls + >r
+ r@ c@  if " redefining label " type  then
+ r@ c@ 0= r@ @ ffffff and 0= 0= and
+ if  r@ @ ffffff and 0
+   begin  - dup w@ >r here over - 2- over 2+ w@ ffff =
+   if  over 2+ w! 0
+   else  dup 80 ?big
+   then  r@ 100 and
+   if  drop r@ 4 shr 0f00 and r@ 9 shr 7 and or 50c8 or over w!
+   else  r@ 4 shr 0f00 and or 6000 or over w!
+   then  r> 0ff and ?dup 0=
+   until  drop
+ then  here ff000000 or r> !  .l ;
+
+
+( BRA takes a label and optionally a condition code [puts a 0
+ if none]. if size is .b, forces to short.  if .w, force to long
+ and if .l use which ever is appropriate.)
+( label# cc -> | label# -> | )
+
+: bra,  dup #lbls <  if 0  then  >r  dup
+ #lbls ?big 2* 2*  lbls + >r  r@ c@
+ if  r> @ ffffff and here - 2- dup abs 80 < size 40 <> and
+   if  0ff and r> or 6000 or w,
+   else  size 0= abort" branch too far" r> 6000 or w, w,  then
+ else  r@ @ ffffff and
+   if  here r@ @ ffffff and - dup 100 ?big
+   else  0
+   then  here ffffff and r> !  r> 4 shl f000 and or w,
+   size  if -1 w,  then
+ then .l ;
+
+: bsr,  nt bra, ;
+
+( DBRA, compiles either the actual instruction or a 32 bit value
+  of |||| ||||  |||| ||||  |||| ||||  |||| ||||
+   CC  REG^  offset  1111 1111  1111 1111
+ L=1 if DBRA, 0 if BRA  )
+
+( label# dreg -1 cc -> |   )
+: dbra,  swap drop >r  over  #lbls ?big
+ swap 2* 2*  lbls + >r r@ c@
+ if  r> @ ffffff and here - 2- r> 50c8 or rot 7 and or w, w,
+ else  r@ @ ffffff and ?dup
+   if  here swap - dup 100 ?big
+   else  0
+   then  here ffffff and r> ! r> 4 shl f000 and or 100 or
+   swap 9 shl e00 and or w, -1 w,
+ then .l ;
+
+( ca -> | Assemble a jump to code at ca that returns via a4 )
+: jmp2  06  over 8000 u< not  if 2+  then pc)d a4 lea, jmp, ;
+
+( ca -> | assemble <jmp2> and then restore next's addr in a4)
+: jumpto  jmp2  next #n a4 move, ;
+
+( t -> f | true if t is the token of an active vocabulary)
+: active?  active  active extant <  ( check order)
+ if extant active - 2/  ( 2 bytes/vocab measuring this way)
+ else active extant - 4 /  ( 4 bytes/vocab measuring this way)
+ then + active do  i w@ over =
+   if drop -1 exit  then  2 +loop  drop 0 ;
+
+( -> | Check to see if asmb68 is active.  If not, abort )
+: asmb68?  ['] asmb68 active? not abort" asmb68 not active" ;
+
+( -> | Create a header and put  here  into token table )
+: <code>  create ;
+
+
+( -> romaddr | begin some code, stack rom address )
+: <frag>  [compile] asmb68  clr  .l  !csp  align here ;
+
+( -> | 'next' macro for exiting from inside code words )
+: next,  asmb68?  nx ) jmp, ;
+
+( -- | Terminate code fragments )
+: ;c  asmb68?  ?csp  ['] asmb68 <deactivate> ;
+
+( -- | Terminate normal code words )
+: next;  next,  ;c ; ( next + security and termination )
+
+: frag  ( -- romaddr | begin code fragment, stack and report address )
+ <frag> cr ." fragment at" dup . ;
+
+( -- | Check for asmb68, create header, etc. and setup asmb68 )
+: code  ( ['] asmb68 active? abort" asmb68 already active" )
+ <code>  <frag> drop ;  ( the address of the code fragment )
+
+tdeactivate asmb68
+
+code spellchars  nx ) jsr, ;c ( parsing and first layer translation for SV )
+ ( Each byte contains either a -1 or a translated character. )
+ ( ff means a separator between verifiable words )
+ ( 0 means not a separator but discarded when translating )
+ ( 1 means an accented char requiring the second layer translation )
+
+( 0 1 2 3    4 5 6 7    8 9 a b    c d e f )
+ ffffffff , ffffffff , ffffffff , ffffffff , ( 00 break chars )
+ ffffffff , ffffffff , ffffffff , ffffffff , ( 10 unused )
+ ffffffff , ffffff27 , ffffffff , ff2d2e2f , ( 20 spc, !"#$%&(*+,-. )
+ ffffffff , ffffffff , ffffffff , ffffffff , ( 30 0123456789:;<=>? )
+ ff414243 , 44454647 , 48494a4b , 4c4d4e4f , ( 40 @ )
+ 50515253 , 54555657 , 58595aff , ffffffff , ( 50 [*]^_ )
+ ff616263 , 64656667 , 68696a6b , 6c6d6e6f , ( 60 ` )
+ 70717273 , 74757677 , 78797aff , ffffffff , ( 70 {|}~  )
+ 80ffffff , ffe18687 , 9e9fffff , ffffff8f , ( 80 ñºOo  nN  )
+ ff9192ff , ffffffff , ffffffff , ffffffff , ( 90         )
+ ffffffff , ffffffff , ffffffff , ffffffff , ( a0     ý3¦§¨ö «¬­®¯ )
+ 00000000 , 00000000 , 00000000 , 00000000 , ( b0 bare accents )
+ 01010101 , 01010101 , 01000000 , 00000000 , ( c0 accents )
+ ffffffff , ffffffff , ffffffff , ffffffff , ( d0 ??? )
+ ff00ff00 , ffff0000 , 00000000 , 00000000 , ( e0 attributes)
+ ffffffff , ffffffff , ffffffff , ffffffff , ( f0 hidden chars )
+
+code spellaccents  nx ) jsr,  ;c ( SV valid accent combinations )
+ ( Each element has 2 bytes, character first and accent second )
+ ( The position in the array + 80 becomes the translated value )
+
+( 0/8 1/9    2/a 3/b    4/c 5/d    6/e 7/f )
+ 000076c3 , 65c061c2 , 61c361c1 , 00000000 , ( 80 ueaaa   )
+ 65c265c3 , 65c169c3 , 69c269c1 , 41c30000 , ( 88 eeeiiiA  )
+ 45c00000 , 00006fc2 , 6fc36fc1 , 75c275c1 , ( 90 E  ooouu )
+ 79c34fc3 , 55c30000 , 00000000 , 00000000 , ( 98 yOU      )
+ 61c069c0 , 6fc075c0 , 6ec64ec6 ,      ( a0 aiounN )
+
+;s
+20   21 ! 22 " 23 # 24 $ 25 % 26 & 27 ' 28 ( 29 ) 2A * 2B + 2C , 2D - 2E . 2F /
+30 0 31 1 32 2 33 3 34 4 35 5 36 6 37 7 38 8 39 9 3A : 3B ; 3C < 3D = 3E > 3F ?
+40 @ 41 A 42 B 43 C 44 D 45 E 46 F 47 G 48 H 49 I 4A J 4B K 4C L 4D M 4E N 4F O
+50 P 51 Q 52 R 53 S 54 T 55 U 56 V 57 W 58 X 59 Y 5A Z 5B [ 5C \ 5D ] 5E ^ 5F _
+60 ` 61 a 62 b 63 c 64 d 65 e 66 f 67 g 68 h 69 i 6A j 6B k 6C l 6D m 6E n 6F o
+70 p 71 q 72 r 73 s 74 t 75 u 76 v 77 w 78 x 79 y 7A z 7B { 7C | 7D } 7E ~ 7F  
+80  81 ñ 82 º 83 O 84 o 85 á 86  87  88 L 89 l 8A   8B   8C n 8D N 8E   8F 
+80                       e1   86   87   9e   9f                            8f
+90  91 ø 92  93   94   95   96   97   98   99   9A   9B  9C  9D  9E  9F 
+     91   92
+A0   A1   A2   A3   A4 ý A5 3 A6 ¦ A7 § A8 ¨ A9 ö AA   AB « AC ¬ AD ­ AE ® AF ¯
+code initdictionary  ( -- flag | checks and may init user dict )
+   a2 sp -) move,          ( save registers )
+   a3 sp -) move,
+   svram #n a2 move,       ( a2 = svram pointer )
+   svwork #n a3 move,      ( a3 = svwork pointer )
+   tc' spellcode 0e + jsr, ( call init routine )
+   sp )+ a3 move,          ( restore registers )
+   sp )+ a2 move,  next;
+
+code emptycheck   ( -- flag | checks if user dict is empty )
+   a2 sp -) move,       ( save registers )
+   a3 sp -) move,
+   svram #n a2 move,    ( a2 = svram pointer )
+   svwork #n a3 move,   ( a3 = svwork pointer )
+   tc' spellcode 12 + jsr, ( call echeck routine )
+   sp )+ a3 move,       ( restore registers )
+   sp ) a2 move,
+   d0 not,
+   d0 sp ) move,        ( push spell result on stack )
+next;
+
+code addspell  ( length -- | adds word in svbuf to  dict )
+   sp ) d0 move,           ( get the length )
+   0 #n d1 moveq,          ( the country code for us is 0 )
+   a2 sp ) move,           ( save registers )
+   a3 sp -) move,  d0 sp -) move,
+   svbuf #n a0 move,       ( a0: svbuf pointer )
+   svrom0 #n a1 move,      ( a1: main dict pointer )
+   svram #n a2 move,       ( a2: svram pointer )
+   svwork #n a3 move,      ( a3: svwork buffer pointer )
+   tc' spellcode 2+ jsr,   ( call main routine )
+   d0 tst,  eq             ( word present in rom? )
+   if,  sp ) d0 move,      ( no, restore the length )
+      tc' spellcode 6 + jsr,  ( call add routine )
+   then,  sp )+ d0 move,  sp )+ a3 move,
+   sp )+ a2 move,  next;   ( restore registers )
+
+code deletespell  ( length -- | deletes word in svbuf from dict )
+   sp ) d0 move,           ( get the length )
+   0 #n d1 moveq,          ( the country code for us is 0 )
+   a2 sp ) move,           ( save registers )
+   a3 sp -) move,  d0 sp -) move,
+   svbuf #n a0 move,       ( a0: svbuf pointer )
+   svrom0 #n a1 move,      ( a1: main dict pointer )
+   svram #n a2 move,       ( a2: svram pointer )
+   svwork #n a3 move,      ( a3: svwork buffer pointer )
+   tc' spellcode 2+ jsr,   ( call main routine )
+   d0 tst,  ne             ( word present in rom? )
+   if,  sp ) d0 move,      ( yes, restore the length )
+      tc' spellcode 0a + jsr, ( call delete routine )
+   then,  sp )+ d0 move,  sp )+ a3 move,
+   sp )+ a2 move,  next;   ( restore registers )
+
+code spellcheck   ( length -- flag | true if string is in dict )
+   sp ) d0 move,  ne             ( d0: length )
+   if,  0 #n d1 moveq,  414398 d1 .w move,   ( d1: country code )
+      a2 sp ) move,  a3 sp -) move,    ( save registers )
+      svbuf #n a0 move,          ( a0: svbuf pointer )
+      svrom0 #n a1 move,         ( a1: main dict pointer )
+      svram #n a2 move,          ( a2: svram pointer )
+      svwork #n a3 move,         ( a3: svwork buffer pointer )
+      tc' spellcode 2+ jsr,         ( call main routine )
+      sp )+ a3 move,  sp ) a2 move,    ( restore registers )
+   else,  -1 #n d0 moveq,
+   then,  d0 sp ) move,  next;         ( push spell result on stack )
+
+code nextnonsep  ( addr -- addr' )
+ sp ) a0 move,  0 #n d0 moveq,  tc' spellchars 2+ #n a1 move,
+ begin,  a0 )+ d0 .b move,
+   -1 #n a1 d0 0 xw)d .b cmp,  ne
+ until,  1 #n a0 subq,  a0 sp ) move,  next;
+
+code nextsep  ( addr -- addr' )
+ sp ) a0 move,  0 #n d0 moveq,  tc' spellchars 2+ #n a1 move,
+ begin,  a0 )+ d0 .b move,
+   -1 #n a1 d0 0 xw)d .b cmp,  eq
+ until,  1 #n a0 subq,  a0 sp ) move,  next;
+
+code prevnonsep  ( addr -- addr' )
+ sp ) a0 move,  0 #n d0 moveq,  tc' spellchars 2+ #n a1 move,
+ begin,  a0 -) d0 .b move,
+   -1 #n a1 d0 0 xw)d .b cmp,  ne
+ until,  1 #n a0 addq,  a0 sp ) move,  next;
+
+code prevsep  ( addr -- addr' )
+ sp ) a0 move,  a0 d1 move,
+ 0 #n d0 moveq,  tc' spellchars 2+ #n a1 move,
+ begin,  a0 -) d0 .b move,
+   -1 #n a1 d0 0 xw)d .b cmp,  eq
+ until,  tc' ^nextchar jsr,  a0 d1 cmp,  lt
+ if,  d1 a0 move,  then,  a0 sp ) move,  next;
+
+code sepchar?  ( addr -- flag \ 0 = addr not point to a separator char )
+ sp ) a0 move,  0 #n d0 moveq,  tc' spellchars 2+ #n a1 move,
+ a0 ) d0 .b move,  -1 #n a1 d0 0 xw)d .b cmp,  eq
+ if,  -1 #n sp ) move,
+ else,  0 #n sp ) move,  then,  next;
+
+code translatespell  ( from offset length -- length' \ string in svbuf )
+ sp )+ d1 move,  eq                 ( d1: limit )
+ if,  sp )+ sp ) move,  next,  then,         ( length' = offset )
+ 0 #n d0 moveq,  sp )+ a1 move,  svbuf #n a1 add,  ( a1: putchradr )
+ sp ) a0 move,  a0 d1 addq,            ( a0: getchradr )
+ a2 sp ) move,  tc' spellchars 2+ #n a2 move,      ( save a2: table )
+ begin,  a0 )+ d0 .b move,  a2 d0 0 xw)d d3 .b move,  ne ( d3: xlated )
+   if,  svbuf 46 + #n a1 cmp,  1 nc bra,     ( enough chars -> 1 )
+      1 #n d3 .b cmp,  ne           ( 1 = accent )
+      if,  d3 a1 )+ .b move,           ( char, move to svbuf )
+      else,  a1 -1 )d d2 .b move,         ( accent, nab last char)
+         8 #n d2 .w lsl,  d0 d2 .b move,     ( combine char+accent )
+         tc' spellaccents 2+ #n a2 move,  25 #n d3 moveq,
+         begin,  a2 )+ d2 .w cmp,  d3 eq -until,   ( scan accent table )
+         tc' spellchars 2+ #n a2 move,  d3 .b tst,  pl   ( restore old table )
+         if,  d3 .b neg,  0a5 #n d3 .b addq,    ( found it, calc trans )
+            d3 a1 -1 )d .b move,       ( store trans in svbuf )
+   then,  then,  then,  d1 a0 cmp,  nc       ( past limit? )
+ until,  1 :l  sp ) a2 move,           ( yes, restore a2 )
+ svbuf #n a1 sub,  46 #n a1 cmp,  nc         ( return new length )
+ if,  46 #n a1 move,  then,  a1 sp ) move,  next;  ( with 46 max )
+
+( : trans sp@ 0 4 translatespell nip svbuf swap .s dump ; ( # -- )
+
+code tohyphen  ( addr1 len1 -- addr1 len1' addr2 len2
+ len1'=0=len1
+ len2=0 means no hyphens or hyphen at end
+ addr2=0 means no hyphens )
+ sp )+ a1 move,  eq
+ if,  a1 sp -) move,  a1 sp -) move,  a1 sp -) move,  ( len1 = 0 )
+ else,  sp ) a0 move,  a1 d3 move,        ( a0: addr1 )
+   a0 a1 add,  ascii - #n d2 moveq,       ( d2: hyphen )
+   begin,  a0 ) d2 .b cmp,  1 eq bra,
+      tc' ^nextchar jsr,  a0 a1 cmp,  le
+   until,  d3 sp -) move,  0 #n d0 moveq,    ( no hyphens )
+   d0 sp -) move,  d0 sp -) move,  next,
+   1 :l  a0 d0 move,  sp ) d0 sub,  d0 sp -) move, ( found hyphen )
+   tc' ^nextchar jsr,               ( skip hyphen )
+   a0 sp -) move,  a0 a1 cmp,  le
+   if,  0 #n a1 move,  else,  a0 a1 sub,  then,  a1 sp -) move,
+ then,  next;
+
+: spellcheck-  ( addr len -- addr/0 \ 0 means spelled ok )
+ local adr  local len  len to  adr to  -1
+ begin  drop adr 0 len translatespell  spellcheck 0= dup
+ while  drop adr len tohyphen  len to adr to  ?dup
+ while  over 0 rot translatespell  spellcheck 0=
+ until ;
+
+: spellcheck>  ( addr1 addr2 -- addr or 0 | addr of first misspelled word )
+ local length  local limit  local start  local speller
+ limit to  start to
+ begin  start nextnonsep speller to
+   speller limit < 0=  if  0 exit  then      ( passed out of bounds )
+   speller nextsep start to         ( start: first sep after word )
+   start speller - length to        ( length: of word checked )
+   speller length
+   spellcheck-
+   ?panic  if  drop  speller nextsep prevchar  exit  then
+ until  speller prevchar nextchar ;    ( misspelled word )
+
+: spellcheck<  ( addr1 addr2 -- addr or 0 | addr of first misspelled word )
+ local length  local bottom  local upper  local speller
+ speller to  bottom to
+ begin  speller prevchar prevnonsep  upper to
+   upper bottom > 0=  if  0 exit  then    ( passed out of bounds )
+   upper prevsep  speller to        ( start: first sep after word )
+   upper speller -  length to       ( length: of word checked )
+   speller length
+   spellcheck-
+   ?panic  if  drop  speller nextsep prevchar  exit  then
+ until  speller prevchar nextchar ;    ( misspelled word )
+
+( : z cr . depth 0 > if .s then ?keystep if quit then ; ( n -- )
+
+: translategap  ( -- length \ copy word split by gap to svbuf and translate )
+ local len1  local len2
+ gap prevsep gap over - len1 to
+ 0 len1  translatespell len1 to        ( part of word below gap )
+ beot dup nextsep over - len2 to
+ len1 len2  translatespell ;        ( part of word above gap )
+
+: spellcheckgap-  ( -- addr or 0 \ 0 means word at gap spelled correctly )
+ local adr     local len   local speller
+ gap prevsep speller to    speller adr to
+ gap adr - len to
+ begin  adr len tohyphen  len to adr to
+   0 swap translatespell  adr
+ while  spellcheck 0=            ( hyphen in word at gap )
+   if  speller prevchar nextchar exit  then
+ again  beot adr to  adr nextsep adr - len to
+ begin  adr len tohyphen  len to adr to
+   rot swap translatespell  spellcheck 0=
+   if  speller prevchar nextchar exit  then  adr
+ while  0                        ( clear translated length )
+ again  0 ;                      ( no hyphen remains )
+
+: spellcheckgap  ( -- addr or 0 \ 0 means word split by gap spelled correctly )
+ translategap  dup               ( check whole word at gap )
+ if  spellcheck
+   if  0  else  spellcheckgap-  then then ;
+
+: nextsep?  ( addr -- addr or addr' )
+ dup prevchar sepchar? 0=  if  nextsep  then ;
+
+: endspellcheck  ( addr -- )
+ end-search " " 3 indicate rule  newlex off
+ ?panic  ?lex ?rex or not or  if  finish-lex  then ;
+
+: spellcheckagain  ( -- )
+ ?extended ?split or ?expanded or
+ if  selected cstate off  then
+ direction
+ if  eos gap <                      ( search right )
+   if  eos nextsep gap prevsep  spellcheck>
+   else  eos dup beot <>  dup gap prevchar sepchar? or 0=  or
+      if  nextsep  then  eor  spellcheck>
+      dup 0= learnbuff 0= and
+      if  drop  bor gap prevsep  spellcheck>
+   then then  ?dup 0=
+   if  gap prevchar sepchar? 0=  eos prevchar gap prevsep <>  and  dup
+      if  drop  spellcheckgap  then  then
+ else  eos beot 1+ <                ( search left )
+   if  eos prevchar gap prevsep >  dup
+      if  drop spellcheckgap  then  ?dup 0=
+      if  bor  eos beot = if gap else eos then prevsep  spellcheck<
+         dup 0= learnbuff 0= and
+         if  drop  beot nextsep? eor  spellcheck<  then  then
+   else  beot nextsep? eos prevsep spellcheck<
+ then  then  endspellcheck ;
+
+: spellcheckleap  ( -- )
+ indspell rule
+ -2 pattern !                    ( disallow normal leaping )
+ newlex eos dup beot = swap gap = or or 0=
+ if  spellcheckagain  exit  then    ( same as typing USE FRONT )
+ ?extended ?split or ?expanded or
+ if  selected cstate off  then
+ direction                       ( on=search to the right )
+ if  beot nextsep? eor  spellcheck>    ( after gap, till end of text )
+   dup 0= learnbuff 0= and       ( if not there & not learning )
+   if  drop bor gap prevsep spellcheck> ?dup 0= ( begin upto sel )
+      if  spellcheckgap  then  then
+ else  gap prevchar dup sepchar? 0= swap gap prevsep <>  and dup
+   if  drop spellcheckgap  then  ?dup 0=  ( off=search to the left )
+   if  bor gap prevsep spellcheck<     ( see if any before selection)
+      dup 0= learnbuff 0= and       ( if not there & not learning )
+      if  drop beot nextsep? eor  spellcheck<   ( then check text after gap)
+ then  then  then  endspellcheck ;
+
+: undospell  ( -- \ undo addspelling or deletespelling )
+ extend spellop execute ;
+
+: dospelling  ( undotoken spelltoken addr len -- )
+ local end        local speller     local count
+ local dospellop  local undospellop
+ rule undop off
+ spellop to       dospellop to
+ undospellop to   count off
+ gap prevchar bos =
+ if  ambiguity error abort  then    ( nothing to add/delete )
+ svramspell>temp  spellcs svspellcs@ <>      ( true if bad dictionary )
+ if  initdictionary  savespell         ( clear the dictionary )
+   svcorrupt error  abort  then
+ ['] undospell undop to
+ bos dup sepchar? 0=
+ if  prevsep  then  end to
+ begin  end nextnonsep speller to
+   speller nextsep end to
+   end gap < ?panic 0= and
+ while  count on  speller 0 end speller -
+   translatespell ?dup
+   if  dospellop execute  then
+ again  dirtytext? on  ?panic
+ if  speller bos to  collapse
+   interruption error
+ else  speller gap <
+   if  translategap  ?dup
+      if  dospellop execute
+ then  then  then  savespell
+ collapse  " " 3 indicate rule
+ undospellop spellop to ;
+
+
+: addspelling  ( -- \ add the word the cursor is on to the dictionary )
+ ['] deletespelling  ['] addspell  ['] addspelling
+ indaddspell dospelling ;
+
+: deletespelling  ( -- \ delete the word the cursor is on from the dictionary )
+ ['] addspelling  ['] deletespell  ['] deletespelling
+ inddelspell dospelling ;
+
+( New Editor version 2.40 )
+( disk C, side 0 )

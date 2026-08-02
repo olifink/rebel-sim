@@ -1,0 +1,2918 @@
+( Target compiler )
+( Begin the target compiler, sys68 )
+
+( vl) addto user  user
+
+( First the integers, starting with the 9" Swyft fundamental I/O addresses.)
+
+: *** ; immediate               ( use this to flag changes to the source )
+idtable 80 0 fill               ( so won't write compiled image back to disk )
+
+: <token>  ( "###" | -- token | preassign name | redefined shortly ... )
+ word str len base number 0= abort" wrong syntax, needs: token ### name" ;
+
+: token  ( "### name" | -- | preassign name | redefined shortly ... )
+ <token> tokens to  word  applic addr str len assign ;
+
+( vl) vocabulary sys68  addto sys68  sys68
+( GA I/O map names   - moves over to new system)
+
+800000   integer  ga3                   ( Gate Array 3 base address )
+   0     integer  fd.cont               ( Disk Control Register )
+   2     integer  kb.wr                 ( Keyboard Write Register )
+   4     integer  pr.data               ( Printer Data Register )
+   6     integer  fd.dwr                ( Disk Write Data Register )
+   8     integer  fd.status             ( Disk Status Register )
+   A     integer  kb.rd                 ( Keyboard Read Register )
+   6     integer  fd.drd                ( Disk Read Data Register )
+   E     integer  pr.cont               ( Printer Control Register )
+
+
+810001   integer  duart                 ( 68681 Base Address )
+   0     integer  ser.mr1a              ( Mode Register 1A              [R/W] )
+   0     integer  ser.mr2a              ( Mode Register 2A              [R/W] )
+   2     integer  ser.sra               ( Status Register A             [R] )
+   2     integer  ser.csra              ( Clock Select Register A       [W] )
+   4     integer  ser.cra               ( Command Register A            [W] )
+   6     integer  ser.rhra              ( Rx Holding Register A         [R] )
+   6     integer  ser.thra              ( Tx Holding Reigster A         [W] )
+   8     integer  ser.ipcr              ( Input Port Change Register    [R] )
+   8     integer  ser.acr               ( Aux. Control Register         [W] )
+   A     integer  ser.isr               ( Interrupt Status Register     [R] )
+   A     integer  ser.imr               ( Interrupt Mask Register       [W] )
+   C     integer  ser.cth               ( Counter Timer High            [R/W] )
+   E     integer  ser.ctl               ( Counter Timer Low             [R/W] )
+   10    integer  ser.mr1b              ( Mode Register 1B              [R/W] )
+   10    integer  ser.mr2b              ( Mode Register 2B              [R/W] )
+   12    integer  ser.srb               ( Status Register B             [R] )
+   12    integer  ser.csrb              ( Clock Select Register B       [W] )
+   14    integer  ser.crb               ( Command Register B            [W] )
+   16    integer  ser.rhrb              ( Rx Holding Register B         [R] )
+   16    integer  ser.thrb              ( Tx Holding Register B         [W] )
+   18    integer  ser.ivr               ( Interrupt Vector Register     [R/W] )
+   1A    integer  ser.ip                ( Input Port                    [R] )
+   1A    integer  ser.opcr              ( Output Port Control Reg.      [W] )
+   1C    integer  ser.cstart            ( Counter Start                 [R] )
+   1C    integer  ser.sopb              ( Set Output Port Bits          [W] )
+   1E    integer  ser.cstop             ( Counter Stop                  [R] )
+   1E    integer  ser.ropb              ( Reset Output Port Bits        [W] )
+
+830000   integer  timer                 ( 6 ms Timer Register )
+840001   integer  opr                   ( Output Port Register )
+850000   integer  wdt                   ( Watchdog timer and power fail )
+860000   integer  tcb                   ( Test control bits )
+820001   integer  modem         ( Modem Chip Base Address )
+   0     integer  md.energy     ( Energy detected                       [R] )
+   2     integer  md.psk.dmd    ( PSK Demodulator Output                [R] )
+   4     integer  md.psk.uscr   ( PSK Unscrambled Output                [R] )
+   6     integer  md.fsk.dmd    ( FSK Demodulator Output                [R] )
+   8     integer  md.sig.qual   ( Signal Quality Detector Output        [R] )
+   0     integer  md.txcr.sqch  ( TX carrier off                        [W] )
+   2     integer  md.srm.dis    ( Scrambler Disable                     [W] )
+   4     integer  md.rx.mark    ( Set RX Data to Mark           [W] )
+   6     integer  md.rsync.dis  ( Receive Sync Disable          [W] )
+   8     integer  md.qual.on    ( Signal Quality Detector Enable        [W] )
+   A     integer  md.pll.fast   ( PLL fast acquisition enable           [W] )
+   C     integer  md.wordlen1   ( Word Length Control 1         [W] )
+   E     integer  md.wordlen0   ( Word Length Control 0         [W] )
+   10    integer  md.async.on   ( Asynchronous Data Mode enable [W] )
+   12    integer  md.hi.speed   ( 1200 BPS PSK enable           [W] )
+   14    integer  md.slave      ( Slave to external clock enable        [W] )
+   16    integer  md.local.clk  ( Internal clock enable         [W] )
+   18    integer  md.answer     ( Answer Mode enable                    [W] )
+   1A    integer  md.an.loop    ( Analog Loopback enable                [W] )
+   1C    integer  md.dig.loop   ( Digital Loopback enable               [W] )
+   1E    integer  md.dot        ( Dotting Pattern enable                [W] )
+   20    integer  md.tx.marks   ( Mark Generator enable         [W] )
+   22    integer  md.tx.space   ( Spave Generator enable                [W] )
+   24    integer  md.sp1.dis    ( SP1 to pin 13 disable                 [W] )
+   26    integer  md.sp1        ( SP1 Control pin 13                    [W] )
+   28    integer  md.sp2.dis    ( SP2 to pin 16 disable                 [W] )
+   2A    integer  md.sp2        ( SP2 Control pin 16                    [W] )
+   2C    integer  md.sp3.dis    ( SP3 to pin 17 disable                 [W] )
+   2E    integer  md.sp3        ( SP3 Control pin 17                    [W] )
+   30    integer  md.test0      ( Test Mode 0 enable                    [W] )
+   32    integer  md.test1      ( Test Mode 1 enable                    [W] )
+   34    integer  md.test2      ( Test Mode 2 enable                    [W] )
+   36    integer  md.test3      ( Test Mode 3 enable                    [W] )
+   38    integer  md.rxd.hiz    ( RXD output HiZ enable         [W] )
+   3A    integer  md.thres.48   ( Energy Detect Threshold -48dBm        [W] )
+
+   50    integer  width                 ( # of bytes in one display line)
+   54    integer  /scan                 ( bytes in a scan line )
+   54    integer  /lscan                ( # of "visible" bytes in a scan line )
+   54    integer  active/scan           ( number of active bytes per line )
+   158   integer  height                ( scan lines per display )
+   10    integer  bytes/char            ( bytes in a font table entry )
+   4     integer  logbytes/char         ( since we shift alot )
+    0E   integer  scans/char            ( scan lines per character )
+   /scan scans/char *   integer bytes/line      ( bytes in a text line )
+   42f2ac                       integer ticks/day
+   ticks/day 18 / 1+            integer ticks/hour
+   ticks/day 18 3c * / 1+       integer ticks/min
+   ticks/day 18 3c * 3c * / 1+  integer ticks/sec
+( SETUP command integers and ROM arrays and pointers )
+
+0  integer  setv&ti             ( the value and token index number)
+90 integer  setv&tlim           ( the value and token index limit )
+10 integer  himsetuplim         ( hidden internal modem setup size )
+0  integer  slo                 ( lo serial index )
+0  integer  shi                 ( hi serial index )
+10 integer  main/altlim         ( the main/alternate printer vector limit )
+0  integer  groupl              ( holds the number of lines in this group)
+0  integer  groupi              ( the display group index)
+0  integer  starti      ( Notes the starting index number for this group)
+5  integer  gpwidth             ( the groups array width )
+12 integer  grouplim            ( the limit on the number of display groups )
+10 integer  ccwidth             ( the country setup info array width )
+10 integer  cclim               ( the country code limit )
+2b integer  setupsc             ( setup command key scan code job87mar31)
+2e integer  spacesc             ( space bar scan code job87mar31)
+36 integer  <leapsc             ( left leap key scan code job87mar31)
+3e integer  leap>sc             ( right leap key scan code job87mar31)
+0  integer  Cat180pop   ( the code number for the Cat 180 parallel only ptr)
+1  integer  VP3103II    ( the code number for the Laser Beam printer)
+5  integer  AP100sop    ( the code number for the AP100 serial only ptr)
+
+0  integer <setdata>            ( ROM array, holds the default setup state.)
+0  integer <settokens>          ( ROM array holding the setup token list)
+0  integer <groups>             ( the ROM array of up to grouplim groups)
+0  integer  <himsetup>          ( hidden internal modem setup rom address )
+0  integer  pfirstpage#
+0  integer  pprintpage#
+0  integer  ppagelen
+0  integer  ptopmgn
+0  integer  pbotmgn
+0  integer  pkeyboard
+0  integer  pdisplay
+0  integer  perror
+0  integer  ptimeout
+0  integer  psspell
+0  integer  pssetup
+0  integer  p#punct
+0  integer  pdecimals
+0  integer  p#sortb
+0  integer  pdpx
+0  integer  pring
+0  integer  pmpcon
+0  integer  pmp
+0  integer  pspcon
+0  integer  pap
+0  integer  ptab
+0  integer  ptlt
+0  integer  papp
+0  integer  pims
+0  integer  pimbpw
+0  integer  pimsb
+0  integer  pimpty
+0  integer  pimra
+0  integer  pimct
+0  integer  pimpro
+0  integer  pdfirstpage#
+0  integer  pdprintpage#
+0  integer  pdpagelen
+0  integer  pdtopmgn
+0  integer  pdbotmgn
+0  integer  pems
+0  integer  pemra
+0  integer  pemct
+0  integer  pemring
+0  integer  pempro
+0  integer  pemspkr
+0  integer  ppro
+0  integer  ptyper
+0  integer  pemcfc
+0  integer  pimcfc
+( system.status offsets )
+0     integer  system.default          ( Address of default array )
+0
+dup   integer  isb                     4 +
+dup   integer  int.mask                2+
+dup   integer  rings                   1+
+dup   integer  ringcount               1+
+dup   integer  acr                     1+
+dup   integer  tickcount               1+
+dup   integer  cpmcount                4 +      ( Call Progress Counter )
+dup   integer  opcr.copy               1+
+dup   integer  ga3pr.cont              1+
+dup   integer  ga2opr                  1+
+dup   integer  modem.status            1+
+( dup integer  modem.spare             1+       ( spare, more status bits? )
+dup   integer  kb.buf.len              2+
+dup   integer  print.buflen            4 +
+dup   integer  ser.rxbuf.len           2+
+dup   integer  ph.rxbuf.len            2+
+dup   integer  system.default.len
+dup   integer  trkbuf.addr             4 +
+dup   integer  ramend.addr             4 +
+dup   integer  track.err               0A +
+dup   integer  sound.addr              4 +
+dup   integer  old.print.char          4 +
+dup   integer  kb.buf                  4 +
+dup   integer  print.buf               4 +
+dup   integer  ser.rxbuf               4 +
+dup   integer  ph.rxbuf                4 +
+dup   integer  print.ptr               4 +
+dup   integer  print.char              4 +
+dup   integer  ser.rxptr               2+
+dup   integer  ser.rxchar              2+
+dup   integer  ph.rxptr                2+
+dup   integer  ph.rxchar               2+
+dup   integer  inptr                   2+
+dup   integer  outptr                  2+
+dup   integer  auto                    4 +
+dup   integer  char                    4 +
+dup   integer  char?                   4 +
+dup   integer  kstat                   4 +
+dup   integer  scancode                4 +
+dup   integer  kval                    4 +
+dup   integer  keyscan                 8 +
+dup   integer  newkey                  8 +
+dup   integer  modifiers               4 +
+dup   integer  shiftstate              4 +
+dup   integer  ticks                   4 +
+dup   integer  mticks                  2+
+dup   integer  bticks                  2+
+dup   integer  kticks                  2+
+dup   integer  rticks                  2+
+dup   integer  vticks                  4 +
+dup   integer  dticks                  2+
+dup   integer  cpmlticks               2+       ( Call Progress Timer )
+dup   integer  cpmlstatus              2+       ( Call Progress Status )
+dup   integer  cpmhticks               2+       ( Call Progress Timer )
+dup   integer  cpmhstatus              2+       ( Call Progress Status )
+dup   integer  modem.energy            2+
+dup   integer  modem.psk.dmd           2+
+dup   integer  modem.psk.uscr          2+
+dup   integer  modem.fsk.dmd           2+
+dup   integer  #defmsg                 4 +
+dup   integer  system.diag
+dup   integer  sys.ramsize             4 +
+dup   integer  ramtest.results         8 +
+dup   integer  0high.chksum            4 +
+dup   integer  0low.chksum             4 +
+dup   integer  1high.chksum            4 +
+dup   integer  1low.chksum             4 +
+dup   integer  svrom0.chksum           4 +
+dup   integer  svrom1.chksum           4 +
+dup   integer  svrom2.chksum           4 +
+dup   integer  svtest.results          4 +
+dup         integer        country.code        4 +
+
+( the following data gets saved in the svram, must be an even number of bytes)
+dup integer startsvss          ( start of svram data in the system area)
+dup integer setdata        setv&tlim  2* + ( start of setup svram area)
+dup integer groups    gpwidth grouplim * + ( the setup groups array)
+dup integer #defaults      esize +         ( format info )
+dup integer himsetup       himsetuplim 2* + ( hidden internal modem setup )
+dup integer externalmodem  1+  ( external modem flag, set by keyboard)
+dup integer checkspell     1+  ( spelling checker existence flag)
+dup integer kbdI/II        1+  ( keyboard I/II indicator flag)
+dup integer spareflg       1+  ( to even out the bytes)
+dup integer svsetupgutters 4 + ( setup printer gutters for 3 pitches)
+dup integer svsetupmainptr 4 + ( setup main printer direction)
+dup integer svsetupaltptr  4 + ( setup alternate printer direction)
+dup integer svsetupscmnd   4 + ( setup send command direction)
+dup integer svsetupflg     1+  ( setup loaded from rom flag)
+dup integer svspare        1+  ( so that there is an even number of bytes here)
+dup integer svid           4 + ( notes the svram version number)
+dup integer svspellcs      4 + ( spell checksum, these two cs's must come last)
+dup integer svsetupcs      4 + ( setup checksum)
+dup integer endsvss            ( end of svram data in the system area)
+endsvss startsvss - 1 and  if beep ." svram data an odd length" abort  then
+
+dup   integer  loop.stack              24 +
+      integer system.status.len
+( Bit position in the Interrupt Status Bits location )
+0     integer  ph.overrun
+1     integer  ph.parity
+2     integer  ph.frame
+3     integer  ph.brk
+4     integer  ser.overrun
+5     integer  ser.parity
+6     integer  ser.frame
+7     integer  ser.brk
+8     integer  sound.en
+9     integer  par.strobe
+A     integer  print.dev
+B     integer  print.en
+C     integer  ph.xoff.pend
+D     integer  ph.xon.pend
+E     integer  ser.xoff.pend
+F     integer  ser.xon.pend
+10    integer  ph.xon.rx.en
+11    integer  ph.xon.tx.en
+12    integer  ser.dsr.en
+13    integer  ser.cts.en
+14    integer  ser.dtr.en
+15    integer  ser.rts.en
+16    integer  ser.xon.rx.en
+17    integer  ser.xon.tx.en
+18    integer  ph.xon.rx
+19    integer  ph.xon.tx
+1A    integer  ser.dsr
+1B    integer  ser.cts
+1C    integer  ser.dtr
+1D    integer  ser.rts
+1E    integer  ser.xon.rx
+1F    integer  ser.xon.tx
+( bit offsets for modem.status )
+0     integer  mdm.1200         ( if true, modem is 1200 baud, else 300 baud )
+1     integer  mdm.answer       ( if true, modem is answer filters )
+2     integer  mdm.trained      ( if true, modem has been trained )
+3     integer  mdm.speed        ( if true, modem should only try 300 baud )
+4     integer  ringdetect       ( if true, ringdetect is high )
+5     integer  mdm.high         ( if true, filters are set high )
+6     integer  mdm.cpm          ( if true, doing call progress monitoring )
+( The difference between width and /scan is the display overscan. )     
+( height of the old display was F3 lines )
+
+   70e0  integer  screensize    ( # of bytes in the display rom 3 was:9064 )
+
+( The display is 104 bytes [832 bits] wide, there are 353 full scan lines, plus 
+44  extra bytes. This comes to $7400 bytes of display.  The ruler requires 2 
+scan lines of slop below the bottom of the screen. Thus the screen is declared 
+to be 355 scan lines tall [old: $747c bytes].  For ROM 4, increase the screen 
+size to 400 lines of 104 bytes or $a280 bytes, in ROM 50, it was compacted down)
+
+400000               integer ramstart   ( start of ram in the Swift)
+ramstart  /scan 2* 2+ + integer screen  ( starts below overscan )
+ramstart 20000 +  integer text          ( absolute start of text area )
+80000                integer ramsize
+ramstart 5fff8 +  integer ramend        ( all the ram that we can save )
+ramstart /scan 2* +  integer screenstart
+
+( Forth values)
+
+1000 integer intsize            ( max size of rom int table, mult of 400 )
+ 1c0 integer #ints              ( # of rom 'int' names )
+ b00 integer #romtokens         ( # of rom tokens for rom table *** )
+ f00 integer #ramtokens         ( # of ram tokens for ram table )
+  10 integer #vocs              ( # of vocabularies)
+  40 integer maxword            ( max size of a word name, see <find>)
+  10 integer #lbls              ( number of labels in assembler )
+  80 integer #cmds              ( # of commands in ROM command array )
+  11 integer xon                ( xon value MT 4/22 )
+  13 integer xoff               ( xoff value MT 4/22 )
+
+a00000               integer .shadow    ( where the shadow ram will be )
+40000                integer romsize    ( size of entire rom )
+.shadow              integer target     ( target compile in shadow rom )
+romsize 18 -         integer targsize   ( size of target complied image )
+target targsize +    integer .top       ( initial top+1 of forth ram )
+target romsize +     integer .tiptop    ( top of ROM image + checksums )
+.top 2+              integer .checksum  ( put <cksum4> of image here )
+target               integer savehere   ( to save here during TC )
+
+200                  integer stacksize  ( the size of the data stack )
+300                  integer rstacksize ( the size of the return stack )
+
+( these data arrays are now in ROM 1 )
+
+.top target -                   ( topmost available byte in ROM 1 )
+
+#romtokens 3 * -                ( 3 bytes per token )
+dup 1 and -                     ( align on an even boundary )
+dup integer .romtbl             ( rom token table )
+
+#cmds 2* -                      ( rom space for initial EDDE command table )
+dup integer .cmds               ( 2 bytes per command )
+
+80 2* -                         ( rom EDDE explain table )
+dup integer .xplntbl            ( 2 bytes per explain message )
+
+#ints 4 * -                     ( start of rom integers value table )
+dup integer .intvals            ( this will be filled in by 'int' )
+
+target + 0a -  integer  saveapplic      ( save applic during target compile )
+
+( Diagnostic routine integers MT )
+
+    0A integer sectors          ( Number of sectors per track MT)
+    50 integer tracks           ( Number of tracks per disk MT)
+
+ 40000 integer svram            ( Start of SVRAM )
+  1400 integer svfree           ( start of free space in the SVRAM, setup, etc.)
+  2000 integer svramlen         ( Length of SVRAM )
+  138b integer svspelllen
+  1400 integer trkbuflen
+   200 integer idblocklen       ( length of idblock at screenend )
+
+     0 integer romstart         ( Starting address of ROM )
+ 40000 integer romlen           ( Length of ROM )
+
+200000 integer svrom0           ( Starting address of SVROM0 )
+240000 integer svrom1           ( Starting address of SVROM1 )
+
+ 40000 integer svrom0len        ( Length of SVROM0 )
+ 40000 integer svrom1len        ( Length of SVROM1 )
+
+0 integer .initlist             ( hardware initialization list )
+0 integer .keynumbers           ( MT keyboard test )
+0 integer .svlist               ( MT sv rom list )
+
+16 integer lines/screen         ( char lines on screen )
+0E integer  scans/image         ( height of a character)
+07 integer tophalf              ( height/2 of character)
+10 integer bytes/image          ( NOTE: code assumes this value!)
+08 integer hrulercursor         ( size of cursor in the ruler )
+
+38 integer esize        ( entry size in bytes for window and interval tables)
+39 integer pktsize      ( size of a packet in text )
+0e integer dpktsize     ( size of a document packet in text )
+
+400 integer isize       ( size of text interval represented by table entry )
+( changed interval table to allow for intervals up to the size of the RAM )
+ramend ramstart - isize / 1+ esize * integer itblsize   ( interval table size )
+
+2d integer wl           ( window array line count )
+0a integer nbufflen
+( some early arithmetic integers - needed in code words )
+ 0c integer awhole      ascii # integer markerchar
+ 0c integer awide    ascii . integer dpoint
+ 18 integer adeep    ascii , integer commapun
+ 18 integer opchars
+ 0a integer #chars
+ 0c integer #op+tokens
+
+a0 integer &horiz       ( horizontal half-characters displayed )
+scans/image lines/screen *  integer vbheight    ( pixel height of vertical bar)
+4 integer lbufwide
+100 integer patternsize
+4e integer lastline     ( last line in window table )
+
+( MNP buffer sizes )
+10c integer xmitbufsize         ( size of transmit buff for 1 max-length frame )
+10c integer rcvbufsize          ( size of frame buffer for 1 max-length frame )
+0f  integer shutbufsize         ( size of canned shut up LA frame buffer )
+120 integer isz                 ( size of pseudo-input buffer **)
+
+( .scratch data structures - above screen memory and below screenend )
+                        ( The structures which follow are copies of either )
+                        ( 1 - copies of the 68000 machine registers, )
+                        (     system.status, roughly some 760 hex big )
+                        (     and some odds and ends )
+                        ( 2 - the Spelling Verifier buffers )
+                        ( 3 - various Calc buffers and the arithmetic stack )
+
+( 100 integer tracescratch )    ( size of trace environment NOT NEEDED )
+
+ramstart screensize + integer .scratch  ( area above screen on fract disk trk )
+
+.scratch                        ( allocate .scratch area *** )
+system.status.len + 84 +        ( enough room for everything )
+ramstart -                      ( length of scratch area )
+trkbuflen /mod                  ( calculate beginning of next track )
+swap 0 <> if 1+ then            ( If odd value, add 1 to # tracks )
+trkbuflen *                     ( Multiply by number of bytes in a track )
+idblocklen -                    ( idblock is at the end of this track )
+ramstart +                      ( Add the ram base address )
+integer screenend               ( after idblock, will be track start )
+
+.scratch 5c + integer .restart  ( if magic#2, then should do a getforward )
+
+.scratch
+
+( Spelling verifier work areas - using track buffer for verifier work area )
+
+dup         integer svwork      100 +   ( spelling verifier scratchpad )
+dup         integer svbuf       400 +   ( translation buffer )
+
+( Calculation data structures - using track buffer for arithmetic stack )
+
+drop .scratch           ( Spell Verifier and Calc don't act at the same time )
+
+dup         integer aacum                               ( holds answers )
+dup         awhole 2/ +         integer aresult         ( for * and / )
+dup         awhole 2/ awide + + integer around          ( for * and / )
+                                awide 4 * +
+dup         integer atemp       awide + 1+ dup 1 and +  ( temp arith buffer )
+dup         integer mtable      awide 0b * +            ( for a* and a/ )
+dup         integer abuffer     40 +                    ( for ??? )
+dup         integer astack      adeep awide * +         ( arithmetic stack )
+
+screenend > if ." .scratch area holds too many structures" abort then
+
+( begin screenend allotments - structures which follow are allocated in memory )
+                        ( such that .s/r will be placed at the beginning of a )
+                        ( track -- This is so that @ptr will work properly *** )
+
+screenend               ( system ram starts after bottom of 'screen' area )
+
+dup         integer .s/r idblocklen +           ( save/restore environment *** )
+rstacksize + dup  integer rp0                   ( rtn stack, so may overflow )
+stacksize + dup   integer sp0 4 +               ( 0 for .s to print on empty )
+50 + dup    integer ssp0                        ( the supervisor stack area )
+                                                ( .s/r MUST be at even address )
+dup         integer svtemp                      ( temporary sv ram storage )
+80 + dup    integer .pad        100 +           ( pad goes both up and down )
+dup         integer lbuff &horiz lbufwide * +   ( edde line buffer )
+                                18 +            ( see Terry about the 18 )
+dup         integer #wtable     lastline 1+ esize * +   ( window table )
+dup         integer #update     lastline 2 + +  ( screen lines to refresh )
+dup         integer #itbl       itblsize +      ( interval table )
+dup         integer .idtable    80 +            ( space for disk id table  )
+dup         integer ptable      patternsize +
+dup         integer pattern     patternsize +   ( search pattern stored here)
+dup         integer .itx                0a0 +
+dup         integer .exec       140 +
+dup         integer .ramcmds    #cmds 2* +      ( command table in ram )
+dup         integer #ctrl       esize +         ( control var setting array )
+dup         integer #pctrl      esize +         ( control array for prev line )
+dup         integer nbuff       nbufflen +
+dup         integer <wordbuff>  maxword +
+dup         integer temptabs    tabsize +
+dup         integer deftabs     tabsize +
+
+( control/format array )
+dup         integer #nextwr     4 +     ( address of next line for build (int?)
+dup         integer #prec       1 +
+dup         integer #sort       1 +
+2 + dup     integer workpkt     pktsize 1+ +    ( a scratchpad text packet )
+2 + dup     integer sparepkt    pktsize 1+ +    ( scratch pkt area for SORT )
+dup         integer saveregs    40 +            ( copy of regs for trace )
+dup         integer uraniumregs 40 +            ( copy of regs for trace )
+
+dup         integer stackcopy  stacksize +      ( array for copy of data stack )
+dup         integer rstackcopy rstacksize +     ( array for copy of rtrn stack )
+
+dup         integer btable      100 +   ( byte detection in build main loop )
+dup         integer jray        30 +    ( array for both side justification )
+
+dup         integer ##ctrl      esize + ( new formats during format change)
+dup         integer vtbuff      vbheight 6 + +  ( image of bytes for tab bar)
+
+dup         integer statbuff    /scan lbufwide * +   ( disp buf for stat line )
+
+
+dup         integer cursorbuf   scans/image hrulercursor + 2* +
+                                                ( save area under cursor )
+
+dup         integer oldiv       4 +     ( other interrupt execution vectors )
+dup         integer intv        30 +
+
+dup         integer .ext        #vocs 4 * +     (  4 bytes/voc in extant tbl)
+dup         integer .act        #vocs 2* +      (  2 bytes/voc in active tbl)
+
+dup         integer ltxbuff     xmitbufsize +   ( buffer for building an LT )
+dup         integer outbuff     rcvbufsize +    ( buff for chars to upper layer)
+dup         integer rcvbuff     rcvbufsize +    ( buff for chars from modem )
+dup         integer shutbuff    shutbufsize + 1+ ( buff for 'canned' shut up LA)
+dup         integer xmitbuff    xmitbufsize +   ( buff for frame going to modem)
+dup         integer inputbuff   isz +           ( buff for debugging? **)
+
+( Note:  these two arrays MUST be in this order as  active  serves as the limit 
+address for  extant  to help keep the vocabulary code compact)
+
+( SETUP command ordinary RAM vectors )
+
+dup   integer oldset    setv&tlim 2* +          ( old setup state )
+dup   integer mainp     main/altlim +           ( main printer)
+dup   integer altp      main/altlim +           ( alternate printer)
+dup   integer idocpkt   dpktsize +              ( initial document packet)
+
+dup   integer leader    20 +            ( buffer for leader for hssl *** )
+dup   integer trailer   4 +             ( buffer for trailer for hssl *** )
+dup   integer xlate     100 +           ( translation table for hssl *** )
+
+dup   integer lbls      #lbls 4 * +             ( data array for assembler )
+
+ 400 + fffffc00 and                     ( align .int on a 400 byte boundary )
+ dup        integer .int        intsize + ( ram space for rom ints and 0ints )
+   ( make sure whole token table is in the same 64k hunk )
+ 10000 over 0ffff and - dup #ramtokens 4 * < and +
+  dup       integer .tb         #ramtokens 4 * +        ( table, 4 bytes/token )
+             integer .endtable          ( the end of the ram token table )
+
+ .tb ffff and 4 / .tb ffff0000 and + integer .tbl
+( a special integer value for the tiers to use to get into the tokens)
+
+
+rp0 astack - integer largestacksize             ( this is the amount of room )
+                                                ( from REAL end of screen to )
+                                                ( start of return stack )
+
+( NOTE: if the astack is moved, the above definition MUST be changed )
+
+( all comments for these integers are in the target source)
+( control/format array )
+
+00 integer %pg
+04 integer %pgl
+08 integer %wr
+0c integer %ln
+10 integer %lnl
+12 integer %spr
+
+( format variables )
+
+14 integer %lsp
+15 integer %left
+16 integer %wide
+17 integer %indent
+18 integer %iwide
+19 integer %just
+1a integer %tabs
+
+( document formats )
+
+2e integer %long
+30 integer %above
+31 integer %below
+32 integer %lock
+34 integer %ipage
+36 integer %iprint
+
+
+%pg      #ctrl + integer #pg
+%pgl     #ctrl + integer #pgl
+%wr      #ctrl + integer #wr
+%ln      #ctrl + integer #ln
+%lnl     #ctrl + integer #lnl
+%spr     #ctrl + integer #spr
+
+( format variables )
+
+%lsp        #ctrl + integer #lsp
+%oldlsp     #ctrl + integer #oldlsp
+%left       #ctrl + integer #left
+%wide       #ctrl + integer #wide
+%indent     #ctrl + integer #indent
+%iwide      #ctrl + integer #iwide
+%just       #ctrl + integer #just
+%tabs       #ctrl + integer #tabs
+
+( document formats )
+
+%long    #ctrl + integer #long
+%above      #ctrl + integer #above
+%below      #ctrl + integer #below
+%lock    #ctrl + integer #lock
+%ipage      #ctrl + integer #ipage
+%iprint     #ctrl + integer #iprint
+
+0 integer diskboc               ( addr locating boc on disk image)
+0 integer drive                 ( saved drive type)
+ramend integer endtext          ( addr of byte just past absolute eot)
+0 integer disktext              ( start of text area on disk)
+( used to during creation of ruler area )
+0 integer goldbytes
+0 integer #goldenbytes
+0 integer indichars
+0 integer modechars
+0 integer #goldenmodes
+0 integer gaugepos
+
+( scan line of beginning of ruler area )
+lines/screen scans/image * integer rulerstart
+
+2 integer ruleredge             ( 'unusable' character at left edge )
+
+( Globals & constants for 'disp' )
+0 integer invbit
+1 integer boldbit
+2 integer ulinebit
+3 integer dlinebit
+4 integer stopbit
+5 drop
+6 drop
+7 integer smallbit
+
+99 integer dotted               ( pattern for dotted underline )
+
+01 integer $inv                 ( display mod bit for inverse )
+02 integer $bold                ( display mod bit for bold font )
+04 integer $uln                 ( display mod bit for underline )
+08 integer $dln                 ( display mod bit for dotted underline )
+10 integer $end                 ( last display character in line )
+80 integer $half                ( display mod bit for half-wide char )
+
+0b integer ds                   ( the break characters )
+0c integer pb
+0f integer mpb                  ( Miyazaki page break - selected form of pb )
+0d integer rtn
+09 integer tb
+1a integer phone1               ( new chars in the phont )
+1b integer phone2
+20 integer spc
+
+2e integer dot
+
+( text command tokens )
+e0 integer &skip
+e2 integer &fmt
+e4 integer &calc
+e5 integer &lockedcalc
+e8 integer &attr                ( used in arithmetic code words )
+ec integer &dln                 ( used in arithmetic code words )
+
+af integer &lastasc
+bf integer &lastchr
+c0 integer &firstacc
+cf integer &lastacc
+e0 integer &firstcmd
+ef integer &lastcmd
+f0 integer &firsthid
+
+01 integer pg#minus             ( "-" sign for page numbers)
+07 integer lok                  ( char that is the locked text border )
+08 integer tab0                 ( a pseudo '-' part of a displayed tab )
+09 integer tab1                 ( a pseudo-arrowhead in tab display )   
+0a integer markbl               ( used in build only, as a space char )
+17 integer locktop              ( top of locked document )
+18 integer lockend              ( end of locked document )
+19 integer lockbar              ( frame for locked text )
+1c integer tabspace             ( blank indicating an unselected tab in lbuff)
+1d integer  invprm              ( display char for highlighted perm space)
+93 integer permspc              ( a 'permanent' [non-break] space )
+aa integer overspace            ( overstrike space [to hold plain accents] )
+e0 integer erase                ( the erase key )
+e1 integer undo                 ( the undo key )
+
+( target compiler \integers                     tlh84)
+
+0 integer \"            0 integer \leave
+0 integer \abort"       0 integer \0leave
+0 integer \bran         0 integer \leavel
+0 integer \0bran        0 integer \0leavel
+0 integer \branl        0 integer \local
+0 integer \0branl       0 integer \locals
+0 integer \do           0 integer \type
+0 integer \loop         0 integer \loc0
+0 integer \+loop        0 integer \loc1
+0 integer \exit         0 integer \;
+0 integer \exitlp       0 integer \;lp
+0 integer \voctok       0 integer \int
+0 integer \blit
+0 integer \wlit
+0 integer \lit
+
+( token of first and last int  )
+ 0 integer .inttok      0 integer .intend
+
+ 0 integer .$start      0 integer .$end         ( rom string end points )
+ 0 integer .1st$tok     0 integer .last$tok     ( rom string tokens )
+
+( vocabulary image constants )
+ 0 integer .vocimage 0 integer .voclen
+
+( integers to contain entry points for subroutines, etc.)
+ 0 integer .move
+ 0 integer .adjust      0 integer nzexec
+ 0 integer .coldip
+ 0 integer .level1      0 integer .level7       0 integer .trap0
+ 0 integer .warmip      0 integer .curtok       0 integer .staddr
+ 0 integer .<restore>
+ 0 integer restart.err
+
+( Turning all these lethal "words" into frags )
+ 0 integer crctable
+ 0 integer iai-trk
+ 0 integer id-trk
+ 0 integer .<seek>
+ 0 integer .<step>
+ 0 integer <wsync>
+ 0 integer <wbyte>
+ 0 integer <rbyte>
+ 0 integer <wdata>
+ 0 integer <wtrack>
+ 0 integer <rdata>
+ 0 integer <rheader>
+ 0 integer <vdata>
+ 0 integer ~wimage
+ 0 integer ~rimage
+ 0 integer ~vimage
+ 0 integer ~writeid
+
+( send and receive frags )
+ 0 integer get4      ( Holds address of 4 byte receiving frag)
+ 0 integer get1      ( Holds address of one byte receiving frag)
+
+( diagnostic entrance points)
+ 0 integer .<save>      0 integer .excpvect
+
+( integers to contain entry points for internal routines)
+ 0 integer .nest        0 integer intnextaddr
+ 0 integer .ramint
+
+( Now for the 68000 assembler: asm68)
+
+( vl) vocabulary asm68  addto asm68  asm68
+
+         10 integer  #lbls      ( maximum # of labels)
+  #lbls 4 * array    lbls       ( data array for labels)
+         0  integer  asm68warn  ( assembler warning message flag
+                                          rest thy weary mouth ... )
+         0  integer  asm68kill  ( the assembler abort flag)
+         80 integer  <size>     ( operand size )
+         0  integer  smode      ( source addressing mode)
+         0  integer  sreg       ( source register)
+         0  integer  sxtra      ( extra source data)
+         0  integer  dmode      ( destination addressing mode)
+         0  integer  dreg       ( destination register)
+         0  integer  dxtra      ( extra destination data)
+         0  integer  quickop    ( holds specific 'quick' opcode)
+         0  integer  immedop    ( holds specific 'immediate' opcode)
+         0  integer  addrop     ( holds specific 'address' opcode)
+         0  integer  normalop   ( holds specific add or subtract opcode)
+         0  integer  iccrop     ( holds specific 'ccr' opcode)
+         0  integer  isrop      ( holds specific 'sr' opcode)
+         -9 integer  usp        ( User Stack Pointer indicator)
+         -a integer  sr         ( Status Register indicator)
+         -b integer  ccr        ( Condition Code Register indicator)
+        0   integer  tr         ( Condition Code for 'true')
+      100   integer  nt         ( Condition Code for 'not true or false')
+      200   integer  hi         ( Condition Code for 'high')
+      300   integer  ls         ( Condition Code for 'low or same')
+      400   integer  nc         ( Condition Code for 'no carry or carry clear')
+      500   integer  cs         ( Condition Code for 'carry set')
+      600   integer  ne         ( Condition Code for 'not equal')
+      700   integer  eq         ( Condition Code for 'equal')
+      800   integer  nv         ( Condition Code for 'no overflow or overflow
+                                clear')
+      900   integer  vs         ( Condition Code for 'overflow set')
+      a00   integer  pl         ( Condition Code for 'plus')
+      b00   integer  mi         ( Condition Code for 'minus')
+      c00   integer  ge         ( Condition Code for 'greater or equal')
+      d00   integer  lt         ( Condition Code for 'less than')
+      e00   integer  gt         ( Condition Code for 'greater than')
+      f00   integer  le         ( Condition Code for 'less or equal')
+
+: ccode ( cc -- cc | Test to see if cc is a condition code)
+dup 8 shr  0 f inrange not  over f0ff and  or abort" needs condition code" ;
+
+: ?dreg ( n -1 -- n | Check for data register, 0<=n<=7)
+-1 <>  over 0 7 inrange not  or  abort" data register necessary using" ;
+
+: ?areg ( n -2 -- n | Check for address register, 0<=n<=7)
+-2 <>  over 0 7 inrange not  or  abort" address register necessary using" ;
+
+: ?big ( a b -- | Abort if a not in the range 0<=a<b)
+0 swap 1- inrange not abort" operand out of range" ;
+
+: ?lit ( 4 -8 -- | Abort if stack indicators not exactly as for immediate data)
+-8 <> swap 4 <> or abort" source not literal" ;
+
+: ?byte ( n -- b | Check for byte sized n)
+dup -80 ff inrange not abort" argument not byte sized" ;
+
+: ?word ( n -- w | Check for word sized n)
+dup -8000 ffff inrange not abort" argument not word sized" ;
+
+: ?sbyte ( n -- b | check for signed byte range and mask to byte size)
+dup -80 7f inrange not abort" argument not signed byte range"  ff and ;
+
+: ?sword ( n -- w | check for signed word range and mask to word size)
+dup -8000 7fff inrange not abort" argument not signed word range" ffff and ;
+
+: dataalterable ( -- | Abort if the destination is not 'data alterable')
+dmode 0 7 inrange  dreg 0 7 inrange or not  dmode 7 =  dreg 1 > and  or
+   dmode 1 = or  abort" destination addressing mode not 'data alterable'" ;
+
+: alterable ( -- | Abort if the destination is not 'alterable')
+dmode 0 7 inrange  dreg 0 7 inrange or not  dmode 7 =  dreg 1 > and  or
+   abort" destination addressing mode not 'alterable'" ;
+
+: warncommon ( -- | Common code in warnings )
+ space  newest 2+ dup 1+ swap c@ 1f and type    ( display name )
+ ."  at" here target - .  asm68kill abort" assembly aborted" ;
+
+: .b ( -- | Set size for byte sized operation)
+0 <size> to ;
+
+: .w ( -- | Set size for word sized operation)
+40 <size> to ;
+
+: .l ( -- | Set size for long sized operation)
+80 <size> to ;
+
+: size ( --> s | Check and stack the operation size)
+<size> dup 0= over 40 = or over 80 = or not abort" operation size error" ;
+
+: d0 ( -- 0 -1 | Set the addressing mode to data register 0) 
+0 -1 ;
+
+: d1 ( -- 1 -1 | Set the addressing mode to data register 1)
+1 -1 ;
+
+: d2 ( -- 2 -1 | Set the addressing mode to data register 2)
+2 -1 ;
+
+: d3 ( -- 3 -1 | Set the addressing mode to data register 3)
+3 -1 ;
+
+: d4 ( -- 4 -1 | Set the addressing mode to data register 4)
+4 -1 ;
+
+: d5 ( -- 5 -1 | Set the addressing mode to data register 5)
+5 -1 ;
+
+: d6 ( -- 6 -1 | Set the addressing mode to data register 6)
+6 -1 ;
+
+: d7 ( -- 7 -1 | Set the addressing mode to data register 7)
+7 -1 ;
+
+: a0 ( -- 0 -2 | Set the addressing mode to address register 0)
+0 -2 ;
+
+: a1 ( -- 1 -2 | Set the addressing mode to address register 1)
+1 -2 ;
+
+: a2 ( -- 2 -2 | Set the addressing mode to address register 2)
+2 -2 ;
+
+: a3 ( -- 3 -2 | Set the addressing mode to address register 3)
+3 -2 ;
+
+: a4 ( -- 4 -2 | Set the addressing mode to address register 4)
+4 -2 ;
+
+: a5 ( -- 5 -2 | Set the addressing mode to address register 5)
+5 -2 ;
+
+: a6 ( -- 6 -2 | Set the addressing mode to address register 6)
+6 -2 ;
+
+: a7 ( -- 7 -2 | Set the addressing mode to address register 7)
+7 -2 ;
+
+: bp ( -- 7 -1 | Set addressing mode to the data register used to hold the base 
+address of the token table)
+d7 ;
+
+: iv ( -- 6 -1 | Set addressing mode to the data register used to hold the 
+address of the value of the integer that is current)
+d6 ;
+
+: ct ( -- 4 -1 | Set addressing mode to the data register used to hold the 
+address of the current token in the token table)
+d4 ;
+
+: sa ( -- 5 -1 | Set addressing mode to the data register used to hold the 
+zeroth nesting starting address)
+d5 ;
+
+: sp ( -- 7 -2 | Set addressing mode to the address register used for the data 
+stack pointer)
+a7 ;
+
+: rp ( -- 6 -2 | Set addressing mode to the address register used for the 
+return stack pointer)
+a6 ;
+
+: ip ( -- 5 -2 | Set addressing mode to the address register used for the 
+interpretation pointer)
+a5 ;
+
+: nx ( -- 4 -2 | Set addressing mode to the address register used for the 
+pointer to next)
+a4 ;
+
+: np ( -- 3 -2 | Set addressing mode to the address register used for the 
+pointer to nest)
+a3 ;
+
+: vp ( -- 2 -2 | Set addressing mode to the address register used for the 
+pointer to the code for integer)
+a2 ;
+
+: ) ( r -2 -- r -3 | Set adressing mode to Address Register Indirect)
+?areg -3 ;
+
+: )+ ( r -2 -- r -4 | Set addressing mode to Address Register Indirect With 
+Postincrement)
+?areg -4 ;
+
+: -) ( r -2 -- r -5 | Set addressing mode to Address Register Indirect With 
+Predecrement)
+?areg -5 ;
+
+: pc)d ( d -- d 2 -8 | Set addressing mode to Program Counter With Displacement)
+?sword 2 -8 ;
+
+: )d ( r -2 d -- d r -6 | Set addressing mode to Address Register Indirect With 
+Displacement)
+?sword  rot rot ?areg -6 ;
+
+: pc,xw)d ( r -1or-2 d -- xword 3 -8 | Set addressing mode to Program Counter 
+With Word Index and byte Displacement)
+?sbyte >r ( save displacement)
+over 0 7 inrange  over -2 -1 inrange  and not           ( test for any register)
+abort" needs register"   1+ 8000 and  swap 0c shl or    ( start extension word)
+r> or ( put in the displacement)  3 -8 ( stack indicators) ;
+
+: pc,xl)d ( r -1or-2 d -- xword 3 -8 | Set addressing mode to Program Counter 
+With Long Index and byte Displacement)
+pc,xw)d  rot 800 or  rot rot ;
+
+: xw)d ( r -2 r -1or-2 d -- xword r -7 | Set addressing mode to Address 
+Register Indirect With Word Index and byte Displacement)
+pc,xw)d  2drop >r ?areg r> swap -7 ;
+
+: xl)d ( r -2 r -1or-2 d -- xword r -7 | Set addressing mode to Address 
+Register Indirect With Long Index and byte Displacement)
+xw)d  rot 800 or  rot rot ;
+
+: #n ( -- 4 -8 | Set the addressing mode to Immediate)
+4 -8 ;
+
+: begin, ( -> addr 1 | note current address, set security and set default 
+operand length of long)
+here 1  .l ;
+
+: if, ( cc -- addr 2 | assemble a bcc, note address, make security)
+ccode 100 xor ( invert cc logic)  6000 or w,  begin, 1+ ;
+
+: lif, ( cc -- addr 2 | assemble a bcc and a nop, note address, make security)
+if, 4e71 w, ( a nop opcode, tested for later & safe to execute too) ;
+
+: <th> ( addr 2 -> | Resolve forward bcc, long or short)
+2 ?pairs  here over -  dup 0= abort" empty conditional"  swap over
+-80 7f inrange  if 1- c!
+               else dup w@ 4e71 <> abort" use long"  swap ?sword swap w!
+               then .l ;
+
+: then, ( Resolve if, or lif,.  Remove and replace any while, or lwhile, 
+markers necessary.)
+0 >r ( stack marker)
+begin dup 3 =                   ( is there a while, marker on the stack?)
+   while >r >r
+again <th>                      ( resolve the if, or lif,)
+begin r> ( is the top of the return stack non-zero?) ?dup
+   while ( it is, replace the while, markers onto the parameter stack) r>
+again ;
+
+: else, ( addr 2 ... -- addr 2 ... | Resolve if, or lif, and assemble an 
+unconditional if,.  Remove and replace any while, or lwhile, markers necessary.)
+0 >r                            ( stack marker)
+begin dup 3 =                   ( is there a while, marker on the stack?)
+   while ( while there is, stash it and the address on the return stack) >r >r
+again  2 ?pairs  nt if,  rot swap <th> 2 ( resolve the old if, or lif, setup
+                                        stack for this assembled short bcc)
+begin r> ( is the top of the return stack non-zero?) ?dup
+   while ( it is, replace the while, markers onto the parameter stack) r>
+again ;
+
+: lelse, ( addr 2 ... -- addr 2 ... | Resolve if, or lif, and assemble an 
+unconditional if,.  Remove and replace any while, or lwhile, markers necessary.)
+0 >r                            ( stack marker)
+begin dup 3 =                   ( is there a while, marker on the stack?)
+   while ( while there is, stash it and the address on the return stack) >r >r
+again 2 ?pairs  nt lif,  rot swap <th> 2 ( resolve the old if, or lif, setup
+                                        stack for this assembled long bcc)
+begin r> ( is the top of the return stack non-zero?) ?dup
+   while ( it is, replace the while, markers onto the parameter stack) r>
+again ;
+
+: until, ( addr 1 ... cc -- | Resolve begin, and multiple while,s or lwhile,s)
+ccode  100 xor ( invert cc logic) 6000 or w, ( fabricate and assemble branch)
+0 >r                            ( stack marker)
+begin dup 3 =                   ( is there a while, marker on the stack?)
+   while drop >r ( while there is, drop flag and stash address on return stack)
+again 1 ?pairs ( check for the begin,) here - ( compute displacement)
+dup -80 7f inrange              ( is the displacement byte sized)
+  if ( short displacement) here 1- c!
+else ( long displacement) ?sword w,
+then
+begin r> ( is the top of the return stack non-zero?) ?dup
+   while ( while it is, resolve flagless while,s) 2 ( fake flag) <th>
+again ;
+
+
+: again, ( addr 1 ... -- | Assemble a branchback always, resolving begins, and 
+multiple while,s or lwhile,s)
+nt until, ;
+
+: while, ( cc -- addr 3 | Assemble a conditional short forward branch)
+if, 1+ ;
+
+: lwhile, ( cc -- addr 3 | Assemble a conditional long forward branch)
+lif, 1+ ;
+
+: -until, ( addr 1 r -1 cc -- | Assemble dbcc using data reg r and cc to addr)
+ccode 50c8 or  rot rot ?dreg  or ( fabricate opcode) w,
+0 >r                            ( stack marker )
+begin dup 3 =                   ( is there a while, marker on the stack? )
+   while drop >r     ( while there is, drop flag and stash addr on return stack)
+again
+1 ?pairs here -  ?sword ( compute & check displacement) w,
+begin r> ( is the top of the return stack non-zero? ) ?dup
+   while ( while it is, resolve flagless while,s ) 2 ( flake flag ) <th>
+again ;
+
+: leave, ( -- addr 3 | Assemble an unconditional short branch)
+nt while, ;
+
+: lleave, ( -- addr 3 | Assemble an unconditional long branch)
+nt lwhile, ;
+
+: getcom ( x -- x 0 7 | y -- y 1 7 | z -- abs{z}-1 | Common code to both getsrc 
+and getdst.  0<=x<=7fff, 8000<=y<=fffffff4, -b<=z<=-1)
+dup fffffff4 u<
+   if ( it is an address) dup 8000 u<  1+ -8
+else ( it is an addressing mode, which?) dup -8 u<
+      if ( a usp, sr or ccr mode) 0 0 rot ( fix it for parent word)
+   then
+then not ;
+
+: getsrc ( n -- | # c -- | x # c -- | Get source operands ...                   
+If 0<=n<=7fff, the mode is 7 and the register is 0.                             
+If 8000<=n<=fffffff4, the mode is 7 but the register is 1.                      
+If -5<=c<=-1 the mode is 4 to 0 and the register is #.                  If 
+-8<=c<=-6 the mode is 7 to 5, the register is # and x goes to extra     If 
+-b<=n<=-9 the mode is a to 8 and the register and extra word are zeroed)
+getcom smode to sreg to  smode 4 > if sxtra to then ;
+
+: getdst ( n -- | # c -- | x # c -- | Get destination operands ...              
+If 0<=n<=7fff, the mode is 7 and the register is 0.                             
+If 8000<=n<=fffffff4, the mode is 7 but the register is 1.                      
+If -5<=c<=-1 the mode is 4 to 0 and the register is #.                  If 
+-8<=c<=-6, the mode is 7 to 5, the register is # and x goes to extra    If 
+-b<=n<=-9 the mode is a to 8 and the register and extra word are zeroed)
+getcom dmode to dreg to  dmode 4 > if dxtra to then ;
+
+: xsrc ( -- | Lay down the extra source data if source mode is 5, 6 or 7)
+smode 4 > ( modes of 5, 6 and 7 have extra data)
+if sxtra             ( stack the extra data.  How wide is it?)
+   sreg 4 =  size 80 = and  sreg 1 =  or  smode 7 = and
+   if ( mode=7 and reg=1 or mode=7 and reg=4 and size=80, it is 32 bits wide) ,
+ else ( otherwise it is 16 bits wide) w,
+ then
+then ;
+
+: xdst ( -- | Lay down the extra destination data if destination mode is 5, 6 
+or 7)
+dmode 4 > ( modes of 5, 6 and 7 have extra data)
+   if dxtra dreg 4 =  size 80 = and  dreg 1 =  or  dmode 7 = and
+      if ( mode=7 and reg=1 or mode=7 and reg=4 and size=80, then do 32 bits) ,
+   else ( otherwise it is 16 bits wide) w,
+   then
+then ;
+
+: <src> ( n -- n' | Or the source mode and source register into n)
+smode 3 shl sreg or or ;
+
+: <dst> ( n -- n' | Or the destination mode and destination register into n)
+dmode 3 shl dreg or or ;
+
+: <ea> ( ea g -- o | Make opcode o from an effective address ea and a generic 
+opcode g)
+>r getdst r> <dst> ;
+
+: dst ( n -- | Put the destination ea into n and compile n and any extra words)
+<dst> w, xdst ;
+
+: rte, ( -- | Assemble a Return from Exception instruction)
+4e73 w, ;
+
+: rtr, ( -- | Assemble a Return and Restore Condition Codes instruction)
+4e77 w, ;
+
+: rts, ( -- | Assemble a Return from Subroutine instruction)
+4e75 w, ;
+
+: nop, ( -- | Assemble a No Operation instruction)
+4e71 w, ;
+
+: trapv, ( -- | Assemble a Trap on Overflow instruction)
+4e76 w, ;
+
+: reset, ( -- | Assemble a Reset instruction)
+4e70 w, ;
+
+: shift ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a shift or 
+rotate instruction.  The stack diagrams represent a generic opcode g and:    Dx 
+Dy, n #n Dy or some effective addr. that is not Dr, Ar, PC or immediate.)
+>r dup -2 = abort" can't shift address registers"
+dup -1 <>
+   if size 40 <> abort" must be word"
+      getdst  dreg 0 1 inrange not dmode 7 = and  dmode 2 7 inrange not or
+      abort" incorrect addressing mode for shifting"
+      r>  dup f100 and 0c0 or swap 18 and 6 shl or dst
+else drop dup 8 ?big >r 2dup -8 = swap 4 = and
+      if drop drop dup 1- 8 ?big 7 and
+   else ?dreg r> 20 or >r
+   then  9 shl r> or r> or size or w,
+then  .l ;
+
+: asr,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble an Arithmetic 
+Shift Right instruction, see  shift )
+e000 shift ;
+
+: asl,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble an Arithmetic 
+Shift Left instruction, see  shift )
+e100 shift ;
+
+: lsr,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Logical 
+Right Shift instruction, see  shift )
+e008 shift ;
+
+: lsl,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Logical Left 
+Shift instruction, see  shift )
+e108 shift ;
+
+: roxr, ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Rotate Right 
+With Extend instruction, see  shift )
+e010 shift ;
+
+: roxl, ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Rotate Left 
+With Extend instruction, see  shift )
+e110 shift ;
+
+: ror,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Rotate Right 
+instruction, see  shift )
+e018 shift ;
+
+: rol,  ( r -1 r -1 g -- | n 4 -8 r -1 g -- | ea g -- | Assemble a Rotate Left 
+instruction, see  shift )
+e118 shift ;
+
+: sz/ea ( ea g -- | Assemble a data alterable destination of any size 
+instruction from the effective address ea and the generic opcode g)
+<ea> dataalterable size or w, xdst .l ;
+
+: neg, ( Assemble a Negate instruction on ea, see sz/ea)
+4400 sz/ea ;
+
+: negx, ( ea -- | Assemble a Negate with Extend instruction on ea, see sz/ea)
+4000 sz/ea ;
+
+: not, ( Assemble a Logical Complement instruction on ea, see sz/ea)
+4600 sz/ea ;
+
+: tst, ( Assemble a Test instruction on ea, see sz/ea)
+4a00 sz/ea ;
+
+: r/ea ( ea r -1 n -- | Assemble basic opcode n with data register r and 
+effective address ea.  The ea can be one, two or three #s)
+rot rot >r >r <ea>  dmode 1 = abort" can't be Ar addressing mode"
+size 40 <> abort" must be word"  r> r> ?dreg 9 shl  or w,  xdst  .l ;
+
+: mulu, ( ea r -1 -- | Assemble an Unsigned Multiply instruction)
+c0c0 r/ea ;
+
+: muls, ( ea r -1 -- | Assemble a Signed Multiply instruction)
+c1c0 r/ea ;
+
+: divu, ( ea r -1 -- | Assemble an Unsigned Divide instruction)
+80c0 r/ea ;
+
+: divs, ( ea r -1 -- | Assemble a Signed Divide instruction)
+81c0 r/ea ;
+
+: chk, ( ea r -1 -- | Assemble a Check Register Against Bounds instruction, the 
+given effective address holds the upper bound word)
+4180 r/ea ;
+
+: \ea ( ea g -- | Assemble a jsr,, jmp, or pea, instruction using the generic 
+opcode g and the given effective address)
+<ea>  dmode 0 1 inrange  dmode 3 4 inrange or  dmode 7 = dreg 4 = and or
+abort" must be control addressing mode"  w,  xdst .l ;
+
+: jsr, ( ea -- | Assemble a Jump to Subroutine instruction to the given 
+effective address)
+4e80 \ea ;
+
+: jmp, ( ea -- | Assemble a Jump instruction to the given effective address)
+4ec0 \ea ;
+
+: pea, ( ea -- | Assemble a Push Effective Address instruction pushing the 
+given effective address)
+size 80 <> abort" must be long"  4840 \ea ;
+
+: \\ea ( ea g -- | Assemble an nbcd, or tas, instruction using the generic 
+opcode g and the given effective address)
+<ea>  dataalterable  size 0 <> abort" must be byte"  w,  xdst .l ;
+
+: nbcd, ( ea -- | Assemble a Negate Decimal with Extend instruction to the 
+given effective address)
+4800 \ea ; ( datalt, .b only)
+
+: tas, ( ea -- | Assemble a Test and Set an Operand instruction to the given 
+effective address)
+4ac0 \ea ; ( datalt, .b only)
+
+: immediate ( -- | Assemble an immediate using the generic opcode in immedop)
+dataalterable  immedop  dmode 3 shl or dreg or size or w,  sxtra  size 80 =
+   if ( long size) ,
+ else size 40 =
+      if ( word size) ?word
+    else ( byte size) ?byte
+    then w,
+ then xdst ;
+
+: quick ( -- | Assemble an add or subtract 'quick' instruction using the 
+generic opcode in quickop)
+alterable  dmode 1 = size 0= and  abort" can't be byte"
+sxtra 8 =  if ( zero means eight) sxtra off  then
+quickop sxtra 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst ;
+
+: address ( -- | Assemble a 'to address register' add or subtract opcode using 
+the generic opcode in addrop)
+size 0= abort" can't be byte"
+addrop dreg 9 shl or  smode 3 shl or  sreg or  size 1 shl or  w,  xsrc ;
+
+: normal ( -- | Assemble a normal add,, subtract,, and,, or,, or eor, 
+instruction using the generic opcode in normalop)
+normalop dup b100 =
+   if ( eor,) dataalterable  smode 0 <> abort" source must be data register"
+      sreg 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst
+else ( add,, sub,, and,, or or,) dmode 0=
+      if ( assemble <ea> to Dn) 0000 ( bit 8 is a 0 for this one)
+         smode 1 =  size 0= and  abort" can't be byte"
+         or  dreg 9 shl or  smode 3 shl or  sreg or  size or  w,  xsrc
+    else ( assemble Dn to <ea>) 0100 ( bit 8 is a 1 for this one)
+         alterable  smode 0 <> abort" source must be data register"
+         or  sreg 9 shl or  dmode 3 shl or  dreg or  size or  w,  xdst
+   then
+then ;
+
+: fimmediate ( n 4 -8 ea -- | Force assembly of an add or subtract immediate 
+instruction)
+getdst getsrc  smode 7 <> sreg 4 <> or abort" source not immediate"
+sxtra 1 8 inrange  asm68warn and
+   if cr ." You may be able to use an add or subtract quick instruction after"  
+   warncommon
+then immediate .l ;
+
+: <xt> ( r -1or-5 r -1or-5 g -- | Assemble the generic opcode g into opcode 
+with data register to data register or predecremented address register memory 
+to memory addressing modes only)
+>r rot over <> >r dup -1 <> over -5 <> and r> or abort" incorrect addressing 
+mode"  -1 =  if 0  else 8  then swap 9 shl or or r> or ;
+
+: addsub ( ea r -1 -- | r -1 ea -- | ea r -2 -- | n 4 -8 ea -- | Assemble one 
+of the four add or subtract opcodes depending on the stack arguments.  See add, 
+or sub,)
+getdst getsrc  smode 7 = sreg 4 = and
+   if ( immediate of some kind)  sxtra 1 8 inrange
+      if ( a quick candidate) quick
+   else ( immediate or address) dmode 1 =
+         if address
+      else immediate
+      then
+   then
+else ( not an immediate) dmode 1 =
+      if address
+   else normal
+   then
+then .l ;
+
+: andoreor ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of the four 
+and, or, or eor, instructions.  See and, or, or eor,)
+getdst getsrc  smode 7 = sreg 4 = and
+   if ( an immediate of some kind) dmode 9 =
+      if ( to sr) isrop w, sxtra ?word w,
+    else dmode a =
+         if ( to ccr) iccrop w, sxtra ?byte w,
+      else immediate
+      then
+   then
+else smode 1 = abort" source can't be address register"
+      normal
+then .l ;
+
+: add, ( ea r -1 -- | ea r -2 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of 
+the four add instructions depending on the stack arguments.  For the preceding 
+stack diagrams, the opcodes are, in order: add, & adda, & add, & adda, addi, or 
+addq,)
+d000 normalop to  d0c0 addrop to  0600 immedop to  5000 quickop to  addsub ;
+
+: addq, add, ; : adda, add, ;
+
+: addi, ( n 4 -8 ea -- | Force assembly of an add immediate instruction)
+0600 immedop to  fimmediate ;
+
+: abcd, ( r -1or-5 r -1or-5 -- | Assemble the Add Decimal with Extend opcode)
+c100 <xt> w, .l ;
+
+: addx, ( r -1or-5 r -1or-5 -- | Assemble the Add Extended opcode)
+d100 <xt> size or w, .l ;
+
+: sub, ( ea r -1 -- | ea r -2 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of 
+the four subtract instructions depending on the stack arguments.  For the 
+preceding stack diagrams, the opcodes are, in order: sub, & suba, & sub, & 
+suba, subi, or subq,)
+9000 normalop to  90c0 addrop to  0400 immedop to  5100 quickop to  addsub ;
+
+: subq, sub, ;  : suba, sub, ;
+
+: subi, ( n 4 -8 ea -- | Force assembly of an subtract immediate instruction)
+0400 immedop to  fimmediate ;
+
+: sbcd, ( r -1or-5 r -1or-5 -- | Assemble the Subtract Decimal with Extend 
+opcode)
+8100 <xt> w, .l ;
+
+: subx, ( r -1or-5 r -1or-5 -- | Assemble the Subtract Extended opcode)
+9100 <xt> size or w, .l ;
+
+: and, ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of the four and 
+instructions depending on the stack arguments.  For the preceding stack 
+diagrams, the opcodes are: and, & and, & andi, or and to ccr, or and to sr)
+c000 normalop to  0200 immedop to  023c iccrop to  027c isrop to  andoreor ;
+
+: andi, and, ;
+
+: or, ( ea r -1 -- | r -1 ea -- | n 4 -8 ea -- | Assemble one of the four or 
+instructions depending on the stack arguments.  For the preceding stack 
+diagrams, the opcodes are: or, & or, & ori, or or to ccr, or or to sr)
+8000 normalop to  0000 immedop to  003c iccrop to  007c isrop to  andoreor ;
+
+: ori, or, ;
+
+: eor, ( r -1 ea -- | n 4 -8 ea -- | Assemble one of the four exclusive or 
+instructions depending on the stack arguments.  For the preceding stack 
+diagrams, the opcodes are: eor, & eori, or eor to ccr, or eor to sr)
+b100 normalop to  0a00 immedop to  0a3c iccrop to  0a7c isrop to  andoreor ;
+
+: eori,  eor, ;
+
+: <cmpa> ( -- | Assemble a Compare Address instruction, see  cmp, )
+size 0= abort" can't be byte sized"
+dreg 9 shl size 80 and 2* c0 + or b000 or <src> w, xsrc ;
+
+: <cmpi> ( -- | Assemble a Compare Immediate instruction, see  cmp, )
+0c00 size or  dmode 7 = dreg 1 > and  dmode 1 = or abort" not data alterable"
+dmode 3 shl or  dreg or w, ( finished with opcode)
+sxtra ( stack the immediate data) size 80 =
+   if ( 32 bit) ,
+else size 40 =
+      if ( 16 bit) ?word
+   else ( 8 bit) ?byte
+   then w,
+then xdst ;
+
+: <cmpm> ( -- | Assemble a Compare Memory instruction, see  cmp, )
+smode 3 <> abort" addressing mode must be postincrement"
+b108  dreg 9 shl or  size or  sreg or w, ;
+
+: <cmp> ( -- | Assemble a Compare instruction, see  cmp, )
+b000  dreg 9 shl or  size or  <src> w,  xsrc ;
+
+: cmp, ( ea r -1 -- | ea r -2 -- | n 4 -8 ea -- | r -4 r -4 -- | Assemble one 
+of the four 68000 compare opcodes depending on the stack arguments.  For the 
+preceding stack diagrams the opcodes are, in order: cmp, cmpa, cmpi, and cmpm,)
+getdst getsrc ( get the destination and source information)
+dmode 1 =
+   if ( can only be cmpa,) <cmpa>
+else smode 7 = sreg 4 = and
+      if ( immediate source data, must be cmpi,) <cmpi>
+   else dmode 3 =
+         if ( cmpm,) <cmpm>
+      else ( cmp,) <cmp>
+      then
+   then
+then .l ;
+
+: cmpa, cmp, ; : cmpi, cmp, ; : cmpm, cmp, ;
+
+: clr, ( ea -- | Assemble a Clear an Operand instruction to the effective 
+address)
+getdst  dataalterable  dmode 0=  size 80 = and  asm68warn and
+   if cr ." A '0 #n Dr moveq,' is faster than 'Dr clr,' after" warncommon
+then 4200  dmode 3 shl or  dreg or  size or  w,  xdst .l ;
+
+: bit ( r -1 ea g -- | n 4 -8 ea g -- | Assemble one of the 'bit' instructions 
+using the generic opcode g.  The stack diagrams are for: 'Dn ea' and 'n #n ea')
+>r getdst getsrc
+smode 7 = sreg 4 = and not  smode 0 <> and  abort" source must be Dr or #n"
+r@ ( test generic opcode) 0=
+   if ( btst) dmode 1 = abort" can't use address register"  smode 7 =
+      if ( static) dmode 7 = dreg 4 = and abort" can't be immediate"  then
+else ( others) dataalterable
+then dmode 0=
+   if ( Dr destination) size 80 <> abort" must be long"
+else ( others) size 0= not abort" must be byte"
+then r>  smode 0=
+   if ( source is Dr) sreg 9 shl or  100 or  dmode 3 shl or  dreg or  w,
+else ( source is #n) 800 or  dmode 3 shl or  dreg or  w,  sxtra dup 20 ?big w,
+then xdst  .l ;
+
+: bchg, ( r -1 ea -- | n 4 -8 ea -- | Assemble a Test a Bit and Change 
+instruction, see 'bit')
+0040 bit ;
+
+: bclr, ( r -1 ea -- | n 4 -8 ea -- | Assemble a Test a Bit and Clear 
+instruction, see 'bit')
+0080 bit ;
+
+: bset, ( r -1 ea -- | n 4 -8 ea -- | Assemble a Test a Bit and Set 
+instruction, see 'bit')
+00c0 bit ;
+
+: btst, ( r -1 ea -- | n 4 -8 ea -- | Assemble a Test a Bit instruction, see 
+'bit')
+0000 bit ;
+
+: lea, ( dest r -2 -- | Assemble Load Effective Address opcode)
+?areg 9 shl 41c0 or >r  getdst  r> dst .l ;
+
+: link, ( r -2 d -- | Assemble Link and Allocate opcode)
+rot rot ?areg 4e50 or ( opcode) w,  ?sword ( check displacement) w, .l ;
+
+: unlk, ( r -2 -- | Assemble Unlink opcode)
+?areg 4e58 or w, .l ;
+
+: swap, ( r -1 -- | Assemble Swap Register Halves opcode)
+?dreg 4840 or w, .l ;
+
+: ext, ( r -1 -- | Assemble the sign extension opcode, word and long only)
+size 0= abort" can't be byte size"  ?dreg  size 40 - or  4880 or  w, .l ;
+
+: (regs   0 ;
+
+: rev16   10 shl 0 swap
+  10 0 do swap 2/ over 0< if 8000 or then  swap 2* loop  drop ;
+
+: <to/fro>   0 >r
+   begin ?dup while 1+ ff and 1+ swap shl r> or >r again r> ;
+
+: to)   <to/fro> 0 ;     : from)   <to/fro> 400 ;
+
+: movem,   getdst 4880 or size 40 xor 7f and or <dst> w,
+  dmode 4 =  if rev16 here 2- w@ 400 and abort" reg to mem only"
+           then w,  xdst .l ;
+
+: movep, ( disp Ar -6 Dr -1 -- | Dr -1 disp Ar -6 -- | Assemble a Move 
+Peripheral Data instruction, to or from a data register and with this 
+addressing mode only: d(Ar)
+getdst getsrc  dmode 0=
+   if ( must be ea to data register) dreg 0 7 inrange not  smode 5 <> or
+      size 0= or  abort" incorrect addressing mode"
+      0108 dreg 9 shl or  size 40 - or  sreg or w,  xsrc
+else ( must be data register to ea) sreg 0 7 inrange not  smode 0 <> or
+      dmode 5 <> or  size 0= or abort" incorrect addressing mode"
+      0188 sreg 9 shl or  size 40 - or  dreg or w,  xdst
+then ;
+
+: ccr/sr>ea ( -- | ccr or sr to some ea)
+dataalterable size 40 <> abort" must be word"  smode 0a =
+   if ( ccr) 42c0
+else ( sr) 40c0
+then dmode 3 shl or  dreg or  w,  xdst ;
+
+: ea>ccr/sr ( -- | Some ea to ccr or sr)
+smode 1 =  size 40 <> or  abort" source can't be Ar or not word size"
+smode 0a =
+   if ( ccr) 44c0
+else ( sr) 46c0
+then smode 3 shl or  sreg or  w,  xsrc ;
+
+: usp<->Ar ( -- | usp <-> Ar)
+size 80 <> abort" must be long"
+dmode 8 =  if 4e60 sreg  else 4e68 dreg  then or  w, ;
+
+: sdmove ( -- | Move Data from Source to Destination)
+dataalterable  smode 1 = size 0= and abort" can't be byte"
+size 0=
+   if ( byte size is wierd) 1000
+else size 40 =
+      if ( word size is real wierd) 3000
+   else ( size is long) 2000
+   then
+then dreg 9 shl or dmode 6 shl or smode 3 shl or  sreg or  w,  xsrc  xdst ;
+
+: mquick ( -- | Move Quick )
+asm68warn
+   if cr ." You may be able to use a move quick after" warncommon
+then sdmove ( force the assembly of a move immediate instruction)
+( build a moveq after getsrc/getdst: 7000 dreg 9 shl or sxtra ?byte or w,) ;
+
+: moveq, ( b 4 -8 r -1 -- | assemble moveq with signed byte data b)
+?dreg 9 shl 7000 or >r ?lit  ?sbyte  r> or w, .l ;
+
+: maddr ( -- | Move Address)
+size 0= abort" can't be byte"
+size 40 =
+   if ( word size is real wierd) 3040
+else ( size is long) 2040
+then  dreg 9 shl or  smode 3 shl or  sreg or  w,  xsrc ;
+
+: move, ( ea ea  -- | ea r -2 -- | b 4 -8 r -1 -- | -9 r -2 -- | r -2 -9 | ea 
+-a -- | -a ea -- | ea -b -- | -b ea | Assemble one of the Move instructions.  
+The various classes as indicated by the stack diagrams are: move, & movea, & 
+moveq, & move An <-> usp & move ea <-> sr & move ea <-> ccr)
+getdst  getsrc
+smode 0a =  smode 9 = or
+   if ccr/sr>ea
+else dmode 0a =  dmode 9 = or
+      if ea>ccr/sr
+   else smode 8 = dmode 8 = or
+         if usp<->Ar
+      else dmode 0= smode 7 = and  sreg 4 = and sxtra -80 7f inrange and
+            if mquick ( warning only for now)
+         else dmode 1 =
+               if maddr
+            else sdmove
+then then then then then .l ;
+
+: exg,   1+  if swap 1+  if 48 else swap 88  then else swap 1+
+   if 88 else 40  then  then swap 9 shl or or c100 or w, .l ;
+
+: trap,   dup 10 ?big 4e40 or w, ;
+
+: stop,   4e72 w,  ffff0000 and abort" argument too big" w, ;
+
+: set, ( Assemble 'Set According to Condition')
+getdst  ccode 50c0 or  dst .l ;
+
+: rtd, ( displacement -- | Assemble 'Return and Deallocate Parameters')
+4e74 ( opcode) w,  ?sword ( check displacement) w, ;
+
+( labels are: low 24 bits, address; next 8, flag, if defined )
+( integer #lbls holds size)
+: clr  lbls  #lbls 4 *  0 fill ;
+
+( label# -> | Defines a label named label#)
+: :l   dup #lbls ?big 2* 2*  lbls + >r
+   r@ c@  if " redefining label " type  then
+   r@ c@ 0= r@ @ ffffff and 0= 0= and
+ if r@ @ ffffff and 0
+  begin - dup w@ >r here over - 2- over 2+ w@ ffff =
+       if over 2+ w! 0 else dup 80 ?big then  r@ 100 and
+     if drop r@ 4 shr 0f00 and r@ 9 shr 7 and or 50c8 or over w!
+   else r@ 4 shr 0f00 and or 6000 or over w!
+   then r> 0ff and ?dup 0=
+  until  drop
+then here ff000000 or r> !  .l ;
+
+( BRA takes a label and optionally a condition code [puts a 0
+ if none]. if size is .b, forces to short.  if .w, force to long
+ and if .l use which ever is appropriate.)
+( label# cc -> | label# -> | )
+: bra,   dup #lbls <  if 0  then >r  dup
+   #lbls ?big 2* 2*  lbls + >r  r@ c@
+   if r> @ ffffff and here - 2- dup abs 80 < size 40 <> and
+        if 0ff and r> or 6000 or w,
+      else size 0= abort" branch too far" r> 6000 or w, w,  then
+ else  r@ @ ffffff and
+     if here r@ @ ffffff and - dup 100 ?big
+     else 0  then here ffffff and r> !  r> 4 shl f000 and or w,
+     size if -1 w,  then  then .l ;
+: bsr,   nt bra, ;
+
+( DBRA, compiles either the actual instruction or a 32 bit value
+  of |||| ||||  |||| ||||  |||| ||||  |||| ||||
+      CC  REG^  offset     1111 1111  1111 1111
+             L=1 if DBRA, 0 if BRA                             )
+
+( label# dreg -1 cc -> |          )
+: dbra,   swap drop >r  over  #lbls ?big
+                  swap 2* 2*  lbls + >r r@ c@
+   if r> @ ffffff and here - 2- r> 50c8 or rot 7 and or w, w,
+   else r@ @ ffffff and ?dup
+         if here swap - dup 100 ?big  else 0  then
+         here ffffff and r> ! r> 4 shl f000 and or 100 or
+         swap 9 shl e00 and or w, -1 w,
+   then .l ;
+
+( behead #lbls behead <dst>     behead <ea>     behead <src>    behead <th>     
+behead <to/fro>   behead <xt>   behead ?areg    behead ?big     behead ?datalt  
+behead ?dreg   behead ?lit      behead ?r       behead \ea      behead bit      
+behead ?sbyte  behead ?sword    behead dmode    behead dreg     behead dst      
+behead dxtra   behead getcom    behead getdst   behead getsrc   behead imm      
+behead lbls behead quik behead r/ea     behead rev16    behead rop/ea   behead 
+shift behead size behead smode  behead sreg     behead sxtra    behead sz/ea    
+behead uni  behead xdst behead xsrc)
+
+: addr 1 abort"  addr used in code word " ;
+
+: c'   1 abort"  c' used in code word " ;
+
+( vl) deactivate asm68
+
+( Send whole binary bytes to the Data I/O burner mt&job85mar14
+  move over to new system )
+
+( vl) addto sys68
+
+: skip!  ( data addr -- ) ( MT 4/6/87 )
+( Store the 32 bit data every other byte from addr )
+ over 18 shr over c! over 10 shr over 2+ c! over 8 shr over 4 + c! 6 + c! ;
+
+( Send whole binary bytes to the Data I/O burner mt&job85mar14)
+( modified for Woody 13 Jan 87/dab)
+
+: initrs232-192
+               cc duart ser.csra + c! ;         ( 19200 baud )
+
+: initrs232-96
+               bb duart ser.csra + c! ;         ( 9600 baud )
+
+: ser.tx semit ;  ( ch -> | Send ch out the serial port of the Cat)
+
+( a c -> | Send c bytes from address a to the Data I/O burner)
+: todataioe/o  initrs232-192    ( sends every other byte in range )
+   0 ser.tx 8 ser.tx 1c ser.tx
+   3e ser.tx 6b ser.tx 8 ser.tx 0 ser.tx        ( send header)
+   dup 1c shr f and ser.tx dup 18 shr f and ser.tx
+   dup 14 shr f and ser.tx dup 10 shr f and ser.tx
+   dup 0c shr f and ser.tx dup 08 shr f and ser.tx
+   dup 04 shr f and ser.tx dup        f and ser.tx      ( send count )
+   ff ser.tx ( finis)  0 ( checksum)
+   rot rot 2* over + swap do  i c@ dup ser.tx +  i 2/ 400 mod 0=
+   if i target - 400 / . then 2 +loop ( send data) 0 ser.tx 0 ser.tx ( destaddr)
+   dup 100 /mod ser.tx ser.tx . ( send & print checksum)  ;
+
+: todataio  initrs232-192       ( sends every byte in range )
+   0 ser.tx 
+   8 ser.tx 1c ser.tx 3e ser.tx 6b ser.tx 8 ser.tx 0 ser.tx     ( send header)
+   dup 1c shr f and ser.tx dup 18 shr f and ser.tx
+   dup 14 shr f and ser.tx dup 10 shr f and ser.tx
+   dup 0c shr f and ser.tx dup 08 shr f and ser.tx
+   dup 04 shr f and ser.tx dup        f and ser.tx      ( send count )
+   ff ser.tx ( finis)  0 ( checksum)
+   rot rot over + swap do  i c@ dup ser.tx +  i 400 mod 0=
+   if i target - 400 / . then loop ( send data) 0 ser.tx 0 ser.tx ( destaddr)
+   dup 100 /mod ser.tx ser.tx . ( send & print checksum)  ;
+
+: swaptarg  ( -- )
+ here savehere here to savehere to
+ applic saveapplic applic to saveapplic to ;
+
+: -target  ( -- )
+ here  target .top inrange  if  swaptarg  then ;
+
+: +target  ( -- )
+ here  target .top inrange  0=  if  swaptarg  then ;
+
+( -> | Restore exact target environment, do checksum)
+: exact   here applic over - ff fill  target 10000 <cksum>      ( .) ;
+
+( -> | Do everything to ram to move to the rom burner )
+: burner  -target  save  ( ."  image saved ")  +target  exact ;
+
+: h>a f and 30 + dup 39 > if 7 + then ;
+
+ 0 integer checksum
+
+: sbyte  ( byte -- )
+ ff and dup checksum +to                ( bump checksum )
+ dup 4 shr h>a ser.tx h>a ser.tx ;      ( send high nybble first )
+
+22 integer swait
+
+: srec  ( saddr daddr len -- )
+ 0 checksum to  ascii S ser.tx  ascii 2 ser.tx
+ dup 4 + sbyte swap
+ dup 10 shr sbyte dup 8 shr sbyte sbyte 0
+ do  i over + c@ sbyte  loop
+ checksum ff xor sbyte drop
+ 0d ser.tx  0a ser.tx  swait ms ;
+
+: seof ascii S ser.tx ascii 9 ser.tx 0 checksum to
+ 4 sbyte dup 10 shr sbyte dup
+ 8 shr sbyte sbyte checksum ff xor sbyte 0d ser.tx ;
+
+: senddata ( saddr daddr cnt -- daddr' )
+   20 /mod swap >r dup 0 >
+   if  0  do  2dup 20 srec 20 + swap 20 + swap  loop
+   else  drop
+   then  r> dup 0 >
+   if  over >r srec r>
+   else  drop swap drop
+   then ;
+
+: toice ( saddr daddr cnt -- | in 32 bytes ) initrs232-192 senddata seof ;
+
+: sendimage  initrs232-192
+   target 0 here target - senddata
+   applic applic target - .tiptop target -  over - senddata seof  ;
+
+: send0high          target             10000 todataioe/o ;
+: send1high          target 20000 +     .tiptop over - 2/ todataioe/o ;
+: send0low           target 1+          10000 todataioe/o ;
+: send1low           target 20001 +     .tiptop over - 1+ 2/ todataioe/o ;
+: sendroms           target romsize todataio ;
+
+: even/oddsrec  ( saddr daddr len -- )
+ 0 checksum to  ascii S ser.tx  ascii 2 ser.tx
+ dup 4 + sbyte swap
+ dup 10 shr sbyte dup 8 shr sbyte sbyte 2* 0
+ do  i over + c@ sbyte  2 +loop
+ checksum ff xor sbyte drop
+ 0d ser.tx  0a ser.tx  swait ms ;
+
+: ibmsenddata ( saddr daddr cnt -- daddr' )
+   20 /mod swap >r dup 0 >
+   if 0
+      do i 40 mod 0= if over ( saddr) . then
+         2dup 20 even/oddsrec 20 + swap 40 + swap
+      loop
+   else  drop
+   then  r> dup 0 >
+   if  over >r even/oddsrec r>
+   else  drop swap drop
+   then ;
+
+: toibm  ( start len -- ) initrs232-96 0 swap ibmsenddata seof ;
+
+: ibm0high           target             10000 toibm ;
+: ibm1high           target 20000 +     .tiptop over - 2/ toibm ;
+: ibm0low            target 1+          10000 toibm ;
+: ibm1low            target 20001 +     .tiptop over - 1+ 2/ toibm ;
+
+: saveimage
+   save?  romsize shadowsize to  savebasis ;
+
+: loadimage       ( put abort" in instead of printing rtrk error code )
+   romsize shadowsize to  loadbasis ;
+
+: moveimage    ( moves target image into the basis memory )
+   ( target a00000 romsize move ) ;
+
+( vl) sys68
+
+( used in the ruler area )
+( value count -- | w,s count values into place in the dictionary )
+0 integer printsize                     ( size of a printer table )
+
+: w,'s      0 do dup w, loop    drop    ;       ( help building tables )
+   ( only used at compile time )
+
+( These words are used to build printer tables -- 26feb87/dab )
+
+: ch  word str c@ w, ;          ( -- <char>  \ add a char as a word in table)
+: os  word str  w@ w,   ;       ( -- <char1><char2>  \ overstrike two chars)
+: ,chars                ( " string" --  \ add a bunch of chars to printer table)
+   over + swap do i c@ w, loop  ;
+
+: ,accents     ( " string" accent --  \ add many chars, all with 'accent')
+   local accent  8 shl accent to
+   over + swap do i c@  accent or w, loop       ;
+
+: XXX    spc w,   ;             ( -- \  filler for unprintable/unused chars)
+
+: ,unbuild     ( oldindex " string" overstrike --  newindex)
+   ( add "string" to unbuild table, combining with 'overstrike',)
+   ( update index value as you go)
+   local overstrike     8 shl overstrike to
+   local index          rot index to
+   over + swap do
+      i c@ overstrike or  w,
+      index w,    1 index +to
+   loop     index    ;
+
+( End of printer table compile-time words )
+( Font loading utility for 14 high font                 db86aug )
+
+0 integer maxi          ( an integer to keep the maximum address)
+
+( new version of chr )
+: chr       ( byte1 . . . byte14  uline12  flag ascii --  \ store into font)
+   local flags swap flags to
+   dup 0 ff inrange not abort" character out of range in font"
+   4 shl  here +  dup 10 + maxi max  maxi to
+   swap not over 0E + c!                ( underline byte)
+   flags over 0F + c!                   ( upper/lower case flag. temp hack)
+   dup 0d + do not  i c! -1 +loop ;
+
+: *** ; immediate ( use this to flag changes to the source)
+
+( a -> | point 48 execption vectors to addresses starting at a)
+: 48pointers   30 0 do  dup ,  6 +  loop drop ;
+
+( t -> f | true if t is the token of an active vocabulary)
+: active?   active  active extant <     ( check order)
+   if extant active - 2/                ( 2 bytes/vocab measuring this way)
+else active extant - 4 /                ( 4 bytes/vocab measuring this way)
+then + active do  i w@ over =  if drop -1 exit  then  2 +loop  drop 0 ;
+
+( token n -> | Load token into rom command array at command n )
+: cmd!   0 max  #cmds 1- min  2*  .cmds +  target +  w! ;
+
+( token n -> | Load token into extended explain table at position n )
+: xpln!   0 max  7f min  2*  .xplntbl +  target +  w! ;
+
+( -> | assemble 48 jsrs to  .excpvect  code in rom)
+: patchromvectors
+     .excpvect          ( the diagnostic exception vector entrance)
+  0c0 target +          ( put them starting here in rom)
+   30 0 do
+           2dup i 6 * + ( create the address for the ith vector)
+           4eb9         ( the 68000 opcode for an absolute long jsr)
+           over w!      ( emplace the jsr opcode)
+              2+ !      ( emplace .excpvect, the address to jsr to)
+      loop
+   cr ." ROM exception vectors patched" swap . . ;
+
+( -> | Check to see if asm68 is active.  If not, abort)
+: asm68?   ['] asm68 active? not abort" asm68 not active" ;
+
+( vl) asm68
+
+( -> romaddr | begin a code fragment, stack rom address)
+: frag   asm68  clr  .l  !csp   align here target - ;
+
+( ca -> | Assemble a jump to code at ca that returns via a4)
+
+: jmp0,  06 over 8000 u< not if 2+ then pc)d a0 lea, jmp, ;
+
+: jmp1,  06 over 8000 u< not if 2+ then pc)d a1 lea, jmp, ;
+
+: jmp2,  06 over 8000 u< not if 2+ then pc)d a2 lea, jmp, ;
+
+: jmp4,  06 over 8000 u< not if 2+ then pc)d a4 lea, jmp, ;
+
+( ca -> | assemble <jmp2> and then restore next's addr in a4)
+: jumpto   jmp4,  intnextaddr a4 move, ;
+
+( -> | 'next' macro for exiting from inside code words)
+: next,   asm68?   nx ) jmp, ;
+
+( vl) deactivate asm68
+
+( -> | Terminate code fragments)
+: ;c   asm68?   ?csp  ['] asm68 <deactivate> ;
+
+( -> | Terminate normal code words)
+: next;  next,  ;c ; ( next + security and termination)
+
+: 3@  ( addr -- n    | fetch 3 bytes from addr )
+ 1- @ ffffff and ;
+
+: 3!  ( n addr --    | store 3 bytes at addr )
+ 1-  swap ffffff and  over c@ 18 shl or  swap ! ;
+
+( target image vocabulary search mechanisms )
+0 integer forthhere                             ( forth's reopening addr )
+0 integer tcurrent                              ( currently opened voc )
+0 array textant  here  10 allot  10 -1 fill     ( target vocabulary list )
+0 array tactive  here  8 allot  8 -1 fill       ( target search order )
+
+: +itable  ( token -- addr \ of token table in shadow rom image )
+ 3 * .romtbl + target + ;
+
+: texa  ( token -- exa          | in growing image during compilation )
+ +itable 3@ target + ;
+
+: tvopen  ( token -- addr                       | voc opening addr )
+ dup tcurrent =
+ if  drop  applic                               ( already computed )
+ else  3 * .romtbl + target +                   ( target token addr )
+   3@ target +  6 + dup @ + 4 +                 ( target applic addr )
+ then ;
+
+: <tfind>  ( str len -- addr 0 | addr token -1 | return token if true )
+ local str  local len  len to  str to
+ local tok  local searched  searched on
+ tactive dup 8 + swap                           ( check target search order )
+ do  i w@ tok to  tok ffff =                    ( more vocabulary tokens? )
+   if  tcurrent                                 ( no, forth is open? )
+      if  forthhere                             ( no, search closed voc )
+      else  searched -1 =                       ( already searched forth? )
+         if  applic                             ( no, search target forth )
+         else  searched 0  exit                 ( yes, not search it again )
+      then  then  str len <find>  exit
+   then  tok tvopen  str len <find>  dup        ( search vocabulary )
+   if  exit  then                               ( found, exit )
+   tok 0=  if  over searched to  then  2drop    ( not search forth twice )
+ 2 +loop ;                                      ( prepare next vocabulary )
+
+( target utilities, all use downstream name & stack a # )
+
+: tn'  ( "name" | -- addr )
+ word  str len <tfind>  fnderr  drop ;
+
+: t'  ( "name" | -- token               | t' name  gets target image token )
+ word str len <tfind> fnderr swap drop ;
+
+: tc'  ( "name | -- addr                | target execution address )
+ t' 3 * target + .romtbl + 3@
+ dup 0= abort" Trying to get address before word is defined" ;
+
+( -> a | Compute the rom storage addr of the named int  )
+: tromaddr'  t' dup  .inttok .intend inrange 0= abort" not an int "
+ .inttok -  .intvals + target + ;       ( add offsets )
+
+: i'   t'  \int 8 shl -  .int + ;       ( i' iname  gets ram address  )
+
+: adjusttokens  ( start end delta -- \ adjust those tokens which will move )
+ local delta   local end        local start     local this
+ delta to      end to           start to        #romtokens 0
+ do  i texa this to  this start end inrange     ( token needs adjustment? )
+   if  this target - delta + i +itable 3!       ( yes, adjust it )
+ then  loop ;
+
+: fillarray ( items reclen offset -- \ "arrayname" )
+ ( fill an array as follows: 24 6 4 fillarray miscellany regx ... )
+ local reclen  local offset  local items  local array
+ offset to  reclen to  items to
+ t' texa 2+ array to
+ items 0  do  t'  i reclen * array + offset +  w!  loop ;
+
+( removing vocabularies from the target compiler's search order )
+
+: tdeactivate  ( "name" | -- | remove named vocabulary from search order )
+ local tok  t'  tok to                  ( token from input stream )
+ tactive dup 8 + swap                   ( remove token from search order )
+ do  i w@ ffff =  if  leave  then       ( if unused search cell, exit )
+   i w@ tok =
+   if  i 2+  i  tactive 6 + i -  move  leave    ( if token found, clear cell )
+   then
+ 2 +loop ;
+
+: tactivate  ( "name" | -- | add named vocabulary to search order )
+ local tok  t' tok to                   ( token from input stream )
+ tactive dup 8 + swap                   ( remove token from search order )
+ do  i w@ ffff =                        ( unused search cell? )
+   if  tok i w!  exit  then             ( yes, store named vocab's token there )
+   i w@ tok =  if  exit  then           ( if token found, leave )
+ 2 +loop ." no room for " tok name ." in search order" <abort> ;
+
+( opening and closing vocabularies )
+
+: taddtoforth  ( -- | close current vocabulary; it must be open )
+ tcurrent 0= abort" no vocabulary is open"      ( protection )
+ local length  local odd  local size
+ here tcurrent texa 0a + -  size to             ( vocab's code size )
+ size applic @ +  1 and odd to  odd allot       ( oddness flag, bump here )
+ tcurrent texa  odd over 3 + c!                 ( set oddness byte )
+ size odd + swap 6 + !                          ( store code length )
+ forthhere here  applic here -  adjusttokens    ( adjust ROM image token table )
+ here forthhere - length to                     ( length of code moving )
+ applic length -  applic to                     ( new applic )
+ forthhere        here to                       ( new here )
+ here  applic length  move                      ( move intervening code )
+ tcurrent off ;                                 ( flag closed w/ forth's token )
+
+: taddto  ( "name" | -- | opens named vocabulary )
+ local tok  t' tok to                           ( get token )
+ local forthapplic  local length
+ tok 0=  if  taddtoforth  exit  then            ( named vocab was "forth" )
+ tcurrent  if  taddtoforth  then                ( close non-forth vocab )
+ applic @ here + 1 and allot                    ( closed voc has even length )
+ here forthhere to                              ( forth's here )
+ applic forthapplic to  tok tvopen applic to    ( old and new applic )
+ forthapplic applic  forthhere forthapplic -    ( start end delta -- )
+ adjusttokens                                   ( adjust ROM image token table )
+ applic forthapplic - length to                 ( of code moved )
+ length here +to                                ( new here )
+ forthapplic forthhere length  move             ( move intervening code )
+ tok texa 3 + c@ 0 <> allot                     ( opposite of "align" )
+ tok tcurrent to                                ( store token )
+ tactive dup 8 + swap                           ( put token in search order )
+ do  i w@ tcurrent =  if  exit  then            ( already in search order? )
+   i w@ ffff =                                  ( no, unused search cell? )
+   if  tcurrent i w!  exit  then                ( yes, store token )
+ 2 +loop                                        ( no room in search order )
+ str len type  1 abort"  won't fit in searh order " ;
+
+( -- | Resolve preassigned name or assign one, point token to exa )
+: <code>  local preassigned  preassigned off
+ word  str len <tfind>                          ( preassigned normally? )
+ if  lasttok to  newest to  preassigned on      ( yes, save name and token )
+ else  drop  tokens #romtokens < not            ( no, more tokens? )
+   abort" #romtokens too small"                 ( no, stop )
+   cr str len type ."  not preassigned "        ( yes, issue warning )
+   applic addr  str len assign                  ( assign name to token )
+ then  lasttok +itable  preassigned             ( take rest of word )
+ if  dup 3@
+   if  cr ." redefining " str len type  space   ( warn of redefinitions )
+ then  then  align  here target -  swap 3! ;    ( point token to code )
+
+( -> | Check for asm68, create header, etc. and setup asm68 )
+: code   ['] asm68 active? abort" asm68 already active"
+   <code>  frag drop ;          ( the address of the frag )
+
+: +ttable   ( token -- addr in token table )   2* 2* .tb + ;
+
+( -> | list the target vocabulary)
+: tw   current execute  words  current <deactivate> ;
+
+: org   target + here to ;      ( a -> | set  here  in targetspace)
+
+( vl) sys68  asm68
+
+: array  code nx ) jsr,  allot ;
+
+: integer code vp ) jmp, , ;
+
+( vl) deactivate asm68  forth
+
+: 0int  ( -- | Common int code, create named int, w/ no value, bump tokens )
+ tokens \int swab -
+ dup  4 mod    abort" token not multiple of 4"
+ intsize <  not      abort" intsize too small"
+ word  applic addr str len assign  3 tokens +to ;
+
+: int  ( n -> | Create named int with value n )
+ tokens .inttok -  4 /  #ints <  not    abort" #ints too small"
+ tokens .inttok -  .intvals + target +  !       ( store value )
+ 0int ;                                         ( create name )
+
+: [compile]   word  str len <tfind>
+   0= abort" not found"  compile, drop ;            immediate
+: if ( -- )
+ \0bran c, here 2  FF c, ;      ( indicate that this code was compiled by if )
+ immediate
+
+: backelse  ( identifier -- increment identifier )
+  temp1 -80 7F inrange          ( handle a short else )
+  if  temp0 c@ FE =             ( check for short if data )
+   if  temp0 temp0 1+ c@ -      ( calculate address of short if data )
+     dup c@                     ( duplicate address, fetch the data )
+     1-                         ( short else data, reduce if by one )
+     swap c!                    ( put reduced if data in place )
+   else  temp0 temp0 w@ -       ( calculate address of long if data )
+     dup w@                     ( duplicate address, fetch the data )
+     1-                         ( short else data, reduce if by one )
+     swap w!                    ( put reduced if data in place )
+   then
+   ( else -> then is short; move the else -> then code back one )
+   ( to recover 2nd byte of else data area )
+    temp0 1+  temp0  temp1 1-  move     ( src dest count )
+   -1 allot                             ( use 1 less byte of code space )
+   -1                                   ( code has moved by -1 increment )
+   temp1 1- temp0 c!                    ( fill in short else data )
+  else
+   \branl temp0 1- c!                   ( replace <bran> with <branl> )
+   temp1 2- temp0 w! ( fill in long else data ) 0
+                     ( code has moved by 0 increment )
+  then  swap ;
+
+: {elsethen} ( address identifier conditionalflag - increment )
+  0 >r                  ( put marker on return stack )
+  begin  swap  dup 4 =  ( put identifier on top of the stack )
+  while  >r  swap  >r   ( move leave and while data to ret stack )
+  again  2 ?pairs       ( check for matching control structures )
+  dup                   ( is this being used by else or then ? )
+  if  \bran  c, 0 w, then
+  swap temp0 to         ( save the address of the if or else data )
+  here temp0 - temp1 to ( save delta distance to the if or else data )
+  temp0 c@ FF =         ( are we backfilling an if ? )
+  if  temp1 -80 7F inrange      ( are we backfilling a short if branch ? )
+   if  temp1 temp0 c!   ( fill in byte if data )
+     0                  ( no code movement is required )
+     swap dup           ( else or then ? )
+      if  FE here 2- c! ( this code means a short if precedes )
+                        ( this else and that the byte offset )
+                        ( to the if data follows this code )
+        here 2-         ( address of the start of else data )
+        temp0 -         ( distance between start of if data )
+                        ( and start of else data )
+        here 1- c!      ( store short offset into memory )
+                        ( immediately after the FE code byte )
+      then
+   else           ( we are backfilling a long if branch )
+      \0branl temp0 1- c!       ( change <0bran> to <0branl> )
+      temp0 1+  temp0 2+  temp1 1-  move        ( src dest count )              
+( move if -> then code up 1 to accomodate the 2 byte if data )
+      1 allot                   ( we use 1 more byte of code space )
+      1                         ( code has moved +1 bytes )
+      temp1 ( 1+ ) temp0 w!     ( backfill word if data )
+      swap dup                  ( else or then ? )
+      if  here 2-               ( start of else data )
+        temp0                   ( start of if data )
+        -                       ( distance between the two )
+        here 2- w!              ( save distance in else data spot )
+     then  then
+  else  backelse  then
+  drop                          ( drop the else / then flag )
+  temp0 to                      ( save away the value by which the while and )
+                        ( leave addresses on the stack should be incremented )
+  begin  r>  ?dup       ( any while or leave data on the return stack ? )
+  while  temp0 +  r>    ( add increment value to the address  )
+  again ;
+
+: else (  -- a n )
+  -1        ( '-1' means else to {elsethen} )
+  {elsethen}  here 2- 2 ; immediate
+
+: then ( -- )
+  0         ( '0' means then to {elsethen} )
+  {elsethen} ; immediate
+
+: {twhile}  ( token1 token2 - address 4 )
+  nestype  if  swap
+  then  drop c,      ( compile the remaining token )
+  here  4            ( leave address of while or leave data and a 4 )
+  0 w, ;             ( leave 2 byte space for while or leave  data )
+
+: while (  - address 4 )
+  \0branl  \0leavel  {twhile} ; immediate
+
+: leave (  - address 4 )
+  \branl  \leavel  {twhile} ; immediate
+
+: {tloop}  ( nestypeflag  address identifier token -  )
+  temp0 to  temp1 to    ( temp0: token ; temp1: identifier )
+  0 >r                  ( put marker on return stack )
+  begin  dup 4 =
+  while  swap  >r  >r   ( move leave and while data to ret stack )
+  again
+  temp1 ?pairs temp0 c, ( lay down token. will be either a <bran> , )
+                        ( <0bran> , <loop> , or a <+loop>  )
+  temp0 \bran  =  temp0 \0bran =        or
+  if     here - temp1 to        ( save negative delta distance in temp1 )
+   temp1 -80 7F inrange
+   if                   ( handle short begin loops )
+     temp1 c,           ( compile delta branch distance )
+   else                 ( handle long begin loops )
+     temp0 \bran =
+      if  \branl here 1- c!             ( replace <bran> with <branl> )
+         temp1 2- w,                    ( because <branl> is wrong )
+      else  \0branl here 1- c!          ( change <0bran> to <0branl> )
+         temp1 1- w,                    ( because <0branl> is wrong )
+  then  then  then  nestype to
+  begin  r>
+  while  here r@ -   ( calc dist between while or leave data and here )
+   r@ 1- c@          ( get while or leave token )
+   \branl =
+   if  2-            ( because <branl> is wrong )
+   else  1-          ( because <0leavel> and <leavel> are wrong )
+   then  r> w!       ( backfill while or leave data )
+  again ;
+
+: until (  --  )
+  1  \0bran  {tloop} ; immediate
+
+: again (  --  )
+  1  \bran  {tloop} ; immediate
+
+: loop  ( -- )
+  3 \loop  {tloop}  -0C loops +to ; immediate
+
+: +loop ( -- )
+  3 \+loop  {tloop}  -0C loops +to ; immediate
+
+: do
+  0c loops +to \do c, nestype 3 -1 nestype to ;  immediate
+
+: begin
+  nestype here 1  nestype off ;         immediate
+
+: tliteral  ( --  )
+ dup 80 + 100 u<
+ if  \blit compile, c,
+ else  dup 10000 u<
+   if  \wlit compile, w,
+   else  \lit compile, ,  then  then ;
+
+: t"  ( --  )
+ ascii " scanfor  -1 len +to  1 str +to
+ state nesting or       ( in definition or interpretting a control structure? )
+ if  \" compile,  len c,                ( compile token, for <">, and length )
+   here  len allot                      ( allot room for string )
+   str swap len cmove                   ( emplace string second, its safer )
+ else  str len  then ;
+
+: tdoloc  ( -> f |  )
+ localvoc str len <find>
+ if  loops + ?dup
+   if  dup 4 =                          ( if only one local )
+      if  drop \loc1 compile,           ( special fast one )
+      else  \local compile, c,  then    ( otherwise an ordinary one )
+   else  \loc0 compile,                 ( no locals yet, initial local )
+   then  drop 0  then ;
+
+: ,s ( -- \ compiles numbers until encounter pb or ds -- vaguely like ;s )
+ begin  in  word
+   edde  if
+      begin  dup limit < 0=  if  drop exit  then
+         dup str <  while
+         dup c@ dup pb = swap ds = or
+         if  in to  exit  then
+         nextchar
+      again  drop  -1
+   else  drop str limit <  then
+ while  str len base number  if  ,  then
+ again ;
+
+: herelt       ( value -- , aborts if here is greater than value )
+   here target - <
+   abort" The previous code is located above the maximum address allowable." ;
+( searching and compiling )
+
+: showgauge  ( length --                | a little progress indicator )
+ negate [ ramstart /scan height 1- * + 21 + ] literal ! ;
+
+: insys68?  ( str len -- flag   | 0 = executed target compiler word )
+ ['] sys68 vopen  rot rot  <find> ?dup  ( is it in target compiler? )
+ if  rot drop  state + 1+ 2 u<
+   if  nesting                          ( not immediate or compiling immediate )
+      if  compile,      ( nested: compile it - never immediate nor compiling )
+      else  sw execute sw               ( not nested: execute it )
+      then  0
+ then  then ;
+
+: anumber?  ( -- [n]    | returns # if not compiling or nested )
+ str len base number
+ if  state
+   if  tliteral                         ( compile numeric literal )
+   else  nesting
+      if  [compile] literal  then  then ( support immediate execution )
+ else  cr ." can't use "  str len type  ."  about "  cr str 20 - 48 dump
+   equit then ;                         ( back to edde without disturbance )
+
+: tsearch  ( str len -- flag'                   | false means found )
+ local len  local str  len to  str to  state    ( are we compiling? )
+ if  str len <tfind>                    ( yes, in target search order? )
+   if  compile,  drop 0                 ( yes, compile it )
+   else  drop  -1  then
+ else  str len find  ?dup               ( not in : def, in host search order? )
+   if  0< nesting and                   ( yes, nested and not immediate? )
+      if  compile,                      ( yes, compile it )
+      else  sw execute sw               ( no, execute it )
+      then  0
+   else  -1  then  then ;
+
+: interp  ( addr count --               | interpret input string )
+ over +  limit to  in to                ( setup interpretation pointers )
+ begin  word  len                       ( parse the next word, 0 = end )
+ while                                  ( there are things to do )
+   locals  if  tdoloc  else  -1  then   ( do local words  )
+   if  str len  insys68?  ?dup          ( execute target compiler words )
+      if  drop  str len tsearch         ( compile target references )
+         if  anumber?  then             ( compile numerical literals )
+   then  then  ?stack abort" stack error"       ( some problem )
+   limit in - showgauge again ;         ( twinkle bottom of screen )
+
+( support for international messages in the svrom )
+
+ 00   integer languages         ( number of languages created so far )
+ 08   integer langmax           ( maximum number of languages )
+100   integer msgstart          ( first message token )
+280   integer msgend            ( after last message token )
+ 00   integer annex             ( address of next token position in annex )
+
+ 00   integer usa               ( country codes )
+ 01   integer canada
+ 02   integer uk
+ 03   integer norway
+ 04   integer france
+ 05   integer denmark
+ 06   integer sweden
+ 07   integer japan
+ 08   integer wgermany
+ 09   integer netherlands
+ 0a   integer spain
+ 0b   integer italy
+ 0c   integer latinamerica
+ 0d   integer safrica
+ 0e   integer switzerland
+
+current >r                      ( build international message vocabulary )
+vocabulary international  addto international
+tokens >r
+
+                           ( preassign the Setup string tokens )
+
+token 100 mCCat            ( name assignments from disk A go here )
+token 101 mL2
+token 102 mL3
+token 103 mL4
+token 104 mL5
+token 105 mPER
+token 106 mLet
+token 107 mLeg
+token 108 mA4
+token 109 mB5
+token 10A mHL
+token 10B mSta
+token 10C mA5
+token 10D mB6
+token 10E m2/4
+token 10F m3/4
+token 110 m4/4
+token 111 m5/4
+token 112 m6/4
+token 113 m7/4
+token 114 m8/4
+token 115 mUS
+token 116 mCA
+token 117 mLA
+token 118 mDN
+token 119 mNW
+token 11A mD/N
+token 11B mS
+token 11C mNL
+token 11D mD
+token 11E mCH
+token 11F mF
+token 120 mUK
+token 121 mIB
+token 122 mI
+token 123 mSA
+token 124 mJ
+token 125 mAS
+token 126 mDV
+token 127 mBoW
+token 128 mWoB
+token 129 mBp
+token 12A mV
+token 12B mBaV
+token 12C mon
+token 12D moff
+token 12E mrgs
+token 12F mrgm
+token 130 mrgf
+token 131 mrgsf
+token 132 mrgmf
+token 133 mrgff
+token 134 mDA
+token 135 m1rg
+token 136 m3rg
+token 137 m5rg
+token 138 m7rg
+token 139 m1m
+token 13A m3m
+token 13B m5m
+token 13C m15m
+token 13D m30m
+token 13E m60m
+token 13F mInf
+token 140 mYes
+token 141 mNo
+token 142 mYes1
+token 143 mcd
+token 144 mdc
+token 145 mad
+token 146 m1rt
+token 147 m2rt
+token 148 m3rt
+token 149 mChP
+token 14A mLMO
+token 14B m10p
+token 14C m12p
+token 14D m15p
+token 14E m16.3p
+token 14F m16.8p
+token 150 mBid
+token 151 mUnid
+token 152 mGot
+token 153 mPic
+token 154 mEli
+token 155 mCou
+token 156 mA
+token 157 mB
+token 158 mA+B
+token 159 mStd
+token 15A mSec
+token 15B m110
+token 15C m300
+token 15D m600
+token 15E m1200
+token 15F m2400
+token 160 m4800
+token 161 m9600
+token 162 m19200
+token 163 m38400
+token 164 mCCITT22b
+token 165 m7b
+token 166 m8b
+token 167 mNon
+token 168 mEve
+token 169 mOdd
+token 16A m1b
+token 16B m1.5b
+token 16C m2b
+token 16D mPP
+token 16E mSP
+token 16F mCR
+token 170 mCL
+token 171 m2s
+token 172 m30s
+token 173 m60s
+token 174 m180s
+token 175 mDDS
+token 176 mDS
+token 177 mFP#
+token 178 mPP#
+token 179 mPL
+token 17A mTM
+token 17B mBM
+token 17C mBMS
+token 17D mKbd
+token 17E mTYM
+token 17F mCSM
+token 180 mEI
+token 181 mSBT
+token 182 mLSpD
+token 183 mLSeD
+token 184 mDNP
+token 185 mDiC
+token 186 mSRS
+token 187 mDPX
+token 188 mFD
+token 189 mHD
+token 18A mCC
+token 18B mCCITT22
+token 18C mBELL2
+token 18D mMS
+token 18E mEM
+token 18F mEMS
+token 190 mpc.0
+token 191 mpc.1
+token 192 mpc.2
+token 193 mpc.3
+token 194 mpc.4
+token 195 mpc.5
+token 196 mpc.6
+token 197 mpc.c
+token 198 mpc.n
+token 199 m180
+token 19A mDW
+token 19B mPM
+token 19C mCSF
+token 19D mTS
+token 19E mPBS
+token 19F mLB
+token 1A0 mFX
+token 1A1 mITLC
+token 1A2 mCF
+token 1A3 mChS
+token 1A4 mAP4
+token 1A5 mAP3
+token 1A6 mAP1
+token 1A7 mNAP
+token 1A8 mBJ
+token 1A9 mSPS
+token 1AA mBR
+token 1AB mDBL
+token 1AC mPty
+token 1AD mSB
+token 1AE mMPS
+token 1AF mCT
+token 1B0 mPT
+token 1B1 mSPC
+token 1B2 mAP
+token 1B3 mAPS
+token 1B4 mAPP
+token 1B5 mSC
+token 1B6 mSSU
+token 1B7 mABK
+token 1B8 mLT
+token 1B9 mRING
+token 1BA mRA
+token 1BB mIMS
+token 1BC mNCT
+token 1BD mSPKR
+token 1BE mPRO
+token 1BF mMNP
+token 1C0 mMCP
+token 1C1 m3LANG
+token 1C2 mGERM
+token 1C3 mFREN
+token 1C4 mITAL
+token 1C5 mCFC
+token 1C6 mascii
+token 1C7 mibm
+token 1C8 mAUTO
+token 1C9 mP/L
+token 1CA mPORT
+token 1CB mLAND
+
+                     ( preassign the explain and help message tokens )
+
+token 200 defmsg
+token 201 leapmsg
+token 202 nocopy
+token 203 copyuplock
+token 204 romcopyup
+token 205 verifyerror
+token 206 mCRSS
+token 207 notanswer
+token 208 titlemsg
+token 209 kbdmsg
+token 20A copymsg
+token 20B capsmsg
+token 20C underlinemsg
+token 20D boldmsg
+token 20E marginmsg
+token 20F stylemsg
+token 210 tabmsg
+token 211 spacingmsg
+token 212 printmsg
+token 213 sendmsg
+token 214 phonemsg
+token 215 controlmsg
+token 216 diskmsg
+token 217 sortmsg
+token 218 learnmsg
+token 219 undomsg
+token 21A addspellmsg
+token 21B setupmsg
+token 21C lockmsg
+token 21D localmsg
+token 21E calcmsg
+token 21F erasemsg
+token 220 lexerr
+token 221 noroom
+token 222 lockedtext
+token 223 nolearnroom
+token 224 nocopyuproom
+token 225 noanswer
+token 226 nodial
+token 227 svcorrupt
+token 228 interruption
+token 229 badtransmit
+token 22A noconnect
+token 22B nomodem
+token 22C carrierlost
+token 22D telconnect
+token 22E writeprotect
+token 22F nodisk
+token 230 noprinter
+token 231 riskytext
+token 232 nodiskroom
+token 233 nontextdisk
+token 234 blankdisk
+token 235 funkydisk
+token 236 notsorted
+token 237 notcalculated
+token 238 longname
+token 239 notokens
+token 23A needsglobal
+token 23B reservedname
+token 23C usedname
+token 23D badname
+token 23E extradigits
+token 23F recursing
+token 240 syntaxerr
+token 241 toomanyrefs
+token 242 trykillagain
+token 243 nosort
+token 244 ambiguity
+token 245 syserror
+token 246 unimplement
+token 247 getfwdmsg
+token 248 nonblankdisk
+token 249 explainmsg
+
+r> tokens to
+r> <addto>
+
+: startmsgrom  ( -- \ create table for rom )
+ .top saveapplic to  target savehere    ( shadow ram area )
+ +target                                ( message roms compile into shadow ram )
+ magic#1 , 0 ,                          ( id for rom, count of languages )
+ 8 langmax 1+ *  here over 0 fill allot ( enough room for 7 languages )
+ languages off ;
+
+: newmsgs  ( country-code -- \ initialize a new message annex )
+ languages langmax > abort" 7 language maximum exceeded"
+ local country  country to                              ( country code )
+ here annex to                                          ( start of token annex )
+ local entry  languages 1+ 8 * target +  entry to       ( entry in table )
+ 1 languages +to                                        ( point to next entry )
+ country entry !                                        ( store country code )
+ annex target - svrom0 + entry 4 + !            ( point table to annex addr )
+ msgend msgstart - 3 *  here over -1 fill  allot ;      ( allot annex )
+
+: targfull? ( n -- | useds '-target' so abort won't crash )
+   needforth 0= if -target " target image is full" error abort then ;
+
+: {  ( msgaddr -- | Compile message ending w/ }, each line ends w/ rtn )
+ local msgaddr  msgaddr to
+ local linelen  linelen off                     ( length of line, clear it )
+ local more  more on                            ( more: -1 means not done )
+ 1 in +to                                       ( skip leading space )
+ begin  in 1- nextchar c@ rtn =
+   if  5 targfull?  rtn c,  1 linelen +to  then ( put an extra rtn in )
+   rtn scanfor                                  ( grab up to but not incl rtn )
+   str len  dup
+   if  -trailing  then  dup
+   if  2dup  dup targfull?  over + swap
+      do  i c@ dup  ascii } =
+         if  more off                           ( end of message )
+         else  dup  [ &firsthid &attr or ] literal and &attr =  ( allow normal )
+            over &lastacc 1+ <  or       ( bold, underlined, or accented chars )
+            if  dup c,  1 linelen +to  then  then  drop
+      loop
+   then  2drop  more
+ while   5 targfull?  rtn c,  1 linelen +to     ( put rtn in )
+ again  linelen msgaddr w! ;                    ( store length )
+
+: <mkmsg>  ( | -- msgaddr )
+ [ asm68 ]                              ( relocatable inline code for message )
+ 14 targfull?  0c pc)d a0 lea,          ( inline code skips over itself )
+ 0 #n d0 moveq,  a0 )+ d0 .w move,      ( a0 points at length field )
+ a0 sp -) move,  d0 sp -) move,  next;  ( runtime: -- addr len )
+ [ deactivate asm68 ]  here  0 w, ;     ( msgaddr )
+
+( -- addr | Resolve preassigned name or assign one, point token to exa )
+: icode  ( "name" | -- \ search international vocab store token in annex )
+ word  ['] international vopen str len <find>   ( preassigned normally? )
+ if  lasttok to  newest to                      ( yes, save name and token )
+   lasttok msgend > abort" msgend too small, recompile TC disk"
+   align here target - svrom0 +         ( calc exa within svROM )
+   lasttok msgstart - 3 * annex + 3!    ( store exa in annex token table )
+   frag drop
+ else  drop  cr str len type ."  not preassigned "      ( no, issue warning )
+   abort  then ;
+
+: mkmsg  ( "name" | -- msgaddr )
+ languages -1 =                 ( normal target image? )
+ if  code                       ( yes, read "name" :: source code/input stream )
+ else  icode                    ( no, use international vocabulary )
+ then  <mkmsg> ;                ( construct relocatable message )
+
+: tassign  ( -- | preassign name pointed to by str, whose length is len )
+ tokens #romtokens < not abort" #romtokens too small"
+ applic addr str len assign
+ 0  lasttok +itable  3!                         ( store in romtoken )
+ limit in - showgauge ;                         ( twinkle bottom of screen )
+
+: token  ( "nnn name" | -- | preassign name )
+ <token>  tokens to
+ word  ['] international vopen str len <find>   ( preassigned normally? )
+ if  nip  tokens <>                             ( yes, save name and token )
+   if  str len type  ."  has a different token number on Disk A than on TC"
+      -1 abort" Change TC disk, and recompile"  then
+ else  drop  then  tassign ;
+
+: assigntokens  ( -- | loop until encounters "thelastword", preassign names )
+ begin  word " thelastword" len <>  swap str len same? not  or
+ while  tassign  again ;                ( twinkle bottom of screen )
+
+( names and vocabularies )
+
+: teta  ( tk -> a t | From token, get target eta, true flag  )
+ encode   tactive textant
+ do  i w@ 7fff <                                ( done? )
+ while  i w@ tvopen over <eta> ?dup
+   if  swap drop -1 exit  then
+ 2 +loop   drop 0 ;                     ( tk -> f | Can't find it, false flag )
+
+: tname  ( t -> | Print the name of a target word given its token t  )
+ dup teta
+ if  2+ dup 1+ swap c@ 1f and space type  drop
+ else  ." (" . ." )"  then ;
+
+: checkromtokens  ( -- | lists names of tokens that aren't assigned )
+ 0  #romtokens 0
+ do  i +itable 3@ 0=                    ( examine rom token element )
+   if  1+  i tname  then                ( name doesn't work? )
+ loop  ?dup  if  cr . ."  are undefined" beep cr  then ;
+
+: targvoc  ( token -- | store token in target vocab list -- for tname )
+ textant dup 10 + swap
+ do  i w@ ffff =                        ( unused position in targ vocab list? )
+   if  dup i w!  leave  then            ( yes, store token )
+ loop  drop ;
+
+: tvocabulary  ( "name" | --    | create empty vocab in target image )
+ local tok  local voc
+ tcurrent if taddtoforth then   ( only create vocabulary with forth open )
+ t' tok to                      ( get token and put aside for a while )
+ applic dup @ + 4 + 14 - voc to ( image addr of vocabulary, just above forth )
+ voc target - tok +itable 3!    ( store ROM addr in image token table )
+ tok targvoc                    ( store token in target voc list -- for tname )
+ applic   applic 14 -           ( shift current structure down to )
+ voc 14 + applic -  move        ( make room for new vocab )
+ -14 applic +to                 ( update applic )
+ emptyvoc voc 14 move           ( make copy of vestigial vocabulary )
+ \voctok  voc 2+ c!             ( compile vocab's backpatched token # )
+ tok      voc 4 + w! ;          ( compile this vocabulary's token )
+
+( SETUP command support )
+
+: ~ ( -> | Setup string compiling word. Delimit string like ~ Oh, "blah"})
+ascii } scanfor  -1 len +to  1 str +to  state nesting or
+    if \" compile, len c,  here  len allot ( allot first)
+      str swap len cmove ( then emplace string, its safer)
+else str len  then ; immediate
+
+: startgroup ( -> | Start a display group, note the first index number)
+groupl off ( zero the group line counter)  setv&ti starti to ;
+
+: setgroup ( bg sg dl l u -> | Set the spacebar group jump number, the setup 
+group jump number, the nominal display line number and the lower and upper 
+index range in current group then increment the group index)
+local bad  groupi 0 grouplim 1- inrange not abort" wild group index"
+groupi gpwidth * <groups> + dup target + ( base address) bad to
+<groups> dup grouplim gpwidth * 1- + inrange not abort" waga"
+bad 1+ c! ( upper token index)  bad c! ( lower token index)
+0 max 17 min bad 2+ c! ( nominal display line)  bad 3 + c! ( setup group jump #)
+bad 4 + c! ( spacebar group jump #)  1 groupi +to ;
+
+: makegroup ( bg sg dl -> | Make a display group, automatically store the group 
+index range in the group vector.  Also, store the spacebar group jump number, 
+the setup group jump number and the nominal display line number)
+setv&ti starti -  dup 1 <  10 rot <  or abort" index sequence error"
+starti  setv&ti 1-  setgroup ;
+
+: setv&t ( n -> | Set downstream name's setdata value to n and its token in the 
+next available place in settokens)
+setv&ti 0 setv&tlim 1- inrange not
+  abort" setup value and token array index out of range!"
+setv&ti 2*   swap over <setdata> + target + w! ( set value)
+t' ( get token) swap <settokens> + target + w! ( set token)
+setv&ti ( stack index to load into pointer)
+1 setv&ti +to ( bump index)  1 groupl +to ( and group line number) ;
+: tsetup ( -> | Empty the text, get source and select entire text )
+ " GetForward" 3 indicate rule
+ bot nextchar gap to  eot prevchar beot to  preset      ( empty the text)
+ getforward  clearundo  eot prevchar eos to movegap
+ bot nextchar bos to  rewindow display  extendedcursor
+ here applic over - ff fill
+ " " 3 indicate rule ;
+
+: tsetup0   side0 tsetup ;
+: tsetup1   side1 tsetup side0 ;
+
+: tcomp     ( -> | Target compile the selection )
+ " Targeting" 3 indicate rule
+ bos gap over - interp
+ bot eot 1+ killivls  rewindow
+ ?extended  if collapse else display then widecursor
+ dirtytext? off von
+ " " 3 indicate ;
+
+: tctext ( -> | Get source, auto-extend and 'interp' the selection )
+ drive# >r  tsetup0  tcomp      ( side zero)
+ r> drive# to
+ tsetup1 tcomp                  ( side one)
+ beep ;
+
+( : Tctext  ( -- | Get source from both drives, in order, and compile it )
+ ( drive# off  tforth  drive# on  tforth  drive# off ; )
+
+( jamb the above words into the command table )
+' tsetup0   2c ( s ) 2* cmds + w!
+' tsetup1   6c ( S ) 2* cmds + w!
+' tcomp     1f ( c ) 2* cmds + w!
+' tctext    03 ( y ) 2* cmds + w!
+( ' Tctext  43 [ Y ] 2* cmds + w! )
+
+( target compiler control structures )
+
+: ( [compile] ( ;                       immediate
+
+: [  state off ;                        immediate
+
+: exit  ( --  )
+ locals loops + ?dup
+ if  \exitlp compile, c,
+ else  \exit compile,  then ;           immediate
+
+: "  ( --  )  t" ;                      immediate
+
+: ."  ( --  )  t" \type c, ;            immediate
+
+: abort"  ( --  )  t" \abort" c, ;      immediate
+
+: ascii  ( --  )
+ word  str c@  state                    ( compiling? )
+ if  tliteral  then ;                   immediate
+
+: [']  ( --  )  word  str len <tfind> 0= abort" not found"
+ tliteral drop ;                        immediate
+
+: literal  ( --  )  tliteral ;          immediate
+
+: local  ( --  )
+ locals 0=
+ if  applic 0a -  localvoc to
+   emptyvoc 0a +  localvoc 0a cmove             ( temp voc )
+   \locals compile,  here location to  0 c,
+ then   tokens >r   locals tokens to
+ word   localvoc addr  str len assign
+ 4 locals +to  r> tokens to ;           immediate
+
+: ;s  edde
+   if in begin
+            dup limit < not if drop limit leave then
+            dup c@ dup pb <> swap ds <> and while
+            nextchar
+         again
+   else  limit  then  in to ;
+
+: ;  ( --  )
+ ?csp  locals loops + ?dup
+ if  \;lp compile, c,
+ else  \; compile,  then
+ state off  locals
+ if  locals location c!  then  locals off ;  immediate
+
+( vl ) asm68 forth
+
+: :  ( --  )  <code>  ]  np ) jmp,  locals off loops off  !csp ;
+
+( vl ) deactivate asm68  deactivate sys68  forth  addto user  user
+
+( vl ) applic here - beot gap - + 500 - needtext drop  ( leave enough room )
+( end of target compiler source, two page breaks follow.)
+side0 save
+(Highlight all of the code before the document break above and press Use Front)
+(ERASE [answer] to compile the target compiler.  Next, erase all of the code,)
+(these directions, the parenthetical remark in the line after next, execute the)
+(the side0 save phrase above, execute cold, erase the phrase, DISK, done.) 
+                     (side1 is NOT) A compiled image of the
+                                        
+                                        
+                              New Editor (v1.74) to
+                       New Editor (v2.40) Target Compiler
+                                        
+                                        
+                                 April 28, 1988
+                                        
+         
+         UseFront-y               will target compile a single disk.
+         UseFront-s or UseFront-S will getforward a side of a disk.
+         UseFront-c               will target compile the current selection.
+         
+         

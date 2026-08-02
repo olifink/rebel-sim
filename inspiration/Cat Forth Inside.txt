@@ -1,0 +1,1551 @@
+The Humane Computer
+
+Jef Raskin was a true renaissance man. From music to aerodynamics to computer interfaces, he was a rare visionary of our time. One of his creations was the Canon Cat.
+
+The Canon Cat was created by Jef Raskin and his team at Information Appliance Inc. It was introduced in July 1987, making the design 20 years old. It sold 20,000 units, in 6 months, but for various reasons was it was a short lived product.
+
+The Canon Cat was an out growth of the SwyftCard that ran on the Apple II, in 1985. Both were an effort of Jef and his team.
+
+The Canon Cat used many of the ideas that Jef had proposed for a user interface that was more productive and user friendly.
+
+The Canon Cat was designed as a appliance type computer. There are a number of truths and myths surrounding this machine. It was stated that it was a closed design. This was not true. Some other applications were created to run on the cat but the market time was too short. The fact that I could add a new printer driver shows that it was not that closed.
+
+The disk drive is often stated as a 256K but examining the code shows it as a 400K. It is a single sided, 80 track, 10 sector per track and 512 bytes per sector.
+
+I believe the editor only uses 256K.
+
+The machine was originally shipped with a printer called the Cat 180, a daisy wheel printer. I've yet to see one of these printers.
+
+The code was written in 68K assembly and Forth. The code would be considered as multiple applications if run from a normal OS. It includes a word processor, spread sheet capable, sort, 90,000 word spell checker, phone modem protocol, disk interface, keyboard interface for multiple foreign languages, learn( macro capable), built in help, screen saver and multiple printer drivers.
+
+The user manuals can be found on the web at:
+http://jef.raskincenter.org/published/cat_manual.html
+http://jef.raskincenter.org/published/cat_card.html
+http://jef.raskincenter.org/published/cat_ref.html
+
+As complicated as the software is, it has the rare distinction never having had a bug found and, according to Jef, created on schedule. I like to think that part of this reason is that it was written in Forth but it was mostly that no piece of code was excepted as complete without a testbench. This was true, no matter how trivial.
+
+The Cat has a Forth interpreter/compiler built in. Anyone can use the compiler to enter Forth code or assembled code. All high level words use a token-to-execution table in RAM, allowing one to patch into code at almost any level.
+
+There was manual created for both the version of Forth used and a technical manual for the editor as well. With these manuals one could write applications for the Cat.
+
+This makes the system an open system. It is normal to save any user compiled code to disk with any text as well. This is what I've done with the printer driver I wrote.
+
+It has been stated that there is 8K of battery backed RAM that one can save code to. So far, I've not found how that might be done, safely. Part of that RAM is to save the system setup. The remaining is for user added spell checking words. The setup space would not be desired because incorrect use here could lock up the system. One might be able to use the spell checker space with care. It is much easier to just save to disk as I have done for both source and compiled code.
+
+I believe that many thought their code was saved in the battery backed RAM because of the way it seemed to remember their code when actually the code was simply saved to disk.
+
+Getting the information to understand this particular version of Forth and the needed information on the editor has been challenging. The Forth was called tForth for Terry Holmes Forth.
+
+It wasn't until about 1 year ago ( 2006 ) that I finally located the two key documents. Both were at the Stanford Special Collections Library. They were donated, along with other notes from Jef Raskin, to the library. The two documents were "Forth Manual: Documentation for the Programming Language of the Canon Cat" and "Technical Documentation for the Canon Cat Editor".
+
+The combination of these two documents and some reverse engineering have given me the information I needed to create my HP printer driver.
+
+Here are some of the notes that I've collected from my trips to the Stanford Library and exploration of the code in the Cat. Some information was from the web, related to entering the Forth interpreter but later information about how this Forth worked was from the documents.
+
+Getting Into the Forth Interpreter and the Forth Execution Mode
+
+Starting Forth mode by
+
+highlight the string:           Enable Forth Language
+ ( Note: must have exact with capital letters )
+Then do:                        usefront+answer
+Then:                           shift+usefront+space
+
+You are now in the Forth interpreter/compiler.
+
+You need to enter:             -1 wheel! savesetup re
+
+From the editor, use the 'setup' to set the keyboard to ASCII so that you can type the characters < and > using the keyboard keys shift , and shift .
+
+From the editor do a 'usefront+disk'
+
+It will save to the disk so that it will be ready the next boot with just the simultaneous 'shift+usefront+space' is needed to restart Forth.
+
+To undo the Forth mode:       Forth? off 0 wheel! re
+
+Use care while in Forth mode as 'usefront shift :' will format the disk ( a good idea to make a backup or at least remove the disk while experimenting ) I Not only back up regularly but usually remove the disk from the machine when experimenting.
+
+While in the Forth mode, the 'usefront answer' will evaluate Forth expressions. This even includes compiling Forth words. Forth words which have text output will output to the editor. I use this often when decompiling.
+
+If you want to do a system check from Forth use the word main-test . To break from the test mode, one needs to reboot the machine. main-test includes disk and keyboard test.
+
+I recommend creating a clean new disk to store work on. One should use 720K disks but I've had good luck with 1.44M disks.
+
+You can write code using the editor and then compile the code by MARKING it and using 'usefront+answer' while in Forth editor mode. You can clean the dictionary of user words with 'empty' or one at a time with 'purge' name, while in the Forth interpreter.
+
+If you compile some code directly in the forth mode, it will be saved to the disk when you read back to the editor and do a 'usefront+disk'. Of course, if you directly enter it, at the Forth prompt, it will not be as easily to modify errors as it will be if entered as text source in the editor.
+
+Some Non-Standard Forth Words and Other Cat Functions
+
+USE-FRONT EXPLAIN will display the rev 1.74
+
+Enter press and hold LEAP, SHIFT then QWERASDFZXCV release the SHIFT then LEAP, do a USE-FRONT EXPLAIN will show credits.
+ 
+I am assuming that one already has some knowledge of Forth. I'll describe those things that I think are unique to the Cat or tForth. There are more things that I don't understand. Some will be more clear by looking at some of my decompiled code. It is hoped that this document will inspire others to look deeper into things.
+
+tForth is a 32 bit value Forth. Default base is hex.
+
+There are 2014 named heads of words and 582 named integers ( variables ) in several vocabularies.
+
+Most words are like fig Forth. Here are a few related to the Cat:
+
+W@ ( Addr - wordVal )
+w! ( wordVal Addr - )
+c@
+c!
+or! ( b A - ) OR's the byte b with byte ate A and stores at A
+and! ( b A - ) AND's the byte b with byte ate A and stores at A
+re ( - )  return to editor
+"  ( - Adr N ) used " string"
+ascii ( - Char ) used 'ascii A' will return 41h
+ctl ( - char ) used 'ctl a' returns ^A
+' ( - tkn ) used ' word   returns token
+decode ( Dic# - tkn )  Takes Dictionary Number to token
+encode ( tkn - Dic# ) take token to value in dictionary header
++table ( tkn - Adr ) token to address points to compiled code.
+see$  ( Adr n - ) displays counted strings ascii
+dump ( Adr n - ) displays values at address 16/line
+hidden ( - ) vocabulary Dictionary from 2417 to 74c2
+forth ( - ) vocabulary Dictionary from 3ea0b to 3ffe4
+user ( - ) vocabulary used by user
+existing ( - ) displays all vocabularies
+searched ( - ) shows current search order
+blit, wlit & lit  ( - n ) low level lit of diff sizes
+name ( tkn - ) displays the name of the word that is tkn.
+eta ( tkn - addr f ) if true, points to the dictionary table entry.
+                     it points to the encoded number.
+exa ( tkn - addr ) returns execution addr of token.
+                    seems to be: +table @
+n' ( - addr ) does ' name eta
+c' ( - addr ) does ' name +table @
+existing (-) displays all vocabularies.
+searched ( - )  displays search order
+addr ( n - addr ) fetches the address of the integer just used
+                  to fetch n. n is not used. Built in integers
+                  all seem to use the int0 to intf method while
+                  new ones are only using normal tokens. Built in
+                  ones are also spaced at every 4 so I suspect
+                  there is a table of them. ( here addr = 40f800,
+                  the last at 41011c )
+empty ( - ) Clears any new user words.
+purge ( - ) used 'purge name', will remove 'name' from dictionary.
+cls ( - ) clear screen
+home ( - ) cursor to upper left of screen
+goto ( Adr - ) goto execution address or code.
+local ( - ) used 'local name' to create temporary locals that
+     can be used by the colon word like an integer within definition. 
+shr ( val cnt - val' ) shift right by count
+inrange ( n l h - f ) true if inclusive range
+integer ( n - | name ) used to create variables and constants
+to ( val int - ) Set new value for integer
++to ( Val int - ) Adds to integer
+rsector ( Buf Sect# - ErrFlag ) 
+wsector ( Buf Sect# - ErrFlag )
+vsector ( Buf Sect# - ErrFlag ) Disk interface words. Read, Write
+           and Verify. Buf needs to be 200H or use trkbuf. Sect#
+           min and max is not yet determined. Normally after a
+           format, one can read or write 0 to 315 but after
+           transferring an image it changes to 1 and 0AH to 0DBH.
+           No zero ErrFlag indicates an error ( values unknown ).
+rtrk ( buf trk# - ErrFlag )
+wtrk ( buf trk# - ErrFlag )
+vtrk ( buf trk# - ErrFlag ) Track at a time
+format ( - ) formats 80 tracks sectors 0 to 316
+killdisk ( - ) fills disk with 55's, no sectors! Used by Cat to indicate erased disk.
+tackdump ( - ) raw read of current track to trkbuf. Not entire track, only
+        1400H. Still useful for debugging track failure.
+semit ( char - ) serial port
+pemit ( char - ) parallel port
+eemit ( char - ) editor ( placed at current cursor )
+demit ( char - ) display emit
+
+Understanding More of the tForth ( Terry Forth )
+
+Forth words are tokenized ( tkn ). Tokens can be single bytes or two bytes. The two byte words are indicated by tiers The words are in different tkn groups. 0 to 0fff would be tiers. from 1000 to 1f00 would be 'integers'. These 'integers' are assigned, using 4 token values. This means that there are only 2048 possible 'integer's. Code created in the 'user' vocabulary uses the word integer to create constants and variables. Some similar word was used for these in the ROM based portion of the code.
+
+Some other useful integers:
+
+ramstart
+ramend
+ramsize
+screensize
+screen
+origin
+here
+
+Dict formats:
+
+2 byte, encoded value Use 'decode' to get compiled tkn
+1 byte  ( Immediate,reserved,5BitsCharCnt)
+Bytes?  Count = 5BitCharCnt
+
+Two special types of tokens:
+
+tier1 to tierf  ( 01 to 0f ) two byte compile
+int0 to intf  ( 10 to 1f ) integer values in tiers
+
+Understanding the Printer Drivers
+
+There are a number of pointers used to point to strings that control the printer. If one wants to reconfigure these for a different printer, one needs to change them. These are usually modified by the editor when one selects a printer with the setup mode. Use care when playing with these and have a backup disk. If there is an error in the compiled Forth code and one saves it to disk, one can get the machine to lock in an endless loop of boot, error. See my HP printer driver code.
+
+printertable ( - Addr ) each 2 byte location has 
+                        a first byte is when the character requires
+                        an accent character to print as is done for
+                        foreign characters and the second is the
+                        character value. If the first value is 00,
+                        it just prints the second character. If the
+                        first value is 0 to 1F, is will pass this
+                        value to the weirdprint routine. This is usually
+                        used to select an alternate font. This first
+                        value is usually the number that is used to
+                        select the font but any amount of code could
+                        be selectively run during the execution of
+                        the weirdprint routine. If there is not support
+                        for a particular character, the values are 00H, 20H.
+                        The normal ASCII characters are 20H to 7E.
+                        See my list of offsets into the printer table.
+
+There are pointers to strings used by the printer:
+
+backspace" ( - a n ) Cause printer to back space
+-bold" ( - a n ) Turn on bold 
++bold" ( - a n ) Turn off bold 
+endline" ( - a n ) end of line 
+endprint" ( - a n ) eject last page
+evenhalfspace" ( - a n ) even half space
+halfline" ( - a n )  half line advance of paper
+hmi" ( - a n )  spacing for proportional
+initprint" ( - a n ) initialize printer  
+oddhalfspace" ( - a n ) odd half space
+overstrike" ( - a n ) Over strike enable
+unoverstirke ( - a n ) Over strike disable
+printforward" ( - a n ) direction of print
+printreverse" ( - a n ) direction of print
+startline" ( - a n ) to the beginning of a line
+topofform" ( - a n ) top of form
+-underline" ( - a n ) end underline
++underline" ( - a n ) end of underline
+leftfoot" ( - a n ) left footer 
+leftfrill" ( - a n ) left frill
+rightfoot" ( - a n ) right footer
+rightfrill" ( - a n ) right frill
+userinit" ( - a n ) Any additional sequences to always send to
+                    the printer. 
+
+A few other variables that can effect above:
+
+boustrophedon ( - f ) knows how to bidirectional
+char/inch ( - n ) usually 10, 12 or 15
+pageprint ( - f )  page or continuous ( I think )
+knowstof? ( - f ) knows top of form
+knowsbold ( - f ) knows how to do bold
+knowsul? ( - f ) Knows how to under line
+knowsos? ( - f ) knows over strike
+knowshmi? ( - f ) knows hmi spacing used for proportional print
+steps/inch ( - n ) used for hmi spacing
+braindamaged ( - f ) unknown ???
+paperpos ( - n ) Top of page location.
+papershort ( - n ) less lines by 1/2 lines count
+rightstop ( - n ) right stop in 1/2 char widths
+diabolical ( - n ) For daisywheels that do Diablo mode.
+'weirdprint ( - tkn ) Use when the international characters are printed
+                     that require a preamble and postamble. See fx80magic
+gutter ( - n ) Left margin in 1/2 chars from '3 printerinfo'
+
+Exploring The tForth and Cat functions:
+
+The dictionaries are in alphabetical order. Although, 'words' displays the dictionary, it is difficult to trace down related words so I've written words to display the word names in token order. This seems more useful as many related words tend to be grouped together:
+
+: tt ( tkn - ) dup 80 + swap do i name loop ;
+( tkn is 0 to 0fff although 7DE is the last in the built in code.
+  tkn can be used in 80 increments to display all 0, 80, 100, 180 ... )
+
+This doesn't work well for built in integer tokens so I wrote:
+
+: xx ( tkn - ) dup 200 + swap do i name 4 +loop ;
+( tkn is the same as for tt but in 200 increments. 1000 to 1918 are valid )
+
+A simple decompiler. It doesn't deal with strings, literals or branches automatically yet but that could be added.
+
+One needs to type one of the following letters when on comes to one of the following low level words:
+
+b      <locals>, <local>, <exitlp>, <0bran>, <bran> or <blit> 
+w      <0branl>, <branl> or <wlit>
+l      <lit>
+s      <">
+q      <;> or <;lp>
+
+The code could use some more clean up but it is what I used so far. Use the letter q to quit. This only works for token threaded code. All token threaded code will start with 4ED3 at the beginning. This value will be displayed first. It is up to you to select q. Any other character like space bar will continue to decompile.
+
+It took me a while to figure out local. They would be used in the form: local fred local sam local joe
+
+The compiled code would loose the names and have: <locals> 0C Each local takes 4 locations so the 0c is 3 4 * or 3 locals, fred, sam and joe.
+
+When accessed, they are just like integer(s). They return the value in them and are set with the word to or +to.
+
+In the compiled code, fred would be <loc0> and sam would be <loc1> but joe would be <local> 8, as fred would be <local> 0 if it wasn't for the short word <loc0> and sam would be <local> 4 if not for <loc1>. I hope this makes sense.
+
+To use the word see, you must first get the token.
+
+As an example:   ' do$ see
+
+would decompile the word do$.
+
+The decompiled words <do> and <loop> do not have any inline values attached and don't need the use of b,w or l.
+
+: .1 ( Addr - Addr' ) dup c@ . 1+ ;
+: .2 ( Addr - Addr' ) dup w@ . 2+ ;
+: .4 ( Addr - Addr' ) dup @ . 4 + ;
+: .spec ( Addr - Addr' )
+  dup .2 swap w@ name ;
+: craddr ( Addr Char - Addr Char )
+   cr over . ;
+: do$ ( Addr Char - Addr' Char )
+   swap dup . dup c@ dup .
+   0ff and ?dup if
+                  0 do
+                     1+ dup c@ . loop
+                then
+   1+ swap craddr ;
+
+: see ( tkn - )
+  exa .2
+  begin
+    key dup ascii q = if exit then            ( quit )
+    dup ascii b = if swap .1 swap craddr then ( byte value )
+    dup ascii w = if swap .2 swap craddr then ( word value )
+    dup ascii s = if do$ then                 ( <"> string )
+    dup ascii x = if drop 3 - dup c@ then     ( back over 2 byte error )
+    ascii l = if .4 craddr then               ( 32 bit value )
+    dup c@ 1 01f inrange
+    if
+      .spec
+    else
+      dup .1 swap c@ name
+    then cr dup .
+  again ;
+
+Note that first two bytes, 4ED3, of a word are a jump to DOCOL.
+
+An example:
+
+ ' beep see   4ED3 9200 183 'beep
+9202 17F sound.on
+9204 182 ?sound
+9206 3d not
+9207 <0bran>
+9208 FC                 ( hit letter b at this line )
+9209 26 <;>
+920A                    ( hit letter q to quit )
+
+This would be reconstructed as:
+
+: beep
+   'beep sound.on
+   begin
+     ?sound not
+   until ;
+
+Information Found in "The Technical Manual for the Canon Cat"
+
+printertable
+Offset in 2 byte offsets
+
+Some of the characters were not found in the HP fonts. I believe that one could fiddle with the vertical movement and font size to create the missing ones. I've listed the HP font where different.
+
+09 tab
+0A underscore
+0B DocBreak
+0C PageBreak
+0D return
+20 space
+21 !
+22 "
+23 #
+24 $
+25 %
+26 &
+27 '
+28 (
+29 )
+2A *
+2B +
+2C ,
+2D -
+2E .
+2F /
+30-39 numbers
+3A :
+3B ;
+3C <
+3D =
+3F <
+40 @
+41-5A A-Z
+5B [
+5c \
+5d ]
+5F _
+60 '
+61-7A a-z
+7B {
+7C |
+7D }
+
+Creating the HP Printer Driver
+
+Fonts used in my Printer Driver
+
+Fonts for HP:  ( Numbers in Decimal )
+ 0 = Roman-8        8U 
+ 1 = Symbol        19M
+ 2 = PC-8 pg 437   10U 
+ 3 = Win3.1 latin  19U
+ 4 = PC-852 latin2 17U
+ 5 = DeskTop       7J
+ 6 = PC8 Dan/Nor   11U
+
+Special Characters Using HP Fonts
+
+7F delta char                     0144
+80 C w/ tail                      00B5
+81 +- as single char              00FE
+82 || as single char              02BA
+83 big 0 with / as single char    00D2
+84 small o with / as single char  03F8
+85 beta char                      00DE
+86 a w/ dot                       03E5
+87 small c w/ tail                00B5
+88 L' as one char                 0495
+89 l' as one char                 0496
+8A B/0 as one char                0020?
+8B Bs as one Char                 0020?
+8C 'n                             06AC
+8D 'N                             A94E
+8e l as script                    06AB
+8F A with small o on top          068F
+90 small o for ontop              05C4
+91 ae as one char                 0691
+92 AE as one char                 0692
+93 perm space                     0020
+94 paragrph mark                  00F4
+95 ( o ) as one char              00BD
+96 1/8                            0020?
+97 3/8                            0020?
+98 5/8                            0020?
+99 3/4                            00F5
+9A 7/8                            0020?
+9B cent mark                      00BF
+9C HP 0BB mark                    00BB
+9D Yen mark                       00BC
+9E Pt one char                    029E
+9F script f roman-8               00BE
+A0 trademark                      05A7
+A1 registered                     05A6
+A2 copyright                      05A5
+A3 Large cross                    05A3
+A4 small 2                        05CB
+A5 small 3                        05CC
+A6 a underlined               5F  05E0?
+A7 o underlined               5F  05B6?
+A9 upside down ?                  05D8
+A9 : -  divide                    05C3
+AA overstrikepase?                0020
+AB 1/2                            05C8
+Ac 1/4                            05C7
+AD upside down !                  05BE
+AE <<                             05D2
+AF >>                             05D3
+B0 ' accent                       00A8
+B1 ` accent                       00A9
+B2 ^ accent                       00AA
+B3 " accent                       00AB
+B4 _ double underscore            05BF
+B5 Gray dots                      057F
+B6 ~ accent                       00AC
+B7 strikeout                      05AB
+B8 curved ^                       05F6
+B9-BF space                       0020
+C0-CF repeat of B0-BF?
+following are accented sequence
+of 'AEIOUaeiou' with accent char
+D0-D9 w/ ' 
+ E0 DC E5 E7 ED C4 C5 D5 C6 B075
+DA-E3 w/ `
+ A1 A3 E6 E8 AD C8 C9 D9 CA CB
+E4-ED w/ ^
+ A2 A4 A6 DF AE C0 C1 D1 C2 C3
+EE-F7 w "
+ D8 A5 A7 DA DB CC CD DD CE CF
+F8-F9 Nn w/ ~
+ B6 B7
+FA-FB Yy w/ "
+ EE EF
+FC-FF AaOo w/ ~
+ E1 E2 E9 EA
+100-109 AEIOUaeiou w/ ^ again? I think these are accent U
+ B841 B845 B849 B84F B855 B861 B865 B869 B86F B875
+ 
+Not part of printer table but in text as formatting markers:
+
+E0 Skip Marker
+E2 Form Marker
+E4 Calc marker
+E5 Locked Calc Marker
+E7 Back Space Attrib
+E8 Extend Attrib
+E9 underline Marker
+EA Bold Marker
+EB Unbold Marker
+EC Dotted Marker
+ED Undeline & Dotted
+EE Bold & Dotted
+EE Undeline & Bold & Dotted
+
+The HP Printer Driver I wrote:
+
+Here is what I have for the HP IIIsi and 4Si so far. This should work for generic HP laserjets that use PCL5.
+
+There is a word RestoreP. Use this word to put things back to the original printer setup. This is important while debugging as a save to disk can crash the system if you erase the driver.
+
+Make sure that the two first comments are correct in the program. You should get both numbers, 412234 and 2C162. If these don't match your version of ROM, fix these in this program. If these are not correct, using the word RestoreP will then crash your machine. These values are correct for ver1.7.
+
+Make sure to make backup disk of you source before compiling or you'll have a pain recovering as I have had a couple times. Remember a save to disk saves everything, including any mistakes that crashes the machine. It will be an endless loop of almost loading and then crashing each time.
+
+Load the words that follow, either by direct entry into Forth or, when Forth is enabled in the editor, highlight the Forth code in text and do a front-answer.
+
+I recommend typing it from the editor. If you've made a typo that the Forth compiler detects, it will beep and leave some part of the text highlighted. Return to the editor with re and use the left leap. It will take you to where it found the error.
+
+Once loaded from Forth use the word HP, return to the editor and do a save to the disk. This links the HP setup in place of the FX80 setup that is used for the printer called the 'Common Printer' in the printer setup. This is now the printer for the HP. Remember to return to the FX80, use the word RestoreP and then return to the editor and do a save to disk.
+
+If you accidentally do an empty before using RestoreP , you should enter 2C162 412234 ! before saving to disk.
+
+ ( NOTE: ! is a command to be entered. )
+
+Also note, I've not tested everything yet and I've added weirdprint and checked it for many of the accented characters but there may still be an error.
+
+It does currently work for plain text. One might add proportional print.
+
+Make sure to set the keyboard to ASCII with the setup so that one can enter the various characters. Comments in ( ) need not be entered. Once things are entered and you want to use one of the Foreign keyboards, you can change the keyboard with the 'usefront setup'. You'll need to set it back to ASCI for any of the Forth words that have < or >.
+
+Also note that tForth is case sensitive and that the space characters within "" strings are important.
+
+Refer to HP's 'User's Reference Manual' to understand the strings I've used. Other than P" most of the code should be clear. I created P" because there was no easy way to enter control characters in quoted strings.
+
+Code follows:
+
+ ( ' fx80setup +table . 412234 )
+ 412234 integer setup'
+ ( setup' @ . 2C162 ) 
+ 2C162  integer 'fx80
+
+: P" ( string" | same as " but ^ causes control next char )
+  here 1+ dup dup >r 1+ dup r> ( cnt@ from to cnt@ )
+  [compile] "    ( Reads the string into dictionary )
+  c@ dup         ( Cnt@ to from cnt cnt )
+  if
+    0 do
+      2dup c@ dup    ( cnt@ to from to char char )
+      5E =       ( ASCII ^ )
+      if 
+        2drop 1+ 2dup  (cnt@ to from+1 to from+1 )
+        c@ 0BF and swap c!   ( Make control char )
+      else             ( Just normal character )
+        swap c!
+      then       ( cnt@ to from )
+      1+ swap 1+ swap   ( Next pointers )
+    loop
+    - dup >r    ( Calculate difference in string size )
+    over c@ + swap c!   ( correct string count )
+    r> allot    ( Return unused space )
+  else          ( Null string )
+   2drop 2drop 
+  then ; immediate
+
+: RestoreP ( - ) ( remember to do this before empty and save to )
+                  ( the disk. )
+   'fx80 setup' ! ;
+
+: HPdocbreak
+   base decimal
+   <# ascii F hold
+   paperlength papershort + 2- 2/ #s
+   P" ^[&l" "hold #> put"
+   base to ;
+
+0 array HP.printer  ( Use parts of fx80 table )
+ fx80.printer here 7F 2* dup allot move
+  ( Starts at 7F to B8 then D0 to 109 )
+  0144 w, 00B5 w, 00FE w, 02BA w, 00D2 w, 03F8 w, 00DE w, 03E5 w, 00B5 w,
+  0495 w, 0496 w, 0020 w, 0020 w, 06AC w, A94E w, 06AB w, 068F w,
+  05C4 w, 0691 w, 0692 w, 0020 w, 00F4 w, 00BD w, 0020 w, 0020 w,
+  0020 w, 00F5 w, 0020 w, 00BF w, 00BB w, 00BC w, 029E w, 00BE w,
+  05A7 w, 05A6 w, 05A5 w, 05A3 w, 05CB w, 05CC w, 05E0 w, 05B6 w,
+  05D8 w, 05C3 w, 0020 w, 05C8 w, 05C7 w, 05BE w, 05D2 w, 05D3 w,
+  00A8 w, 00A9 w, 00AA w, 00AB w, 05BF w, 057F w, 00AC w, 05AB w, 05F6 w,
+  fx80.printer 0B9 2* + here 0D0 0B9 - 2* dup allot move
+( D0-D9 w/ ' )
+ 0E0 w, 0DC w, 0E5 w, 0E7 w, 0ED w, 0C4 w, 0C5 w, 0D5 w, 0C6 w, B075 w,
+( DA-E3 w/ ` )
+ 0A1 w, 0A3 w, 0E6 w, 0E8 w, 0AD w, 0C8 w, 0C9 w, 0D9 w, 0CA w, 0CB w,
+( E4-ED w/ ^ )
+ 0A2 w, 0A4 w, 0A6 w, 0DF w, 0AE w, 0C0 w, 0C1 w, 0D1 w, 0C2 w, 0C3 w,
+ ( EE-F7 w " )
+ 0D8 w, 0A5 w, 0A7 w, 0DA w, 0DB w, 0CC w, 0CD w, 0DD w, 0CE w, 0CF w,
+( F8-F9 Nn w/ ~ )
+ 0B6 w, 0B7 w,
+( FA-FB Yy w/ " )
+ 0EE w, 0EF w,
+( mFC-FF AaOo w/ ~  )
+ 0E1 w, 0E2 w, 0E9 w, 0EA w,
+( 100-109 AEIOUaeiou w/ ^ again? I think these are accent u )
+ B841 w, B845 w, B849 w, B84F w, B855 w,
+ B861 w, B865 w, B869 w, B86F w, B875 w,
+
+0 array HPfonts
+ decimal
+ 8 c, ascii U c,
+ 19 c, ascii M c,
+ 10 c, ascii U c,
+ 19 c, ascii U c,
+ 17 c, ascii U c,
+  7 c, ascii J c,
+ 11 c, ascii U c,
+ hex
+
+: SelHPfont ( Font - )
+  base >r decimal
+  <#
+  2* HPfonts +
+  dup 1+ c@ hold
+  c@ #s 
+  p" ^[(" "hold
+  #> put"
+  r> base to ;
+
+: HPmagic ( Addr Font - )
+  SelHPfont 1+ c@ <printc> 0 SelHPfont ;
+
+: HPsetup
+  P" ^J" endline" "to
+  P" ^[;" halfline" "to
+  P" ^M" startline" "to
+  0 printerinfo
+  if
+   P" ^[(s1S" +underline" "to
+   P" ^[(s0S" -underline" "to
+  else
+   P" ^[&d0D" c, ] +underline" "to
+   P" ^[&d@" -underline" "to
+  then
+  P" ^[(s3B" +bold" "to
+  P" ^[(s0B" -bold" "to
+  P" ^H" backspace" "to
+  P"  " evenhalfspace" "to
+  P" " oddhalfspace" "to
+  <# 2 printerinfo ?dup
+  if
+   1 =
+   if
+    0C P" ^[&k4S"
+   else
+    10 P" ^[&k2S"
+   then
+  else
+   0A P" ^[&k0S"
+  then
+  "hold char/inch to
+  P" ^[(8U" "hold  ( default to Roman-8 Fonts )
+  ( add any additional strings for init here )
+  P" ^[E" "hold 0 #> initprint" "to
+  0C paperpos to
+  ['] HPdocbreak 'docbreak to
+  ['] HPmagic 'weirdprint to
+  HP.printer printertable to ;
+
+: HP
+  ['] HPsetup exa setup' ! ;
+
+Code Decompiled From the Cat
+
+Examples of decompiled to show printer setups.
+
+Note that "to adjusts the string space to match the size of the string. Typically, setprinter will take what is in printercode and use that for the final initialization of the printer strings. It does a few strings but these can be overwritten as needed. 'Whichprinter' selects between the serial and parallel printer. 'printercode' points to the printer type. One should be able to patch the value in the +table for any of these printers to initialize its own specific printer. The printer listed as the Common printer in the setup menu is the fx80. The fx80 has online docs at: http://files.support.epson.com/pdf/fx80__/fx80__uv.pdf
+
+This is useful in interpreting escape sequences used. I found some docs on the Canon BJ printers at: http://www.precision.com/manuals/Canon_BJ-10sx_Manual.pdf
+
+The following code is decompiled in no particular order. It is just ordered as I decoded it. These should help to understand the various ways the printer is setup. You'll notice that I show manually created strings is the sequence [ ' <"> c, ...... ]. There doesn't seem to be a method of creating control characters with the " ...." type command. You'll notice that I created such in my HP setup, with P" " .
+
+: setprinter ( - )
+  whichprinter to
+  7 printerinfo dup none <> and pageprint to
+  3 printerinfo 2* gutter to
+  1000 rightstop to
+  paperpos off
+  papershort off
+  4 footpos to
+  ['] printerror 'weirdprint to
+  ['] noop 'docbreak to
+  [ ' <"> c, 3 c, 1b c, 1f c, 1 c, ] unoverstrike" "to
+  [ ' <"> c, 1 c, 0c c, ] toppfform" "to
+  [ ' <"> c, 1 c, 0c c, ] endprint" "to
+  braindamaged off
+  boustrophedon off
+  knowshmi? off
+  knowstof? on
+  ulinehack? off
+  knowsbold? on
+  knowsul? on
+  knowsos? off
+  printercode 2* printers + w@ execute
+  vanilla.unbuild unbuildtable to ;
+
+printercode(s)
+ cat180setup 0
+ lbp8setup 1
+ newapsetup 2
+ ap400setup 3 
+ ap300setup 4
+ ap100setup 5
+ bj80setup 6
+ fx80setup 7
+ noprintersetup 8
+
+: printerinfo ( n - Info )
+  0 max 7 min 2* whichprinter
+  if
+    40f416
+  else
+    40f406
+  then
+  + w@ dup 6e65 =
+  if 
+    drop 6e6f6e65
+  then ;
+
+pinterinfo table:
+ 0 italics/underline
+ 1 font
+ 2 pitch
+ 3 left margin offset
+ 4 unidirectional/bidirectional
+ 5 daisy wheel country
+ 6 tray
+ 7 pause between sheets
+
+cat180 
+  daisy wheel US   info 5  0=us 1=canada 
+  char/inch  10
+  left mar offset 0 
+  print mode bidir
+  cut sheet feeder yes
+  pause between sheets no
+vp310311
+  underline prints italics no
+  char font  gothic pica elite courier info 1 gothic=0 to courier=3
+  char / in  10p
+  left mar off
+NewAP
+  Daisy  Wheel  us
+  char/in  10 p
+  printmode bidir
+  cutsheet feed
+  tray sel  a           info 6 = tray
+  pause btwn sheets yes
+AP400  AP300
+  dw
+  c/i
+  left m o 0
+  pm bidir
+  cut sheet feeder no
+  tray select A
+  pause btwn sheet yes
+bubblejet
+  char set  us
+  char/in 10
+  left mar offset 0
+  print mode bidir
+  pause betwen sheet yes
+CommonPrinter
+  underline italics  no  info 0  1=yes
+  char/in 10             info 2 10=0 12=1 16.8=2
+  left mar offset 0      info 3  #chars
+  print mode bidir       info 4  1=unidirectional
+  pause between sheets no info 7  1=yes
+
+: cat180setup ( - )
+ 2 paperpos to
+ local ?name?
+ [ ' <"> c, 1 c, 0a c, ] endline" "to
+ [ ' <"> c, 1 c, 0d c, ] startline" "to
+ [ ' <"> c, 2 c, 1b c, 45 c, ] +underline" "to
+ [ ' <"> c, 2 c, 1b c, 52 c, ] -underline" "to
+ [ ' <"> c, 2 c, 1b c, 4f c, ] +bold" "to
+ [ ' <"> c, 2 c, 1b c, 26 c, ] -bold" "to
+ [ ' <"> c, 1 c, 8 c, ] backspace" "to
+ [ ' <"> c, 7 c, 1b c, 1e c, 5 c, 0a c, 1b c, 1e c, 9 c, ] halfline" "to
+ [ ' <"> c, 2 c, 1b c, 35 c, ] printforward" "to
+ [ ' <"> c, 2 c, 1b c, 36 c, ] printreverse" "to
+ [ ' <"> c, 2 c, 1b c, 1f c, ] hmi" "to
+ 4 printerinfo 0= boustophedon to   ( prints both ways )
+ <# 0d hold 5 printerinfo
+ if
+   6 printerinfo dup none = over 0= or  ( tray select )
+   if
+     31 31
+   else
+     dup 1 =
+     if
+       32 32
+     else
+       32 31 
+     then
+   then
+   hold [ ' <"> c, 2 c, 1b c, 19 c, ] "hold
+   ?name? to
+   drop
+   [ ' <"> c, 3 c, 1b c, 19 c, 52 c, ] endprint" "to
+ else
+   [ ' <"> c, 5 c, 0c c, 1b c, 1b c, 19 c, 45 c, 0d c, ] topofform" "to
+   [ ' <"> c, 3 c, 1b c, 19 c, 45 c, ] "hold
+ then
+    2 printerinfo 0 =  ( pitch )
+ if 
+   [ ' <"> c, 3 c, 1b c, 1f c, 0d c, ] "hold
+   0a 9e rightstop to
+   [ ' <"> c, 7 c, 1b c, 1f c, 7 c, 20 c, 1b c, 1f c, d c, ]
+ else
+   2 printerinfo 1 = 
+   if
+      [ ' <"> c, 3 c, 1b c, 1f c, 0b c, ] "hold
+      0c 0be rightstop to
+      [ ' <"> c,  7 c, 1b c, 1f c, 6 c, 20 c, 1b c, 1f c, ob c, ]
+   else
+      2 printerinfo 2 =
+      if 
+         [ ' <"> c, 3 c, 1b c, 1f c, 9 c, ] "hold
+         0f 0ed rightstop to
+         [ ' <"> c, 7 c, 1b c, 1f c, 5 c, 20 c, 1b c, 1f c, 09 c, ]
+      else
+         printererror
+      then
+      2dup
+   then
+ then
+ evenhalfspace" "to
+ oddhalfspace" "to
+ char/inch to
+ diabolical not
+ if
+   [ ' <"> c, 2 c, 1b c, 3a c, ] "hold
+   0 printerinfo wheel>iso + c@ 10 /mod
+   swap 30 + hold 20 + hold
+   [ ' <"> c, 6 c, 1b c, 3b c, 1b c, 1b c, 28 c, 26 c,] "hold
+ then
+ [ ' <"> c, 9 c, 1b c, 35 c, 1b c, 26 c, 1b c, 52 c, 1b c, 1e c, 09 c, ] "hold
+ 0 #> initprint" "to
+ 5 printerinfo  ( us or Canada )
+ if
+   <# 0d hold ?name? hold
+   [ ' <"> c, 6 c, 0c c, 1b c, 19 c, 52 c, 1b c, 19 c, ] "hold
+   0 #> topofform" "to
+ then
+ knowshmi? on
+ 78 steps/inch to   ( 120 step/inch in decimal )
+ daisyoverstrike 6 footpos to
+ ['] daisymagic 'weirdprint to
+ ['] CATdocbreak 'docbreak to ;
+
+: fx80setup ( - )
+  [ ' <"> c, 1 c, 0a c, ] endline" "to
+  [ ' <"> c, 3 c, 1b c, 4a c, 12 c, ] halfline" "to
+  [ ' <"> c, 0 c, ] startline" "to
+  0 printerinfo ( italics or underline )
+  if 
+    [ ' <"> c, 2 c, 1b c, 34 c, ] +underline" "to
+    [ ' <"> c, 2 c, 1b c, 35 c, ] -underline" "to
+  else 
+    [ ' <"> c, 3 c, 1b c, 2d c, 1 c, ] +underline" "to
+    [ ' <"> c, 3 c, 1b c, 2d c, 0 c, ] -underline" "to
+  then
+  [ ' <"> c, 2 c, 1b c, 47 c, ] +bold" "to
+  [ ' <"> c, 2 c, 1b c, 48 c, ] -bold" "to
+  [ ' <"> c, 1 c, 8 c, ] backspace" "to
+  [ ' <"> c, 1 c, 20 c, ] evenhalfspace" "to
+  [ ' <"> c, 0 c, ] oddhalfspace" "to
+  <# 2 printerinfo ?dup ( pitch )
+  if 
+    1 =
+    if 
+      oc
+      [ ' <"> c, 3 c, 1b c, 4d c, 12 c, ] ( elite mode )
+    else
+      10
+      [ ' <"> c, 3 c, 1b c, 50 c, 0f c, ] ( pica )
+    then
+  else
+    0a
+    [ ' <"> c, 3 c, 1b c, 50 c, 12 c, ] ( pica )
+  then
+  "hold
+  char/inch to
+  4 printerinfo ( unidirectional? )
+  if
+    1
+  else
+    0
+  then
+  hold
+  [ ' <"> c, 2 c, 1b c, 55 c, ] "hold    ( unidirectional mode select )
+  [ ' <"> c, 4 c, 1b c, 40 c, 1b c, 36 c, ] "hold ( reset printer and enable controls )
+  0 #> initprint" "to
+  0c paperpos to
+  ['] bj80docbreak 'docbreak to
+  ['] fx80magic 'weirdprint to
+  fx80.printer printertable to ;
+
+: bj80setup
+  7 paperpos to
+  2 papershort to
+  6 footpos to
+  [ ' <"> c, 1 c, 0A c, ] endline" "to
+  [ ' <"> c, 3 c, 1B c, 4A c, 12 c, ] halfline" "to
+  [ ' <"> c, 0 c, ] startline" "to
+  [ ' <"> c, 3 c, 1B c, 2D c, 1 C, ] +underline" "to
+  [ ' <"> c, 3 c, 1B c, 2D c, 0 c, ] -underline" "to
+  [ ' <"> c, 2 c, 1b c, 45 c, ] +bold" "to
+  [ ' <"> c, 2 c, 1B c, 46 c, ] -bold" "to
+  [ ' <"> c, 1 c, 8 c, ] backspace" "to
+  [ ' <"> c, 1 c, 20 c, ] oddhalfspace" "to
+  [ ' <"> c, 0 c, ] evenfalfspace" "to
+  <# 2 printerinfo 0=
+  if
+    [ ' <"> c, 1 c, 12 c, ] "hold
+    0A char/inch to 
+  else 
+    [ ' <"> c, 1 c, 0F c, ] "hold
+    10 char/inch to
+  then
+  4 printerinfo
+  if 
+    1 
+  else 
+    0
+  then
+  hold
+  [ ' <"> c, 2 c, 1b c, 55 c, ] "hold  ( set direction )
+  [ ' <"> c, 7 c, 1B c, 46 c, 1B c, 2D c, 0 c, 1B c, 36 c, ] "hold
+     ( cancel emphasis mode, cancel underscore, IBM chars set 2 )
+  0 #> initprint" "to
+  ulinehack? on
+  BJ80.printer printertable to
+  ['] bj80docbreak 'docbreak to ;
+
+: lbp8setup
+ local loc0 local loc1 local loc8
+ base loc8 to
+ decimal
+ 4 paperpos to
+ 4 papershort to
+ [ ' <"> c, 3 c, 0C c, 1B c, 3A c, ] endprint" "to
+ [ ' <"> c, 1 c, 0A c, ] endline" "to
+ [ ' <"> c, 4 c, 9B c, 36 c, 30 c, 65 c, ] halfline" "to
+ [ ' <"> c, 1 c, 0D c, ] startline" "to
+ [ ' <"> c, 3 c, 9B c, 31 c, 6D ] +bold" "to
+ [ ' <"> c, 3 c, 9B c, 32 c, 6D ] -bold" "to
+ [ ' <"> c, 1 c, 08 c, ] backspace" "to
+ 0 printerinfo
+ if
+   [ ' <"> c, 3 c, 9b c, 33 c, 6D c, ]         ( Italic on )
+   [ ' <"> c, 4 c, 9B c, 32 c, 33 c, 6D c, ]   ( Medium Char )
+   ulinehack? off
+ else
+   ulinehack? on
+   [ ' <"> c, 3 c, 9B c, 34 c, 6D c, ]         ( Underline On )
+   [ ' <"> c, 4 c, 9B c, 32 c, 34 c, 6D c, ]   ( ???? Char )
+ then
+ -underline" "to
+ +underline" "to
+ <#
+    2 printerinfo 0 =
+    if
+      0A 0 48
+      [ ' <"> c, 4 c, 9B c, 33 c, 36 c, 61 c, ]
+    else
+      2 printerinfo 1 =
+      if
+        0C 04 3C
+        [ ' <"> c, 4 c, 9b c, 33 c, 30 c, 61 c, ]
+      else
+        2 printerinfo 2 =
+        if
+          0E 08 30
+          [ ' <"> c, 4 c,  9B c, 32 c, 34 c, 61 c, ]
+        else
+          printerror
+        then
+      then
+    then
+    2dup evenhalfspace" "to
+    oddhalfspace" "to
+    loc0 to
+    loc1 to
+    char/inch to
+    [ ' <"> c, 2 c, 20 c, 47 c, ] "hold
+    loc0 #s drop
+    [ ' <"> c, 5 c, 9B c, 31 c, 32 c, 30 c, 3B c, ] "hold   ( set pitch )
+    [ ' <"> c, 8 c, 9B c, 32 c, 32 c, 6D c, 9B c, 32 c, 33 c, 6D c, ] "hold  ( upright and medium char )
+    1 printerinfo dup
+    [ ' <"> c, 1 c, 79 c, ] "hold
+    #s drop
+    9B hold
+    0C * loc1 + lbpsmarts + dup W@
+    [ ' <"> c, 2 c, 20 c, 43 c, ] "hold
+    #s drop
+    9B hold
+    2+ w@
+    [ ' <"> c, 2 c, 20 c, 4B c, ] "hold
+    dup #s drop 64 >
+    if
+      3F hold
+    then
+    9B hold 
+    gutter off
+    [ ' <"> c, 1C c, 1B c, 3B c,   ( init iso )
+     1B c, 3D c,
+     1B c, 28 c, 42 c,
+     9B c, 3F c, 34 c, 3B c, 35 c, 6c c, 
+     9B c, 31 c, 31 c, 68 c, 
+     9B c, 3F c, 36 c, 3B c, 38 c, 68 c, 
+     9B c, 30 c, 3B c, 31 c, 75 c, ] "hold
+    0 
+ #> initprint" "to
+ <#
+    [ ' <"> c, 2 c, 20 c, 47 c, ] "hold
+    loc0 #s
+    [ ' <"> c, 3 c, 1B c, 5B c, 3B c, ] "hold
+ #> hmi" "to
+ 6 footpos to
+ LBP.printer printertable to
+ ['] LBPmagic 'weirdprint to
+ ['] LBPdocbreak 'docbreak to
+ loc8 base to ;
+
+: LPBmagic ( Addr ChrSet - )
+ dup 1D >
+ if    
+   1E =
+   if   
+     642    ( ['] mimlt  )
+   else  
+     641    ( ['] mimdpx  )
+   then
+   setcountry
+   [ ' <"> c, 4 c, 0e c, 1b c, 3a c, 1b c, ] put"
+   1+ c@ <printc>
+   [ ' <"> c, 3 c, 1b c, 3b c, 0f c, ] put"
+ else 
+   1- 2* countries + w@ dup setcountry
+   swap 1+ c@ <printc>
+   2 motion 8000 and 
+   if
+     [ ' <"> c, 3 c, 1b c, 29 c, 42 c, ] put"
+     oldcountry off
+     hmi" put"
+   then
+  then ;
+
+: fx80magic ( Addr ChrSet - )
+  [ ' <"> c, 2 c, 1b c, 52 c, ] put" <printc>  ( select an international chr set )
+  1+ c@ <printc>
+  [ ' <"> c, 3 c, 1b c, 52 c, 0 c, ] put" ;
+
+: bj80docbreak
+  [ ' <"> c, 2 c, 1b c, 43 c, ] put" ( Form length )
+  paperlength papershort +
+  2- 2/ <printc> ;
+
+: "  ( - Addr Cnt | expect a string of char in input until " )
+  22 scanfor
+  -1 len +to
+  1 str +to
+  state nesting or 
+  if
+    compile <">
+    len c,
+    here
+    len allot
+    str swap
+    len cmove
+  else
+    str len
+  then ;
+
+: Pickprinter ( - )
+ printercode dup 8 = swap none =
+ or
+ if
+   noprinter error abort
+ then
+ printerport ?dup
+ if 
+   0<
+   if
+     print.parallel
+   else  bran
+     noprinter error abort
+   then
+ else
+   print.serial
+ then ;
+
+: makeprinttable
+ printercode dup 2 5 inrange swap 0= or
+ if
+   daisy.printer trkbuf 214 move trkbuf printertable to
+   0 printerinfo dup
+   0 0d inrange
+   if
+     2* DW.countries + w@ execute
+     patchprint 
+   else
+     printerror 
+   then
+ else
+   printercode 6 = 0 printerinfo 1 = and
+   if
+     BJ80.printer trkbuf 214 move trkbuf printertable to
+     bjsecond.dw patchprint
+    then
+ then ;
+
+: patchprint ( Addr - ) ( table terminated with FFFF )
+  begin
+   dup w@ dup ffff <>
+  while 
+     over 2+ c@ 2* printertable + w!
+     3 + 
+  repeat
+  2drop ;
+
+: "to ( AddrFrom$ CntFrom AddrTo$ CntTo - )
+  <"to>
+  2drop ;
+
+: <"to>
+  local loc0 local loc1 local loc8 local locC local loc10
+  loc0 to
+  loc1 to
+  loc8 to
+  locC to
+  loc1 6 - w@
+  149 <>
+  " not a string variable"
+  abort"
+  loc1 current exa here inrange
+  loc1 strings origin inrange
+  or not " can't assign to string in closed vocabulary"
+  abort"
+  loc8 loc0 - loc10 to
+  loc10 froom?
+  loc1 4 - @ 1 and
+  if
+    -1 loc10 +to 
+  then 
+  loc10 1 and
+  if
+    1 loc10 +to 
+  then
+  loc1 loc0 + dup dup loc10 + here rot - loc1 loc0 + here 1+ loc10
+  move&adjust locC loc1 loc0 + here inrange
+  if
+    loc10 locC +to
+  then
+  locC loc1 loc8 move loc8 loc1 4 - ! loc1 loc8 ;
+
+: print ( char - )
+  dup white? underline and unlinehack? and
+  if
+    bolded
+    if
+      -bold" put"
+    then
+    drop 5F printc
+    bolded
+    if
+      bold" put"
+    then
+   else
+     2* printertable +
+     dup c@ ?dup
+     if
+       dup 1F >
+       if
+         overstrike 1+ c@ printc
+       else
+         'weirdprint execute
+       then
+     else
+       1+ c@ printc
+     then
+   then ;
+
+: overstrike
+  dup 2* printertable + w@ white?
+  if
+    drop
+  else
+    knowsos?
+    if
+      overstrike" put"
+      print FE motion
+      unoverstrike" put"
+    else
+      print backspace
+    then
+  then ;
+
+Disk Relate Decompiled Code
+
+The are 10 decimal sectors per track Each sector is 512 bytes. 1400H per track Disk seems to be a single sided 400K disk but I believe the Cat only uses about 256K. When it initializes the disk, it marks all the sectors as being not there. I think that the unused sectors can be reclaimed and used by Forth for what ever.
+
+: rsector ( Buffer Sec# - )       ( 8            c             10 )
+ local buffer local sector# local rawcmd local retries local recals
+ sector# to
+ buffer to
+ #retry retries to
+ #recal recals to
+ sector# 0A /mod dup seek ?dup
+ if
+   swap drop swap drop exit
+ then
+ 18 shl swap 8 shl or 2 or side# 10 shl or rawcmd to
+ begin  buffer rawcmd <rsector> dup 
+ while
+   retries
+   if  -1 retries +to
+   else  recals
+     if  -1 recals +to
+       #retry retries to
+       recal ?dup
+       if  swap drop exit  then
+       sector# 0A / seek ?dup
+       if  swap drop exit  then
+     else
+       0
+     then
+   then
+ 0=
+ until ;
+
+: seek ( track - f )
+   dup t#on =
+   if  drop don 
+   else  t#on dup 0< swap 50 > or
+     if  recal ?dup
+       if   swap drop exit  then
+     then
+     dup t#on - dup 0<
+     if  negate stepout 
+     else  stepin  then
+     ?dup 
+     if  don ?dup
+       if  swap drop swap drop exit  then
+       0 ioff
+       do  3 ms <step> 3 ms loop
+       12 ms ion t#on to
+     else  drop  then
+     0
+   then ;
+
+: recal
+   don ?dup
+   if  exit then
+   ?trk0
+   if  setin 12 ms 4 ioff
+     begin   <step> 6 ms ?trk0
+     while   1- dup 0=  until
+     ion 0=
+     if  0fe exit  then
+   then
+   don ?dup
+   if  exit  then
+   stepout 12 ms 54 ioff 
+   begin  <step> 6 ms ?trk0 0= 
+   while  1- dup 0=  until
+   ion 0= 
+   if  0fe exit  then
+   0 t#on off ;
+
+Display Low Level Code
+
+code <demit> ( Char X Y - )
+
+0000D924   1e3c 0000           MOVE.B    #0x0000,D7
+    0410100
+0000D928   2247                MOVE      D7,A1
+0000D92A   d2c9                ADDA.W    A1,A1
+0000D92C   d2c9                ADDA.W    A1,A1
+         410400
+0000D92E   2439 0041 00e8      MOVE      A_004100e8,D2     424
+0000D934   d442                ADD.W     D2,D2
+0000D936   d442                ADD.W     D2,D2        1090
+0000D938   2271 2000           MOVE      (D_00,A1,D2.W),A1                                                                           romanfont   (411490)=013BEA
+0000D93C   241f                MOVE      (A7)+,D2
+  y
+0000D93E   221f                MOVE      (A7)+,D1
+  x
+0000D940   201f                MOVE      (A7)+,D0
+  char
+0000D942   c4fc 0498           MULU      #0x0498,D2
+0000D946   d481                ADD       D1,D2
+0000D948   0682 0040 00aa      ADD       #0x4000aa,D2
+0000D94E   2042                MOVE      D2,A0
+0000D950   0880 0007           BCLR      #7,D0
+0000D954   56c1                SNE       D1
+0000D956   e980                ASL       #4,D0
+       16 *
+0000D958   d3c0                ADDA      D0,A1
+0000D95A   5489                ADDQ      #2,A1
+ 2+
+0000D95C   740d                MOVEQ     #0xd,D2      14 pixels wide
+0000D95E   4a01                TST.B     D1
+0000D960   6712                BEQ       B_d974       invert image?
+0000D962   1019                MOVE.B    (A1)+,D0
+0000D964   4600                NOT.B     D0
+0000D966   1080                MOVE.B    D0,(A0)
+0000D968   d1fc 0000 0054      ADDA      #0x00000054,A0
+0000D96E   51ca fff2           DBF       D2,B_1d962
+0000D972   600c                BRA       B_d980
+0000D974   1099                MOVE.B    (A1)+,(A0)
+0000D976   d1fc 0000 0054      ADDA      #0x00000054,A0
+0000D97C   51ca fff6           DBF       D2,B_1d974
+0000D980   4ed4                JMP       (A4)
+
+Font table starts at 13BEC 16 bytes per char( only 14 bytes used ) 4000aa is the start of the text on the video screen. There are 672 or 2A0H bits per line. These are in 84 or 54H bytes.
+
+Video RAM seems to be at 400000. Height is 158 pixels lines. This means that there are 38700 pixels on the screen or 70E0 bytes in the video Ram.
+
+A simple pixel routine would be:
+
+0 array vbit 80 c, 40 c, 20 c, 10 c, 8 c, 4 c, 2 c, 1 c,
+
+: pixel ( x y - )
+     2A0 * + 
+     8 /mod 400000 +
+     swap vbit + c@
+     over c@ xor
+     swap c! ;
+
+Some fonts
+
+A @ 13ffc
+
+ 11100111
+ 11100111
+ 11011011
+ 11011011
+ 10111101
+ 10000001
+ 10111101
+ 10111101
+
+B
+ 10000011
+ 10111101
+ 10111101
+ 10000011
+ 10111101
+ 10111101
+ 10111101
+ 10000011
+
+C
+ 11100011
+ 11011101
+ 10111111
+ 10111111
+ 10111111
+ 11011101
+ 11100011
+
+Cold Boot Code Disassembled from the Cat:
+
+00031F3C   46fc 2700                        MOVE      #0x2700,SR
+00031F40   13fc 001c 0084 0001              MOVE.B    #0x001c,A_00840001
+00031F48   49fa 0008                        LEA       (D_0008,PC),A4
+00031F4C   4ef9 0000 a73a                   JMP       A_0000a73a
+ ;                                                 reset.hardware
+00031F52   207c 0040 7600                   MOVE      #0x00407600,A0
+00031F58   303c 01c2                        MOVE.W    #0x01c2,D0
+00031F5C   72ff                             MOVEQ     #0xff,D1
+00031F5E   10c1                             MOVE.B    D1,(A0)+
+00031F60   5340                             SUBQ.W    #1,D0
+00031F62   66fa                             BNE       B_31f5e
+00031F64   13fc 0000 0080 0002              MOVE.B    #0x0000,A_00800002
+00031F6C   13fc 0009 0080 000e              MOVE.B    #0x0009,A_0080000e
+00031F74   e08f                             LSR       #8,D7
+00031F76   e08f                             LSR       #8,D7
+00031F78   1e39 0080 000a                   MOVE.B    A_0080000a,D7
+00031F7E   13fc 0008 0080 000e              MOVE.B    #0x0008,A_0080000e
+00031F86   4a07                             TST.B     D7
+00031F88   6b00 0166                        BMI.L     B_320f0
+00031F8C   49fa 0008                        LEA       (D_0008,PC),A4
+00031F90   4ef9 0000 ed46                   JMP       A_0000ed46
+ ;                                                          <chksumroms>
+00031F96   2c44                             MOVE      D4,A6
+00031F98   2a43                             MOVE      D3,A5
+00031F9A   207c 0003 fff0                   MOVE      #0x0003fff0,A0
+00031FA0   0148 0000                        MOVEP     (0x0,A0),D0
+00031FA4   4480                             NEG       D0
+00031FA6   b084                             CMP       D4,D0
+00031FA8   6600 0062                        BNE.L     B_3200c
+00031FAC   0148 0001                        MOVEP     (0x1,A0),D0
+00031FB0   4480                             NEG       D0
+00031FB2   b083                             CMP       D3,D0
+00031FB4   6600 0056                        BNE.L     B_3200c
+00031FB8   0148 0008                        MOVEP     (0x8,A0),D0
+00031FBC   4480                             NEG       D0
+00031FBE   b086                             CMP       D6,D0
+00031FC0   6600 004a                        BNE.L     B_3200c
+00031FC4   0148 0009                        MOVEP     (0x9,A0),D0
+00031FC8   4480                             NEG       D0
+00031FCA   b085                             CMP       D5,D0
+00031FCC   6600 003e                        BNE.L     B_3200c
+00031FD0   13fc 0033 0081 000f              MOVE.B    #0x0033,A_0081000f
+00031FD8   13fc 0007 0081 000d              MOVE.B    #0x0007,A_0081000d
+00031FE0   1039 0081 001d                   MOVE.B    A_0081001d,D0
+00031FE6   13fc 0004 0081 001b              MOVE.B    #0x0004,A_0081001b
+00031FEE   13fc 001c 0084 0001              MOVE.B    #0x001c,A_00840001
+00031FF6   203c 0000 a85c                   MOVE      #0x0000a85c,D0
+00031FFC   e058                             ROR.W     #8,D0
+00031FFE   e058                             ROR.W     #8,D0
+00032000   51c8 fffa                        DBF       D0,B_31ffc
+00032004   13fc 0000 0081 001b              MOVE.B    #0x0000,A_0081001b
+0003200C   13fc 001c 0084 0001              MOVE.B    #0x001c,A_00840001
+00032014   49fa 0008                        LEA       (D_0008,PC),A4
+00032018   4ef9 0000 ee34                   JMP       A_0000ee34
+ ;                                                        <ramtest>
+0003201E   4a43                             TST.W     D3
+00032020   6730                             BEQ       B_32052
+00032022   13fc 0099 0081 000f              MOVE.B    #0x0099,A_0081000f
+0003202A   13fc 0003 0081 000d              MOVE.B    #0x0003,A_0081000d
+00032032   1039 0081 001d                   MOVE.B    A_0081001d,D0
+00032038   13fc 0004 0081 001b              MOVE.B    #0x0004,A_0081001b
+00032040   207c 0040 0000                   MOVE      #0x00400000,A0
+00032046   5290                             ADDQ      #1,(A0)
+00032048   13fc 001c 0084 0001              MOVE.B    #0x001c,A_00840001
+00032050   60f4                             BRA       B_32046
+00032052   207c 0040 7604                   MOVE      #0x00407604,A0
+00032058   20c3                             MOVE      D3,(A0)+
+0003205A   20c4                             MOVE      D4,(A0)+
+0003205C   20ce                             MOVE      A6,(A0)+
+0003205E   20cd                             MOVE      A5,(A0)+
+00032060   7000                             MOVEQ     #0x0,D0
+00032062   227c 0003 fff8                   MOVE      #0x0003fff8,A1
+00032068   1029 0000                        MOVE.B    (D_0000,A1),D0
+0003206C   dc80                             ADD       D0,D6
+0003206E   1029 0002                        MOVE.B    (D_0002,A1),D0
+00032072   dc80                             ADD       D0,D6
+00032074   1029 0004                        MOVE.B    (D_0004,A1),D0
+00032078   dc80                             ADD       D0,D6
+0003207A   1029 0006                        MOVE.B    (D_0006,A1),D0
+0003207E   dc80                             ADD       D0,D6
+00032080   20c6                             MOVE      D6,(A0)+
+00032082   1029 0001                        MOVE.B    (D_0001,A1),D0
+00032086   da80                             ADD       D0,D5
+00032088   1029 0003                        MOVE.B    (D_0003,A1),D0
+0003208C   da80                             ADD       D0,D5
+0003208E   1029 0005                        MOVE.B    (D_0005,A1),D0
+00032092   da80                             ADD       D0,D5
+00032094   1029 0007                        MOVE.B    (D_0007,A1),D0
+00032098   da80                             ADD       D0,D5
+0003209A   20c5                             MOVE      D5,(A0)+
+0003209C   207c 0004 0000                   MOVE      #0x00040000,A0
+000320A2   227c 0040 7d54                   MOVE      #0x00407d54,A1
+000320A8   303c 07ff                        MOVE.W    #0x07ff,D0
+000320AC   0348 0000                        MOVEP     (0x0,A0),D1
+000320B0   22c1                             MOVE      D1,(A1)+
+000320B2   5088                             ADDQ      #8,A0
+000320B4   51c8 fff6                        DBF       D0,B_320ac
+000320B8   13fc 001c 0084 0001              MOVE.B    #0x001c,A_00840001
+000320C0   49fa 0008                        LEA       (D_0008,PC),A4
+000320C4   4ef9 0000 edaa                   JMP       A_0000edaa
+ ;                                                   <svtest>
+000320CA   207c 0040 7600                   MOVE      #0x00407600,A0
+000320D0   2140 0028                        MOVE      D0,(D_0028,A0)
+000320D4   207c 0004 0000                   MOVE      #0x00040000,A0
+000320DA   227c 0040 7d54                   MOVE      #0x00407d54,A1
+000320E0   303c 07ff                        MOVE.W    #0x07ff,D0
+000320E4   2219                             MOVE      (A1)+,D1
+000320E6   03c8 0000                        MOVEP     D1,(0x0,A0)
+000320EA   5088                             ADDQ      #8,A0
+000320EC   51c8 fff6                        DBF       D0,B_320e4
+000320F0   49fa 0008                        LEA       (D_0008,PC),A4
+000320F4   4ef9 0000 efae                   JMP       A_0000efae
+ ;                                                       <ramsize>
+000320FA   207c 0040 7600                   MOVE      #0x00407600,A0
+00032100   2080                             MOVE      D0,(A0)
+00032102   2147 002c                        MOVE      D7,(D_002c,A0)
+00032106   42b9 0040 723c                   CLR       A_0040723c
+0003210C   227c 0041 0400                   MOVE      #0x00410400,A1
+00032112   207c 0000 03e0                   MOVE      #0x000003e0,A0
+00032118   303c 07ff                        MOVE.W    #0x07ff,D0
+0003211C   7200                             MOVEQ     #0x0,D1
+0003211E   7200                             MOVEQ     #0x0,D1
+00032120   1218                             MOVE.B    (A0)+,D1
+00032122   e189                             LSL       #8,D1
+00032124   1218                             MOVE.B    (A0)+,D1
+00032126   e189                             LSL       #8,D1
+00032128   1218                             MOVE.B    (A0)+,D1
+0003212A   22c1                             MOVE      D1,(A1)+
+0003212C   51c8 fff0                        DBF       D0,B_4211e
+00032130   2a7c 0003 2486                   MOVE      #0x00032486,A5 ; <cold> + 4
+00032136   2e7c 0040 7d00                   MOVE      #0x00407d00,A7
+0003213C   4e67                             MOVE      A7,USP
+0003213E   2c7c 0040 7b00                   MOVE      #0x00407b00,A6
+00032144   2878 1ff0                        MOVE      A_1FF0.W,A4
+00032148   267c 0000 74c6                   MOVE      #0x000074c6,A3
+0003214E   247c 0000 74e0                   MOVE      #0x000074e0,A2
+00032154   2e3c 0041 0100                   MOVE      #0x00410100,D7
+0003215A   283c 0041 1230                   MOVE      #0x00411230,D4
+00032160   2a3c 0003 2482                   MOVE      #0x00032482,D5
+00032166   4ed4                             JMP       (A4)
+
+00001FF0   74D4
+
+000074D4   1e1d                             MOVE.B    (A5)+,D7
+000074D6   2047                             MOVE      D7,A0
+000074D8   d0c8                             ADDA.W    A0,A0
+000074DA   d0c8                             ADDA.W    A0,A0
+000074DC   2250                             MOVE      (A0),A1
+000074DE   4ed1                             JMP       (A1)
+
+Goes to <cold> but skips <<cold>> that was the boot code above.
+
+0000845E   381e                             MOVE.W    (A6)+,D4
+00008460   305e                             MOVE.W    (A6)+,A0
+00008462   2244                             MOVE      D4,A1
+00008464   2a11                             MOVE      (A1),D5
+00008466   4bf0 5800                        LEA       (D_00,A0,D5.L),A5
+0000846A   4ed4                             JMP       (A4)
+
+Web Reference pages:
+
+http://jef.raskincenter.org/home/
+http://rchi.raskincenter.org
+http://www.old-computers.com/museum/doc.asp?c=642
+http://regnirps.com/Apple6502stuff/apple_iie_cat.htm
+http://www.applefritter.com/ui/cat/explain/explain.html
+http://www.cbsnews.com/stories/2005/02/27/scitech/pcanswer/main676791.shtml
+http://www.answers.com/topic/canon-cat
+http://en.wikipedia.org/wiki/Canon_Cat
+http://www.canoncat.org/index.html
+http://www.landsnail.com/apple/local/cat/canon.html
+http://www.digibarn.com/collections/systems/canon-cat/index.html
+http://www.applefritter.com/ui/cat/index.html
+http://www.jaghouse.com/swyft.html
+http://www.pinga.free-online.co.uk/canon_cat.html
+
+Dwight Elvey
