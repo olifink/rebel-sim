@@ -870,10 +870,12 @@ FindBank` already exists in C++) is sufficient — "`docs/MEMORY-MODEL.md`
 §3.2 explicitly left this as a 'revisit once Forth is actually
 reading/writing through it' question." Raised directly (2026-08-02):
 shared banks should probably be reachable the same way, by type — which
-surfaced a real, previously-unflagged problem this section exists to
-resolve before picking a mechanism, not after.
+led to checking whether cross-arena/shared-bank memory access is
+enforced anywhere today (below), and then a deliberate call on what to
+do about it (2026-08-05, also direct): nothing — see "Isolation: a
+confirmed non-goal, not an oversight" below.
 
-### The finding that shapes this design: memory-access isolation isn't enforced anywhere today
+### A real finding, checked not assumed: memory-access isolation isn't enforced anywhere today
 
 Checked against `rebel-rom/docs/MEMORY-MODEL.md` §2, directly, not
 assumed: *"There is no separate 'special' memory kind from Forth's
@@ -885,40 +887,49 @@ real, physical, fully-accessible memory"). This means `MEMORY-MODEL.md`
 not an *enforcement* — nothing stops a stray or crafted offset from one
 arena's Forth code reaching another arena's private `DICT`/`SYSV`, or a
 shared bank like `KMAP`, since there's no distinction at the addressing
-level once an address is computed. This isn't flagged anywhere in
-`rebel-rom`'s own docs — a genuine gap surfaced by asking "should
-shared banks be `BANK@`-reachable too," not a restatement of something
-already tracked.
+level once an address is computed. Not flagged anywhere in `rebel-rom`'s
+own docs — a genuine finding, surfaced by asking "should shared banks
+be `BANK@`-reachable too," not a restatement of something already
+tracked.
 
-**Rebel-Sim already has a structural advantage here it isn't exploiting
-yet.** Checked `arena.ts`: it does zero bounds-checking of its own — it
-relies entirely on `DataView`, and (confirmed empirically, `node -e`)
-`DataView` throws a real `RangeError` on any out-of-range offset,
-positive or negative. So a Rebel-Sim arena already can't be corrupted
-from *outside its own `ArrayBuffer`* — a guarantee bare-metal C++
-cannot get for free. That boundary is around the *whole arena* today,
-not per-bank — within one arena's buffer, `KMAP` is exactly as exposed
-as `DICT` is, matching Rebel-ROM. But it points at a real option once
-multi-arena lands here: put genuinely-shared banks in a **separate
-`ArrayBuffer`** that a per-arena Forth program is never handed a raw
-offset-space into at all — real enforcement, essentially for free, via
-the same JS mechanism, rather than mirroring Rebel-ROM's "just more
-flat address space" approach by default.
+### Isolation: a confirmed non-goal, not an oversight
+
+Decided directly (2026-08-05), after the finding above was raised:
+**this is correct as-is, not a gap to close.** Multiple, independent
+Forth sections (arenas), fully accessible to the local user and
+machine, with all the risks that implies, is the intended v1 model —
+the same "authentic risk" philosophy `MEMORY-MODEL.md` §1 already
+states for a *single* arena ("a stray write from Forth can corrupt
+Rebel's own programs, screen, or dictionary — that's the intended,
+authentic risk") extends naturally to *multiple* arenas once they
+exist: a fully-trusted, single-local-user machine has no real
+"attacker" for arena isolation to defend against, any more than a
+Spectrum's BASIC program needed protecting from another BASIC program
+that could never run at the same time anyway. A more security-focused
+implementation could enforce real boundaries later — giving
+genuinely-shared banks a separate `ArrayBuffer` a per-arena program is
+never handed offset-space into is a real option, since `DataView`
+already throws a real `RangeError` on any out-of-range offset
+(confirmed by checking `arena.ts`: it does zero bounds-checking of its
+own, relying entirely on `DataView` for this) — but that's future,
+opt-in hardening for a different threat model than this one, and not
+designed further here.
 
 ### Design direction: API-mediated, not an arena-resident table
 
-Given the isolation gap above, an arena-resident bank table Forth walks
-via raw `@`/`C@` (`FORTH-ARCHITECTURE.md` §9 item 4's first option) is
-the wrong direction to build toward: once the table is just memory,
-there's no interception point left for a future access-control decision
-("which banks can this arena's Forth code reach," left unresolved
-below) to hook into — the data being readable *is* the access. A
-primitive is the right shape precisely because it's a checkpoint: today
-it can just
-answer "where's the bank with this tag," and later, once multi-arena
-and shared-bank policy are actually decided, the same call site is
-where "is the caller's arena allowed to see this bank" would get
-checked, with zero redesign.
+With isolation settled as a non-goal, the choice between `BANK@` as a
+primitive versus an arena-resident table Forth walks via raw `@`/`C@`
+(`FORTH-ARCHITECTURE.md` §9 item 4's two options) comes down to
+ordinary implementation economics, not access control: **a primitive
+wins on simplicity today.** Rebel-Sim's `BankTable` (`banks.ts`) is a
+plain host-side TS array of `{tag, name, base, size}` objects, not
+arena-backed data — making it arena-resident would mean inventing a
+wire format and writing real descriptor bytes into the arena on every
+`createBank()` call, solely so Forth could re-parse them back out
+byte-by-byte, when a primitive can just read the existing TS objects
+directly. Same shape as `PAD ( -- addr )`/`LATEST-ADDR` (M16/M13) —
+expose something the host already tracks via a small primitive, rather
+than duplicating it as arena bytes with no other consumer.
 
 **`BANK@ ( "tag" -- addr size )`** — parses the next input token
 directly (the same `nextInputToken()` mechanism `'`/`CREATE`/`VARIABLE`/
@@ -949,19 +960,17 @@ so there's nothing real to return yet. Both are documented future
 extensions (`BANK-NAME@`, a flags cell), not built ahead of an actual
 need for them.
 
-### Shared-bank access control: deliberately not resolved here
+### Shared banks: `BANK@` reaches them too, no special-casing
 
-This section fixes the *shape* (a primitive, not raw address
-arithmetic) specifically so a real access-control decision doesn't
-require retrofitting the mechanism later — it does not make that
-decision. Rebel-Sim has zero multi-arena support today (`Machine`'s
-constructor creates exactly one `Arena`, unconditionally,
-`HAL.md` §3), so there is currently nothing to distinguish "this
-arena's own bank" from "a shared bank" — every bank `BANK@` could ever
-find lives in the one arena that exists. `BANK@` as scoped here works
-correctly and identically for that entire single-arena case with zero
-access-control logic, and stays forward-compatible with adding it once
-multi-arena is actually being built.
+Per the "confirmed non-goal" decision above, `BANK@` doesn't
+distinguish "this arena's own bank" from "a shared bank" at all — it
+finds any bank, arena-private or shared, by tag, uniformly. Rebel-Sim
+has zero multi-arena support today anyway (`Machine`'s constructor
+creates exactly one `Arena`, unconditionally, `HAL.md` §3), so every
+bank `BANK@` can find lives in the one arena that exists regardless;
+once multi-arena lands, this stays exactly this simple by design, not
+by omission — no per-arena filtering to add later, because none is
+wanted.
 
 ### Implementation sketch
 
@@ -995,10 +1004,11 @@ multi-arena is actually being built.
   same as `findBank(tag)`'s existing one-argument semantics today).
 - No `flags` in the returned descriptor — nothing on the Rebel-Sim side
   has one yet.
-- No shared-bank / cross-arena access-control policy decided — this
-  section is preparation for that decision (the right mechanism shape),
-  not the decision itself. Revisit once multi-arena is actually being
-  built on the Rebel-Sim side, not before.
+- No shared-bank / cross-arena access control of any kind — decided
+  directly, not deferred: full mutual accessibility across arenas is
+  the intended v1 model, not a gap. A future security-focused variant
+  could add real enforcement (e.g. a separate `ArrayBuffer` for shared
+  banks); explicitly out of scope for this design.
 - No arena-resident bank table (the rejected direction, reasoning
   above) — API-mediated only.
 - Not implemented ahead of an actual need. This scoping exists so the
