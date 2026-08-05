@@ -75,8 +75,6 @@ export interface Bank {
 }
 
 export class BankTable {
-  private nextSerial = 0;
-
   /** DEVELOPING.md §11/§14, M19/M22: the real source of truth for this
    * table now — reads and allocation both go through it. Public so
    * tests/tooling can inspect it directly. */
@@ -92,8 +90,12 @@ export class BankTable {
     this.mmap.allocate(MMAP_TAG, MMAP_TAG, MMAP_SIZE, DEFAULT_FLAGS);
   }
 
+  /** DEVELOPING.md §20, M27: draws from MMAP's own header cell now, not
+   * a private field — the same counter CREATE-BANK's primitive uses
+   * directly, so this and Forth-side creation can never collide on an
+   * auto-generated name. */
   private generateSerialName(): string {
-    return String(this.nextSerial++).padStart(BANK_NAME_LEN, '0');
+    return String(this.mmap.nextBankSerial()).padStart(BANK_NAME_LEN, '0');
   }
 
   createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {

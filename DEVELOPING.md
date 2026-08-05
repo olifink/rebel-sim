@@ -2209,3 +2209,183 @@ time. A matching entry for the cursor design was added to
 repo, not committed there, same as every prior entry — a heads-up for
 whoever picks up `rebel-rom`'s own Forth phase, not a coordinated
 cross-repo commit).
+
+## 20. A real bank-naming collision bug, found while reviewing storage — done, M27
+
+### The bug, found by reviewing, not assumed
+
+Asked to review whether `CREATE-BANK` (Forth-side, M21) gets the same
+storage treatment as host-created banks. The read side was already
+fine (M22 made `getAllBanks()`/`findBank()`/`saveAsset()`/
+`openProject()` uniform regardless of a bank's origin) — but tracing
+`CREATE-BANK`'s primitive (case 100) turned up a real, reproducible
+bug: it calls `ctx.banks.mmap.allocate()` directly, bypassing the
+name-uniqueness check `BankTable.createBank()` enforces for every
+other creation path. Since `CREATE-BANK` always named a bank after its
+own tag, two Forth-created banks sharing a tag always collided on
+name too. Reproduced directly against the built engine before writing
+anything:
+
+```
+64 CREATE-BANK DATA   → addr 84916, name "DATA"
+64 CREATE-BANK DATA   → addr 84980, name "DATA"   -- same name!
+```
+
+Two concrete, reproduced storage-layer failures followed from this:
+`saveAsset()` writes to `${name}.${ext}` — both banks target the exact
+same file, so the second save silently overwrites the first's data,
+no error, no warning. `openProject()` calls the *checked*
+`BankTable.createBank()` when reconstructing banks from disk — a name
+collision there throws `bank name ... already exists` and **aborts the
+whole project load**, not just skipping the one bad file the way every
+other malformed-asset case (short read, bad extension, oversized
+payload) is handled gracefully. Both reproduced end-to-end against a
+real in-memory `StorageHal`, not just inferred from reading the code.
+
+### Design arc — two false starts, worth recording
+
+**First proposal: give `CREATE-BANK` its own uniqueness check,
+throwing on collision.** Rejected — the user's counter-proposal was
+better: don't fail, just make the name unique, the same way any
+*host*-side `createBank()` call already does when it doesn't care
+about a stable name (`BankTable`'s private `nextSerial`
+counter/`generateSerialName()`, mirroring `CBankTable::
+GenerateSerialName`).
+
+**Second proposal: expose `generateSerialName()` publicly so the
+primitive could call it.** Rejected on sight — "just make something
+internal public" doesn't make the counter *shared*, it just gives one
+more caller access to the same private field, and `CREATE-BANK` still
+couldn't reach it anyway (M21's whole point was zero host round-trip
+— reaching into `BankTable` at all would undo that).
+
+**Third proposal: back the counter with a sysvar (`FORTH.NEXT-BANK`),
+with `BankTable` gaining an `attachSysvars()` method to bridge the
+boot-order gap** (`Sysvars` doesn't exist until *after* `BankTable`
+has already created the `SYSV` bank itself — a real chicken-and-egg
+problem, confirmed by reading `repl.ts`'s actual constructor order,
+not assumed). Worked, but the user called it correctly: **too
+convoluted** — an attach lifecycle, a dual-mode counter (private
+field pre-attach, sysvar post-attach), and a seed-the-sysvar-from-the-
+private-counter step, all just to solve a boot-ordering problem that
+has a much simpler answer.
+
+**What actually shipped: put it in `MMAP`'s own header.** `MemoryMap`
+is constructed and fully usable from the *very first line* of
+`BankTable`'s constructor — before `Sysvars` exists at all, before
+`SYSV` itself is even registered. No chicken-and-egg problem, no
+attach step, no dual-mode counter: `BankTable`'s own fallback and
+`CREATE-BANK`'s primitive both just call the same
+`MemoryMap.nextBankSerial()` method directly.
+
+### The header grows: 4 bytes → 16
+
+```
+offset 0-1: magic ('M','M')
+offset 2:   version
+offset 3:   reserved
+offset 4:   NEXT-BANK   — the shared bank-naming counter (this fix)
+offset 8:   ARENA-SIZE  — moved out of the old CORE.ARENA-SIZE sysvar
+offset 12:  ARENA-ID    — reserved, always 0 today
+```
+
+**Worth naming explicitly: this isn't the same kind of state M22
+removed.** M22's `nextFree`/`slotCount` cursor cells were *derivable*
+by scanning existing slots — genuinely redundant cached state that
+could drift, so M22 deleted them outright. A bank-naming serial is
+different in kind: it has to persist monotonically across the table's
+whole lifetime (never repeat, even once bank deactivation exists),
+which scanning current occupancy alone can't give you. Necessary
+persistent state, not a redundant cache — the same reasoning that
+already justified keeping `nextSerial` as a real field before this
+change, just relocated to be arena-resident and genuinely shared.
+
+**`ARENA-SIZE` moved out of `CORE`, on the same principle the user
+named directly**: it's arena/bank-table bookkeeping, not
+Forth-interpreter-observable state the way `CURSOR-X`/`BASE`/`STATE`
+are — it belongs with `MMAP`, not mixed into `SYSV`. Checked blast
+radius before moving it, not assumed: only one test read it
+(`bank-access.test.ts`), and `app.ts`'s inspector panel already reads
+`arena.sizeBytes` directly, never the sysvar — safe, low-risk move.
+Still reachable from Forth exactly the same way, just through a
+different bank: `BANK@ MMAP 8 + @` instead of
+`BANK@ SYSV <core-offset> + @`.
+
+**`ARENA-ID` is reserved, not built** — the user's own call: "for
+future multi-arena bookkeeping, like a counter on the arena creation
+side... right now 0 is ok as well." No consumer anywhere today
+(checked — first time the concept appears in this codebase at all).
+Written as `0` by `initHeader()`, documented as inert, same precedent
+as `RESIDENT`/`EXTERNAL`/`SWAPPABLE`/`DIRTY`'s reserved bank flags —
+add real meaning the day multi-arena support actually needs it, not
+before.
+
+### Implementation
+
+- `mmap.ts`: `HEADER_SIZE` 4→16. `initHeader()` also writes
+  `NEXT-BANK=0`, `ARENA-SIZE=this.arena.sizeBytes` (already available —
+  `MemoryMap` holds its own `Arena` reference, no new parameter
+  needed), `ARENA-ID=0`. New `nextBankSerial(): number` — reads
+  `NEXT-BANK`, writes it back incremented, returns the pre-increment
+  value (matches the old private field's exact `nextSerial++`
+  semantics).
+- `banks.ts`: `BankTable`'s private `nextSerial` field removed
+  entirely. `generateSerialName()` becomes one line:
+  `String(this.mmap.nextBankSerial()).padStart(BANK_NAME_LEN, '0')`.
+- `primitives.ts`: `CREATE-BANK` (case 100) builds its name the same
+  way, calling `ctx.banks.mmap.nextBankSerial()` directly — still zero
+  `BankTable` round-trip, M21's design goal intact.
+- `repl.ts`: the `CORE.ARENA-SIZE` sysvar write deleted — `MMAP`'s own
+  `initHeader()` (already running as part of `new BankTable(this.arena)`
+  a few lines earlier) covers it now.
+- `rebel-opcodes.json`: `CORE.ARENA-SIZE` field removed from
+  `sysvarGroups`.
+
+### Verification
+
+- Five pre-existing tests broke exactly as predicted while scoping
+  this (checked against real code before writing anything, not
+  guessed from a test-runner error afterward): `bank-access.test.ts`'s
+  `CORE.ARENA-SIZE` test (sysvar gone — rewritten to read `MMAP`'s
+  header instead); `mmap.test.ts`'s raw-`@`-read test (hardcoded old
+  `HEADER_SIZE=4` in its own slot-address formula — updated to `16`);
+  three `CREATE-BANK` naming tests whose premise was "name equals tag"
+  — inverted, same pattern M22 already used once for a different test
+  in this same file.
+- Two new tests added, not just fixes: one confirms the counter is
+  genuinely shared by *interleaving* host-side and Forth-side creation
+  (`createBank()`, `CREATE-BANK`, `createBank()` again) and checking
+  all three names are sequential and distinct — proves real sharing,
+  not two counters that happen not to collide by accident of nothing
+  else calling one of them. The other is an end-to-end `storage.test.ts`
+  case reproducing the *original* bug scenario (two same-tag
+  `CREATE-BANK` banks) all the way through `saveAsset()`/
+  `openProject()`, confirming both survive as distinct files with
+  their original byte content intact — the real motivating failure,
+  fixed, not just a unit assertion on `MemoryMap` in isolation.
+- Full engine suite: 248 passed (246 + 2 new, 5 rewritten). App suite
+  (10) and both builds unaffected.
+- Live, via WebMCP: fresh `Machine`'s `read_banks` showed `MMAP` at
+  `1552` bytes (up from `1540`, the exact `+12` the two new header
+  cells account for), every other bank's base shifted down by exactly
+  12 — and, confirming the new mechanism reproduces old behavior
+  exactly, `SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` still show
+  `00000000` through `00000005`, byte-identical to before this change.
+  `64 CREATE-BANK DATA` typed twice in a row produced `00000006` and
+  `00000007` — no collision, continuing the exact same sequence the
+  boot-time banks used. Zero console errors.
+
+### Scope cuts, explicit
+
+- `ARENA-ID` stays `0`/reserved — no semantics decided, per the user's
+  own call.
+- No change to `openProject()`'s error handling (still aborts the
+  whole load on a name collision) — the realistic trigger for that is
+  gone now that names can't collide, so the defensive hardening
+  discussed earlier (skip the one bad file instead of aborting) is no
+  longer motivated by a live bug; revisit only if a real trigger
+  resurfaces.
+- `MMAP`'s slot byte layout is still not a finalized cross-target
+  contract (`DEVELOPING.md` §11/§14's existing note) — this change
+  grows the *header*, not the slot layout, same open question either
+  way.

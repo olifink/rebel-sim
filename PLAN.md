@@ -340,6 +340,35 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `SCREEN.CURSOR-VISIBLE` sysvar is a real layout proposal, same
     category as `CORE.ARENA-SIZE` (M19), which *did* get an entry —
     added the matching one for M25. See `DEVELOPING.md` §19.
+30. **M27 — a real bank-naming collision bug, found while reviewing
+    storage** — **done**: `CREATE-BANK` bypassed the name-uniqueness
+    check `BankTable.createBank()` enforces everywhere else, and
+    always named a bank after its own tag — so two Forth-created banks
+    sharing a tag always collided on name too, reproduced directly
+    (`64 CREATE-BANK DATA` twice → both named `"DATA"`). Real,
+    end-to-end storage consequences confirmed: `saveAsset()` silently
+    clobbers the first bank's file; `openProject()` throws and aborts
+    the *entire* project load on the collision, unlike every other
+    malformed-asset case, which is skipped gracefully. Two design
+    proposals tried and rejected before landing on the right one: a
+    sysvar-backed counter needed an `attachSysvars()` bridge to solve
+    a real chicken-and-egg problem (`Sysvars` doesn't exist until
+    *after* `BankTable` has already created `SYSV`) — correctly called
+    "too convoluted." **What shipped**: the counter lives in `MMAP`'s
+    own header instead — available from the very first line of
+    `BankTable`'s constructor, no bootstrap-ordering problem at all.
+    `MMAP`'s header grows 4→16 bytes: `NEXT-BANK` (the shared counter,
+    read by both `BankTable`'s own fallback and `CREATE-BANK`
+    directly), `ARENA-SIZE` (moved out of `CORE.ARENA-SIZE` — arena
+    bookkeeping, not interpreter state, checked-low-risk to move),
+    `ARENA-ID` (reserved, `0`, future multi-arena bookkeeping per
+    direct instruction, no consumer yet). Five pre-existing tests
+    updated, two new ones added (genuine host/Forth interleaved-serial
+    sharing; an end-to-end `storage.test.ts` case reproducing the
+    original bug fully fixed). Full engine suite: 248 passed (246+2).
+    Live-verified via WebMCP — `MMAP` now `1552` bytes, every existing
+    bank's serial name unchanged, `CREATE-BANK`'s serials now
+    genuinely sequential with no collision. See `DEVELOPING.md` §20.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

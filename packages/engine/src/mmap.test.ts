@@ -38,6 +38,26 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
     expect(c.base).toBe(b.base + b.size); // right after b, no gap
   });
 
+  it('the bank-naming serial lives in MMAP\'s own header, genuinely shared between host-side createBank() and CREATE-BANK (DEVELOPING.md §20, M27)', () => {
+    const m = new Machine();
+    // Interleaved on purpose: host, then Forth, then host again — no
+    // collision, because both draw from the exact same MMAP.NEXT-BANK
+    // cell, not two independently-incrementing counters that happen
+    // not to collide by accident of nothing else calling one of them.
+    const a = m.banks.createBank('DATA', 64); // host-side, no name given
+    m.interpret('64 CREATE-BANK DATA'); // Forth-side
+    const forthAddr = m.stack.pop();
+    const b = m.banks.createBank('DATA', 64); // host-side again
+
+    const forthBank = m.banks.getAllBanks().find((bk) => bk.base === forthAddr)!;
+    const names = [a.name, forthBank.name, b.name];
+    expect(new Set(names).size).toBe(3); // all distinct
+    // And genuinely sequential, not just distinct by luck.
+    const asNumbers = names.map((n) => Number(n));
+    expect(asNumbers[1]).toBe(asNumbers[0] + 1);
+    expect(asNumbers[2]).toBe(asNumbers[1] + 1);
+  });
+
   it('mirrors every created bank into a slot, in creation order, matching getAllBanks() exactly', () => {
     const banks = new BankTable(new Arena(1 << 16));
     banks.createBank('DSTK', 64, 'ASTACK');
@@ -92,11 +112,13 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   it('a slot is readable directly via raw @ from Forth source, matching BANK@ for the same bank', () => {
     const m = new Machine();
     const dict = m.banks.findBank('DICT')!;
-    // MMAP's own layout (M22): header(4) + slotIndex*24, then
+    // MMAP's own layout (M27): header(16) + slotIndex*24, then
     // tag(4)+name(8) lead into base at +12, size at +16, flags at +20
-    // within a slot.
+    // within a slot. Header grew from 4 to 16 (M27, DEVELOPING.md §20)
+    // — magic+version+reserved(4) + NEXT-BANK(4) + ARENA-SIZE(4) +
+    // ARENA-ID(4).
     const dictSlotIndex = m.banks.getAllBanks().findIndex((b) => b.tag === 'DICT');
-    const slotAddr = 4 + dictSlotIndex * 24;
+    const slotAddr = 16 + dictSlotIndex * 24;
 
     m.interpret(`${slotAddr} 12 + @`); // base
     expect(m.stack.pop()).toBe(dict.base);
@@ -181,35 +203,49 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     const addr = m.stack.pop();
 
     expect(m.banks.getAllBanks().length).toBe(before + 1);
-    expect(m.banks.findBank('GAP1')).toEqual({
+    const bank = m.banks.findBank('GAP1');
+    expect(bank).toMatchObject({
       tag: 'GAP1',
-      name: 'GAP1',
       base: addr,
       size: 128,
       flags: BankFlagResident | BankFlagActive,
     });
+    // M27, DEVELOPING.md §20: named after an auto-generated serial now,
+    // not the tag — see the "names the bank after an auto-generated
+    // serial" test below for why.
+    expect(bank!.name).toMatch(/^\d{8}$/);
     // BANK@ (M20, reads MMAP directly) agrees, as it already did before M22.
     m.interpret('BANK@ GAP1');
     expect(m.stack.pop()).toBe(addr);
   });
 
-  it("createBank()'s name-uniqueness check now also catches a Forth-created bank's name (M22)", () => {
+  it("createBank()'s name-uniqueness check now also catches a Forth-created bank's name (M22/M27)", () => {
     const m = new Machine();
     m.interpret('64 CREATE-BANK DUPE');
-    expect(() => m.banks.createBank('DATA', 64, 'DUPE')).toThrow(/already exists/);
+    m.stack.pop();
+    // M27: the bank's real name is its auto-generated serial, not
+    // "DUPE" (that's only its tag) — read it back rather than assume.
+    const created = m.banks.findBank('DUPE')!;
+    expect(() => m.banks.createBank('DATA', 64, created.name)).toThrow(/already exists/);
   });
 
-  it('names the bank after its (truncated) tag — no auto-serial, matching DEVELOPING.md §13', () => {
+  it('names the bank after an auto-generated serial, not the tag — M27 fixes a real name-collision bug', () => {
     const m = new Machine();
-    // Deliberately >4 chars, to demonstrate the truncation edge case
-    // directly (not via BANK@, which never truncates its search tag —
-    // a >4-char CREATE-BANK tag is only findable by its first 4 chars).
+    // Deliberately >4 chars, to confirm tag truncation still applies
+    // independently of naming (unaffected by this change).
     m.interpret('32 CREATE-BANK LONGNAMETAG');
     const addr = m.stack.pop();
+    const first = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr)!;
+    expect(first.tag).toBe('LONGNAMETAG'.slice(0, 4)); // TAG_SIZE
+    expect(first.name).toMatch(/^\d{8}$/); // serial, not tag-derived
 
-    const slot = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr)!;
-    expect(slot.tag).toBe('LONGNAMETAG'.slice(0, 4)); // TAG_SIZE
-    expect(slot.name).toBe('LONGNAMETAG'.slice(0, 8)); // BANK_NAME_LEN
+    // DEVELOPING.md §20's real motivating bug, reproduced directly:
+    // before M27, two CREATE-BANK calls sharing a tag always got the
+    // *same* name too (both derived from the tag), silently colliding.
+    m.interpret('16 CREATE-BANK LONGNAMETAG');
+    const addr2 = m.stack.pop();
+    const second = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr2)!;
+    expect(second.name).not.toBe(first.name);
   });
 
   it('throws once MMAP itself is full, same as any other allocate() caller', () => {

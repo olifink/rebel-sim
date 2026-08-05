@@ -41,7 +41,19 @@ const NAME_SIZE = 8;
 const HEADER_MAGIC_0 = 'M'.charCodeAt(0);
 const HEADER_MAGIC_1 = 'M'.charCodeAt(0);
 const HEADER_VERSION = 1;
-const HEADER_SIZE = 4;
+
+// DEVELOPING.md §20, M27: three more header cells, arena-bookkeeping
+// that belongs with MMAP itself rather than in SYSV — genuinely
+// necessary persistent state (unlike M22's removed cursor cells,
+// which were *derivable* by scanning slots and so didn't belong
+// anywhere), available from the very first line of BankTable's own
+// constructor, before Sysvars exists at all.
+const NEXT_BANK_OFFSET = 4; // MemoryMap.nextBankSerial()'s counter
+const ARENA_SIZE_OFFSET = 8; // moved out of the old CORE.ARENA-SIZE sysvar
+const ARENA_ID_OFFSET = 12; // reserved, always 0 today — future
+// multi-arena bookkeeping (a counter on the arena-creation side,
+// analogous to NEXT-BANK), no consumer yet, not decided further
+const HEADER_SIZE = 16;
 
 // tag(4) + name(8) + base(4-cell) + size(4-cell) + flags(4-cell).
 const SLOT_SIZE = TAG_SIZE + NAME_SIZE + 4 + 4 + 4;
@@ -88,7 +100,24 @@ export class MemoryMap {
     this.arena.writeByte(b + 0, HEADER_MAGIC_0);
     this.arena.writeByte(b + 1, HEADER_MAGIC_1);
     this.arena.writeByte(b + 2, HEADER_VERSION);
-    this.arena.writeByte(b + 3, 0);
+    this.arena.writeByte(b + 3, 0); // reserved
+    this.arena.writeCellUnsigned(b + NEXT_BANK_OFFSET, 0);
+    this.arena.writeCellUnsigned(b + ARENA_SIZE_OFFSET, this.arena.sizeBytes);
+    this.arena.writeCellUnsigned(b + ARENA_ID_OFFSET, 0); // reserved, DEVELOPING.md §20
+  }
+
+  /** DEVELOPING.md §20, M27: the shared bank-naming counter — both
+   * `BankTable`'s own auto-serial fallback (when no name is given)
+   * and the `CREATE-BANK` primitive draw from this single
+   * arena-resident cell, so two independently-created anonymous
+   * banks (one host-side, one Forth-side) can never collide on
+   * name. Returns the value *before* incrementing (matches the old
+   * private `nextSerial++` field's exact semantics). */
+  nextBankSerial(): number {
+    const offset = this.base + NEXT_BANK_OFFSET;
+    const n = this.arena.readCellUnsigned(offset);
+    this.arena.writeCellUnsigned(offset, n + 1);
+    return n;
   }
 
   private slotOffset(index: number): number {

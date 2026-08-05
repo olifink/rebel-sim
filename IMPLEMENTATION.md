@@ -1710,6 +1710,67 @@ direct confirmation every programmatic caller stayed untouched.
 Live-verified: a fresh page load now shows the cursor at the very
 first prompt, no keystroke needed.
 
+### 1.48 A real bank-naming collision, and `MMAP`'s header grows (M27, `DEVELOPING.md` §20)
+
+Found while reviewing whether `CREATE-BANK` (M21) gets the same
+storage treatment as host-created banks: it bypasses the
+name-uniqueness check `BankTable.createBank()` enforces everywhere
+else, and names a bank after its own tag — so two Forth-created banks
+sharing a tag always collided on name. Reproduced directly
+(`64 CREATE-BANK DATA` twice → both `"DATA"`), then traced through to
+two real storage failures: `saveAsset()` silently overwrites the
+first bank's file (same `${name}.${ext}` path); `openProject()`
+throws on the collision and aborts the *entire* project load, unlike
+every other malformed-asset case (short read, bad extension,
+oversized payload), which is skipped gracefully.
+
+**Two rejected designs, in order.** Failing loudly on the collision
+instead was rejected — better to just make the name unique, the way
+host-side `createBank()` already does via its own private
+`nextSerial` counter when no name is given. Making that counter
+public so `CREATE-BANK`'s primitive could call it was rejected too —
+doesn't make it *shared*, just gives one more caller private access,
+and still means reaching back into `BankTable`, undoing M21's "zero
+host round-trip" property. A sysvar-backed counter (`FORTH.NEXT-BANK`)
+solved the sharing problem but needed an `attachSysvars()` bridge
+method on `BankTable` to solve a real chicken-and-egg problem —
+`Sysvars` doesn't exist until *after* `BankTable` has already created
+the `SYSV` bank itself, confirmed by reading `repl.ts`'s actual
+constructor order. Correctly called out as too convoluted.
+
+**What shipped**: the counter lives in `MMAP`'s own header instead.
+`MemoryMap` is constructed and fully usable from the very first line
+of `BankTable`'s constructor, before `Sysvars` exists at all — no
+bootstrap-ordering problem, no attach step, no dual-mode counter.
+`BankTable`'s own fallback and `CREATE-BANK`'s primitive both call
+`MemoryMap.nextBankSerial()` directly.
+
+`MMAP`'s header grows 4→16 bytes: `NEXT-BANK` (the shared counter —
+genuinely necessary persistent state, unlike M22's removed cursor
+cells, which were *derivable* by scanning and so didn't need to
+exist), `ARENA-SIZE` (moved out of `CORE.ARENA-SIZE` — arena
+bookkeeping, not Forth-interpreter state; checked low-risk to move,
+only one test and no app code depended on the sysvar), `ARENA-ID`
+(reserved, `0`, explicitly for future multi-arena bookkeeping per
+direct instruction — no consumer today, same precedent as the
+reserved `SWAPPABLE`/`DIRTY` bank flags).
+
+*Implementation:* `mmap.ts` (`HEADER_SIZE` 4→16, `initHeader()`
+writes the three new cells, new `nextBankSerial()`), `banks.ts`
+(`nextSerial` private field removed, `generateSerialName()` now one
+line calling `mmap.nextBankSerial()`), `primitives.ts` (`CREATE-BANK`
+builds its name the same way), `repl.ts` (the old `CORE.ARENA-SIZE`
+write deleted — `MMAP.initHeader()` already covers it), `rebel-opcodes.json`
+(`CORE.ARENA-SIZE` field removed). Five pre-existing tests updated
+(a hardcoded old header-size offset, three "name equals tag"
+assumptions inverted), two new ones added — genuine host/Forth
+interleaved-serial sharing, and an end-to-end `storage.test.ts` case
+reproducing the original bug fully fixed, not just a `MemoryMap`-level
+unit assertion. Full engine suite: 248 passed (246+2). Live-verified:
+`MMAP` now `1552` bytes, every existing bank's serial name
+byte-identical to before this change, `CREATE-BANK`'s serials now
+genuinely sequential with no collision.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1843,5 +1904,6 @@ exactly as it would be on the bare-metal target.
 | **M24** | `BASE`/`HEX`/`DECIMAL` (§1.45, tokens 114-116): `BASE ( -- addr )` exposes `FORTH.BASE`'s sysvar address, same `fieldOffset()` pattern `LATEST-ADDR` (M13) used — a real variable, `BASE @`/`n BASE !`, not a read-only value word. `HEX`/`DECIMAL` are thin `setBase()` sugar. A real gotcha (every subsequent numeric token, not just this one, parses under the new base) documented in `DEVELOPING.md` §16, then actually tripped a first-draft test before being fixed and turned into its own explicit assertion. | `rebel-opcodes.json`, `primitives.ts` |
 | **M25** | A visible, inverse-video text cursor: `CURSEN`/`CURSDIS` (§1.46, tokens 117-118). Neither target has ever rendered a visible cursor. `Screen`-level, not HAL, not Forth — `setCursor()` gains a redraw hook every existing cursor-movement path already routes through for free; `writeChar()` itself never auto-inverts (would highlight the character being typed, not the cursor). New `SCREEN.CURSOR-VISIBLE` sysvar, a genuine cross-target candidate like `CORE.ARENA-SIZE`. A real `cls()` ordering bug (cursor drawn before the framebuffer clear, then painted over) found and fixed as part of this change. | `screen.ts`, `rebel-opcodes.json`, `primitives.ts` |
 | **M26** | Wiring the cursor into the interactive REPL (§1.47): one line, `showCursor()`, added to `startRepl()` — not the constructor (would affect every programmatic caller) and not just defaulting the sysvar (wouldn't actually draw anything until the first keystroke). Cursor now visible from the very first prompt, confirmed live. | `repl.ts` |
+| **M27** | A real bank-naming collision bug, found while reviewing storage (§1.48): `CREATE-BANK` bypassed the uniqueness check and named banks after their tag, so two Forth-created banks sharing a tag always collided — reproduced end-to-end through `saveAsset()`/`openProject()`. Fixed by moving the bank-naming serial counter into `MMAP`'s own header (available before `Sysvars` even exists, avoiding a sysvar-backed design's real chicken-and-egg problem). Header grows 4→16 bytes: `NEXT-BANK` (the fix), `ARENA-SIZE` (moved out of `CORE`), `ARENA-ID` (reserved, future multi-arena bookkeeping). | `mmap.ts`, `banks.ts`, `primitives.ts`, `repl.ts`, `rebel-opcodes.json` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

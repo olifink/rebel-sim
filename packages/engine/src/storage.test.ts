@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
 import { BankTable } from './banks.js';
+import { Machine } from './repl.js';
 import { Storage, StorageHal, runStorageSelfTest } from './storage.js';
 
 /** A real (not no-op) in-memory StorageHal — lets these tests exercise
@@ -57,6 +58,42 @@ describe('Storage', () => {
     for (let i = 0; i < bank.size; i++) {
       expect(readArena.readByte(loaded[0].base + i)).toBe((i * 3) & 0xff);
     }
+  });
+
+  it('two CREATE-BANK banks sharing a tag no longer collide on save (DEVELOPING.md §20, M27 — the real bug this fixes)', async () => {
+    const hal = memoryHal();
+    const m = new Machine();
+    const storage = new Storage(m.arena, m.banks, hal);
+
+    m.interpret('64 CREATE-BANK DATA');
+    const addr1 = m.stack.pop();
+    m.interpret('64 CREATE-BANK DATA');
+    const addr2 = m.stack.pop();
+    m.arena.writeByte(addr1, 111);
+    m.arena.writeByte(addr2, 222);
+
+    const created = m.banks.getAllBanks().filter((b) => b.tag === 'DATA');
+    expect(created).toHaveLength(2);
+    expect(created[0].name).not.toBe(created[1].name); // the actual fix
+
+    for (const bank of created) {
+      await storage.saveAsset('COLLIDEPROJ', bank);
+    }
+
+    const readArena = new Arena(1 << 16);
+    const readBanks = new BankTable(readArena);
+    const readStorage = new Storage(readArena, readBanks, hal);
+    const reloaded = await readStorage.openProject('COLLIDEPROJ');
+
+    // Before M27, both banks shared name "DATA" — reproduced directly
+    // while reviewing this: the second saveAsset() silently clobbered
+    // the first's file, and openProject() threw "bank name DATA
+    // already exists" and aborted the whole project load. Now: two
+    // distinct files, both banks recovered, both original byte values
+    // intact.
+    expect(reloaded).toHaveLength(2);
+    const bytes = reloaded.map((b) => readArena.readByte(b.base)).sort();
+    expect(bytes).toEqual([111, 222]);
   });
 
   it('skips files with an unrecognized extension rather than throwing', async () => {

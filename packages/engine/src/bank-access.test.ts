@@ -52,13 +52,12 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
     expect(m.stack.toArray()).toEqual([m.sysvars.getState()]);
   });
 
-  it('CORE.ARENA-SIZE reports the real arena size, reachable the same way', () => {
+  it('arena size lives in MMAP\'s own header now, reachable the same way (DEVELOPING.md §20, M27)', () => {
     const m = new Machine();
-    const arenaSizeAddr = m.sysvars.fieldOffset('CORE', 'ARENA-SIZE');
-    const sysv = m.banks.findBank('SYSV')!;
-    const offset = arenaSizeAddr - sysv.base;
-
-    m.interpret(`BANK@ SYSV ${offset} + @`);
+    // ARENA-SIZE moved out of CORE.ARENA-SIZE into MMAP's header cell
+    // at offset 8 (magic+version+reserved=4, NEXT-BANK=4) — arena
+    // bookkeeping, not Forth-interpreter state.
+    m.interpret('BANK@ MMAP 8 + @');
     expect(m.stack.toArray()).toEqual([m.arena.sizeBytes]);
   });
 });

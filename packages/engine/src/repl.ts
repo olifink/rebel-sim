@@ -175,7 +175,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.sysvars.set('SCREEN', 'PAPER', DEFAULT_PAPER);
     this.sysvars.set('CORE', 'CURSOR-X', 0);
     this.sysvars.set('CORE', 'CURSOR-Y', 0);
-    this.sysvars.setUnsigned('CORE', 'ARENA-SIZE', this.arena.sizeBytes);
+    // DEVELOPING.md §20, M27: ARENA-SIZE moved out of CORE — it's now
+    // MMAP's own header cell (written by mmap.initHeader(), already
+    // run as part of `this.banks = new BankTable(this.arena)` above),
+    // arena-bookkeeping rather than Forth-interpreter state.
 
     const charBank = this.banks.createBank('CHAR', charCols * charRows);
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
