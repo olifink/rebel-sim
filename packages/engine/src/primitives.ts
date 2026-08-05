@@ -674,13 +674,13 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.clear();
       throw new Error('ABORT');
 
-    case 99: { // BANK@ ( "tag" -- addr ) — DEVELOPING.md §10, M18
+    case 99: { // BANK@ ( "tag" -- addr ) — DEVELOPING.md §10/§12, M18/M20
       const tag = ctx.nextInputToken().toUpperCase();
-      const bank = ctx.banks.findBank(tag);
-      if (!bank) {
+      const addr = ctx.banks.mmap.findBankAddr(tag);
+      if (addr === undefined) {
         throw new Error(`? unknown bank: ${tag}`);
       }
-      s.push(bank.base);
+      s.push(addr);
       break;
     }
 

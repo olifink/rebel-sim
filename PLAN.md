@@ -210,14 +210,14 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     the way. Exact slot byte layout isn't a finalized cross-target
     contract yet — mirrored into `rebel-rom/CHANGES.md` for whoever
     picks this up on that side. Detailed below.
-21. **`BANK@` reads `MMAP` directly** — scoped (`DEVELOPING.md` §12,
-    2026-08-05), not built: a pure read-path swap, `BANK@` calling a
-    new `MemoryMap.findBankAddr()` (walks `MMAP`'s slots directly)
-    instead of `ctx.banks.findBank()` (the host TS array) — same
-    observable behavior, proven by the existing `bank-access.test.ts`
-    suite passing unmodified. The smaller, more contained half of
-    M19's "Follow-on, not resolved" note; Forth-side bank creation
-    stays separately scoped, not touched here.
+21. **M20 — `BANK@` reads `MMAP` directly** — **done**: a pure
+    read-path swap, `BANK@` calling a new `MemoryMap.findBankAddr()`
+    (walks `MMAP`'s slots directly) instead of `ctx.banks.findBank()`
+    (the host TS array) — same observable behavior, proven by the
+    existing `bank-access.test.ts` suite passing completely unmodified.
+    The smaller, more contained half of M19's "Follow-on, not
+    resolved" note; Forth-side bank creation stays separately scoped,
+    not touched here. Detailed below.
 22. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
     `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
@@ -2284,3 +2284,38 @@ printed `1048576`, the real default arena size.
 the full build unaffected — no Angular/UI changes this milestone (the
 inspector panel's hex/kB formatting and arena-usage label were a
 separate, earlier UI-only change).
+
+## M20 — `BANK@` reads `MMAP` directly — done
+
+Scoped in `DEVELOPING.md` §12 as the smaller, more contained half of
+M19's own "Follow-on, not resolved" note — a pure read-path swap, not a
+behavior change, made possible because M19 already proved `MMAP` is a
+correct mirror of the host bank table in the same creation order.
+
+**What shipped:** `MemoryMap` (`mmap.ts`) gained one new method,
+`findBankAddr(tag: string): number | undefined` — walks `getSlot(i)`
+for every slot in use, returns the first match's `base`, matching
+`findBank(tag)`'s own "first bank of this type, in creation order"
+semantics exactly. `primitives.ts`'s case 99 (`BANK@`) changed its one
+lookup line from `ctx.banks.findBank(tag)` to
+`ctx.banks.mmap.findBankAddr(tag)` — everything else about `BANK@`
+(token parsing, uppercasing, the `? unknown bank: <TAG>` error, not
+being `IMMEDIATE`) is byte-for-byte unchanged. `PrimitiveContext`'s
+shape didn't change at all — `banks: BankTable` was already there
+(M18); this only changed what `BANK@`'s single call site does with it.
+
+**Verified via the engine test suite**: `bank-access.test.ts`'s
+existing 7 tests all passed completely unmodified — the actual proof
+this was a safe migration, not just an argument for it. Four new tests
+in `mmap.test.ts` cover `findBankAddr()` directly (known tag, unknown
+tag returns `undefined` rather than throwing, first-match-on-repeated-
+tag semantics) plus a direct check that `BANK@`'s own result equals
+`findBankAddr()`'s, confirming the primitive is actually exercising the
+new path. **Live-verified in the browser** via WebMCP:
+`BANK@ SYSV . BANK@ DICT . BANK@ PAD .` printed `1548 13836 84796`,
+matching `read_banks`' own rows exactly; `BANK@ NOPE` still printed
+`? unknown bank: NOPE`, unchanged. Zero console errors.
+
+**Tests:** 212 engine tests total (208 before this milestone, 4 new in
+`mmap.test.ts`), confirmed via a full test run. 10 app tests and the
+full build unaffected — no Angular/UI changes.

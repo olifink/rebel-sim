@@ -1263,7 +1263,7 @@ see the section above; nothing about M19 changes that boundary.
   `rebel-rom/CHANGES.md`, but still needs that side's real agreement
   once `rebel-rom` picks this up.
 
-## 12. `BANK@` reads `MMAP` directly — scoped, not yet built
+## 12. `BANK@` reads `MMAP` directly — done, M20
 
 ### Motivation
 
@@ -1311,18 +1311,24 @@ either way — the entire, unmodified `bank-access.test.ts` suite passing
 against the new lookup path is the actual proof of that, not just an
 argument for it.
 
-### Verification plan
+### Verification
 
-- `bank-access.test.ts`'s existing 7 tests should all pass completely
-  unmodified — the primary evidence this is a safe migration, not a
-  behavior rewrite.
-- New test(s) for `findBankAddr()` itself: a known tag resolves to the
-  right base; an unknown tag returns `undefined`; first-match-on-a-
-  repeated-tag semantics hold, matching `findBank()`'s own test
-  coverage.
-- Live, via WebMCP: the same `BANK@ SYSV`/`BANK@ NOPE`/`BANK@ PAD`
-  checks already done for M18, confirming identical results after the
-  migration.
+- `bank-access.test.ts`'s existing 7 tests all passed completely
+  unmodified, exactly as predicted — the primary evidence this was a
+  safe migration, not a behavior rewrite.
+- New tests, `mmap.test.ts`: `findBankAddr()` resolves a known tag to
+  the same base `findBank()` reports; returns `undefined` (not a
+  throw) for an unknown tag; resolves the first-created bank when a
+  tag repeats, matching `findBank(tag)`'s own semantics; and a direct
+  check that `BANK@ SYSV`'s result equals `findBankAddr('SYSV')`,
+  confirming the primitive is actually using the new path, not just
+  coincidentally agreeing with it.
+- Live, via WebMCP: `BANK@ SYSV . BANK@ DICT . BANK@ PAD .` printed
+  `1548 13836 84796`, matching `read_banks`' own rows exactly;
+  `BANK@ NOPE` still printed `? unknown bank: NOPE`, unchanged. Zero
+  console errors.
+- Full engine (212 tests) + app (10 tests) suites and `npm run build`
+  green, zero regressions.
 
 ### Scope cuts, explicit
 

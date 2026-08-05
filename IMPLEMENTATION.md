@@ -1416,6 +1416,31 @@ flag constants, `BankTable` constructor + `createBank()` wire into
 `MemoryMap`), `index.ts` (new exports), `rebel-opcodes.json`
 (`CORE.ARENA-SIZE` field), `repl.ts` (one line setting `ARENA-SIZE`).
 
+### 1.41 `BANK@` reads `MMAP` directly (M20, `DEVELOPING.md` §12)
+
+The smaller, more contained half of M19's own "Follow-on, not
+resolved" note — a pure read-path swap made possible because M19
+already proved `MMAP` is a correct mirror of the host bank table, in
+the same creation order.
+
+`MemoryMap` (`mmap.ts`) gained `findBankAddr(tag: string): number |
+undefined` — walks every slot in use, returns the first match's
+`base`, matching `findBank(tag)`'s own "first bank of this type, in
+creation order" semantics exactly. `BANK@` (`primitives.ts` case 99)
+changed its one lookup line from `ctx.banks.findBank(tag)` to
+`ctx.banks.mmap.findBankAddr(tag)` — parsing, uppercasing, the
+`? unknown bank: <TAG>` error, and not being `IMMEDIATE` are all
+byte-for-byte unchanged. `PrimitiveContext`'s shape didn't change —
+`banks: BankTable` (M18) already covered this.
+
+Verified by the *unmodified* `bank-access.test.ts` suite (7 tests)
+passing exactly as before — the actual proof this didn't change
+`BANK@`'s observable behavior, not just an argument for it.
+
+*Implementation:* `mmap.ts` (`findBankAddr()`), `primitives.ts` (case
+99's one lookup line), `rebel-opcodes.json` (note update). No
+`PrimitiveContext`/`repl.ts` change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1542,5 +1567,6 @@ exactly as it would be on the bare-metal target.
 | **M17** | `ABORT` (§1.38): scoped in full as `THROW`/`CATCH`/`ABORT`, deliberately trimmed to just `ABORT` (token 98) before implementing — no consumer for the rest without `CATCH`, and this project doesn't track ANS conformance closely. Empties the data stack (`DataStack.clear()`, new) and throws a plain `Error`. Found and fixed a real, independent bug along the way: `threadFrom`'s rstack sentinel leaked one entry per uncaught error, forever — `replLoop`'s catch now clears both stacks on any error, not just `ABORT`. `interpret()`'s contract is unchanged. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
 | **M18** | `BANK@` (§1.39): `BANK@ ( "tag" -- addr )` (token 99) — parses the next input token like `'`/`CREATE`, uppercases it, looks up via `ctx.banks.findBank()`, pushes addr only (matching the `SOMETHING@` one-value convention) or throws `? unknown bank: <TAG>`. API-mediated, not arena-resident — `BankTable` is plain host-side TS. Built once a concrete need appeared: reaching any sysvar from Forth via `BANK@ SYSV <offset> + @`, a hardcoded-offset approach chosen over adding a second named-lookup primitive (`SYSV@`). | `rebel-opcodes.json`, `primitives.ts` |
 | **M19** | `MMAP` (§1.40): arena-resident bank table, bank 0, 64 slots (matches `rebel-rom`'s `BANK_TABLE_MAX_BANKS`) — every `createBank()` call, including `MMAP`'s own self-referential registration, mirrors into it, in addition to (not instead of) the existing host-side array. `Bank` gains a real `flags` field; new `ACTIVE` flag (atomic exclusion during flush) supersedes ever wiring up the confirmed-inert `DIRTY`. Mirror only — `findBank()`/`BANK@`/Forth-side bank creation are unchanged, real follow-on work. Also added `CORE.ARENA-SIZE`, a new sysvar exposing total arena size to Forth. | `mmap.ts` (new), `banks.ts`, `index.ts`, `rebel-opcodes.json`, `repl.ts` |
+| **M20** | `BANK@` reads `MMAP` directly (§1.41): new `MemoryMap.findBankAddr()` walks `MMAP`'s slots instead of `BANK@` calling `BankTable.findBank()` — a pure read-path swap, `BANK@`'s observable behavior unchanged (proven by the unmodified `bank-access.test.ts` suite passing as-is). The smaller half of M19's follow-on; Forth-side bank creation still doesn't exist. | `mmap.ts`, `primitives.ts`, `rebel-opcodes.json` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

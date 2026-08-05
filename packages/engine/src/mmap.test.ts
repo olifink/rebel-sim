@@ -101,3 +101,32 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
     expect(m.stack.pop()).toBe(dict.size);
   });
 });
+
+describe('MemoryMap.findBankAddr (DEVELOPING.md §12, M20) — BANK@\'s real lookup path', () => {
+  it('resolves a known tag to the same base address findBank() reports', () => {
+    const m = new Machine();
+    const dict = m.banks.findBank('DICT')!;
+    expect(m.banks.mmap.findBankAddr('DICT')).toBe(dict.base);
+  });
+
+  it('returns undefined for an unknown tag, not a thrown error', () => {
+    const m = new Machine();
+    expect(m.banks.mmap.findBankAddr('NOPE')).toBeUndefined();
+  });
+
+  it('resolves the first-created bank when a tag repeats, matching findBank(tag) semantics', () => {
+    const banks = new BankTable(new Arena(1 << 16));
+    const first = banks.createBank('DATA', 64, 'FIRST');
+    banks.createBank('DATA', 64, 'SECOND');
+    expect(banks.mmap.findBankAddr('DATA')).toBe(first.base);
+  });
+
+  it('BANK@ itself now resolves through findBankAddr(), not findBank() — same observable result', () => {
+    const m = new Machine();
+    const sysv = m.banks.findBank('SYSV')!;
+    m.interpret('BANK@ SYSV');
+    const result = m.stack.pop();
+    expect(result).toBe(sysv.base);
+    expect(result).toBe(m.banks.mmap.findBankAddr('SYSV'));
+  });
+});

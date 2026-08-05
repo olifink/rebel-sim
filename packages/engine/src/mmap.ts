@@ -158,4 +158,20 @@ export class MemoryMap {
     }
     return out;
   }
+
+  /** DEVELOPING.md §12: BANK@'s real lookup path — the first slot's
+   * base address whose tag matches, `undefined` if none. Slots are
+   * always in creation order, so this matches
+   * `BankTable.findBank(tag)`'s own "first bank of this type"
+   * semantics exactly, reading arena bytes instead of the host array. */
+  findBankAddr(tag: string): number | undefined {
+    const count = this.getSlotCount();
+    for (let i = 0; i < count; i++) {
+      const slot = this.getSlot(i);
+      if (slot.tag === tag) {
+        return slot.base;
+      }
+    }
+    return undefined;
+  }
 }
