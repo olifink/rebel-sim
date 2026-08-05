@@ -1817,3 +1817,98 @@ implementation detail.
   way, from a miscounted manual byte-walk in the live test line
   itself (not a primitive bug) — confirmed the interpreter recovered
   cleanly (empty stack, no corruption), a useful incidental check.
+
+## 16. `BASE`, `HEX`, `DECIMAL` — radix control from Forth source — done, M24
+
+### Motivation
+
+`FORTH.BASE` (`rebel-opcodes.json`'s sysvar table) already exists and
+already does real work — `parseNumber` (`repl.ts`) reads it for input
+radix, `.`/`.S` (tokens 18/102) read it for output — but nothing lets
+Forth source itself inspect or change it. Today the only way to
+switch radix is `ctx.sysvars.setBase()` from TypeScript; there's no
+Forth-level `BASE`, `HEX`, or `DECIMAL`, the exact gap `LATEST-ADDR`
+(token 95, §8) closed for `LATEST` when `VOCABULARY`/`USE` needed
+direct sysvar-cell access.
+
+### The words
+
+| Token | Word | Stack effect | Category | Notes |
+|---|---|---|---|---|
+| 114 | `BASE` | `( -- addr )` | CORE | Pushes the arena address of the `FORTH.BASE` sysvar cell — a real Forth **variable**, not a read-only value the way `HERE`/`LATEST` are (tokens 59/60). Read with `BASE @`, write with `n BASE !`, matching real Forth's own `BASE` exactly (not `LATEST-ADDR`'s split-name pattern — `BASE` doesn't need a separate value-reading word the way `LATEST`/`LATEST-ADDR` do, since nothing already claimed the bare name `BASE` for something else). |
+| 115 | `HEX` | `( -- )` | STANDARD-for-now | Sets `BASE` to 16. Trivially `16 BASE !` once token 114 exists — genuinely derivable, shipped native for the same reason M23's whole batch was (`DEVELOPING.md` §15): consistent with every other STANDARD-for-now word in this codebase, and testable directly against a bare `Machine` the way `system.fth`-defined words (loaded by `packages/app` only) aren't. |
+| 116 | `DECIMAL` | `( -- )` | STANDARD-for-now | Sets `BASE` to 10. Same reasoning as `HEX`. |
+
+### Implementation sketch
+
+- `rebel-opcodes.json`: 3 new entries, tokens 114-116.
+- `primitives.ts`: `case 114` pushes
+  `ctx.sysvars.fieldOffset('FORTH', 'BASE')` — identical shape to
+  `LATEST-ADDR`'s existing case 95, `fieldOffset` already public and
+  already doc-commented for exactly this reuse ("the same way real
+  Forth systems usually treat HERE/LATEST/STATE/BASE as ordinary
+  variables," `sysvars.ts`). `case 115`/`case 116` call
+  `ctx.sysvars.setBase(16)`/`setBase(10)` directly — `Sysvars` already
+  has this exact method, currently only called from `repl.ts`'s own
+  constructor (`this.sysvars.setBase(10)` at boot).
+- No `dictionary.ts`/`inner.ts`/`repl.ts` change — same as every M23
+  word, none of these three need `IMMEDIATE`/`COMPILE_ONLY` or
+  inner-interpreter special-casing.
+
+### A real, existing consequence this doesn't change
+
+`parseNumber` (`repl.ts`) has no leading-radix-prefix syntax (no
+`$FF`/`0x`/`#`-style override) — the *only* way a numeric token gets
+parsed as hex is the current `BASE` value at parse time, for every
+token on the line, not a per-number override. `HEX`/`DECIMAL` make
+this switch reachable from Forth source, but don't change that
+behavior — worth knowing before relying on it (e.g. `HEX DEAD DECIMAL`
+parses `DEAD` as hex correctly, but `HEX DEAD 10 +` also parses the
+literal `10` as hex-16, not decimal-ten, matching real Forth's own
+documented `BASE`-affects-every-token-uniformly behavior).
+
+### Scope cuts, explicit
+
+- No `OCTAL`/`BINARY` — not ANS `CORE`, no current caller needs them;
+  add the day something does, same "don't build ahead" discipline as
+  everywhere else.
+- No `STATE`-address word — `STATE` (`FORTH` group, same as `BASE`)
+  has the identical "real Forth treats it as a variable" gap, but
+  nothing has asked for direct `STATE @`/`STATE !` access yet; flagged
+  here as the next candidate if `fieldOffset`'s reuse pattern comes up
+  again, not scoped now.
+- No `system.fth` change — `HEX`/`DECIMAL` could instead be defined
+  there once `BASE` (token 114) exists (`: HEX 16 BASE ! ;`), matching
+  the `WORDS`/`SEE`/`HIDE` precedent (M12-M14) of composing in Forth
+  once the primitive it needs exists. Deliberately not done — shipping
+  all three as primitives keeps them engine-testable against a bare
+  `Machine`, consistent with M23's own choice for the exact same
+  "genuinely derivable, native for now" category of word.
+
+### Verification — done
+
+- A new `describe` block appended to `low-level-batch.test.ts` (not a
+  separate file — same topic-file organization, radix control is
+  small enough to sit alongside the M23 batch without confusing the
+  two milestones, each still individually traceable via its own test
+  names/comments): `BASE @` reads `10` fresh; `HEX`/`DECIMAL` flip it
+  to `16`/back to `10`; `16 BASE !` proves `BASE` is a real writable
+  variable, not private `HEX`/`DECIMAL` state; `.` after `HEX` prints
+  hex digits. **One test written wrong on the first pass, caught
+  immediately by the suite, not shipped**: `HEX 255 .` was meant to
+  show hex output but `255`'s own digits are all valid hex digits, so
+  it got parsed *as* hex under the just-switched `BASE` (`597`
+  decimal) and printed back out as `255` — a real demonstration of
+  §16's own documented "every subsequent token, not just non-numeric
+  ones" gotcha, encountered firsthand while writing the test for it.
+  Fixed by reordering to `255 HEX .` (the literal parses while still
+  decimal, only the *printing* happens under the new base) — the
+  originally-intended assertion (`ff`) now correct for the right
+  reason. Also added: `HEX 10 DECIMAL` leaves `16` on the stack, not
+  `10` — the gotcha itself, asserted directly, not just narrated.
+- Full engine suite: 237 passed (232 + 5). App suite (10) and both
+  builds unaffected.
+- Live, via WebMCP: `BASE @ .` → `10`; `255 HEX .` → `ff`;
+  `DECIMAL BASE @ .` → `10`; `16 BASE ! FF .` → `ff` (confirms `BASE
+  !` and `HEX` are genuinely the same mechanism, not two independent
+  code paths that happen to agree). Zero console errors.

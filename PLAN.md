@@ -286,6 +286,22 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `CREATE-BANK`'d region). Full engine suite: 232 passed (219+13).
     Live-verified via WebMCP end to end, zero console errors — see
     `DEVELOPING.md` §15 for the full transcript.
+26. **M24 — `BASE`/`HEX`/`DECIMAL`** — **done**: `BASE ( -- addr )`
+    (token 114) exposes the `FORTH.BASE` sysvar cell's address the
+    same way `LATEST-ADDR` (M13) did for `LATEST` — read with
+    `BASE @`, write with `n BASE !`, matching real Forth's own
+    variable-style `BASE`, not a read-only value word. `HEX`/`DECIMAL`
+    (tokens 115/116) are thin `setBase(16)`/`setBase(10)` sugar on
+    top, reusing `Sysvars.setBase()`, already used by `repl.ts`'s own
+    boot code. Zero `repl.ts`/`dictionary.ts`/`inner.ts` changes.
+    A first-draft test (`HEX 255 .`) tripped over the exact
+    every-subsequent-token-parses-as-the-new-base gotcha §16 itself
+    documents — `255`'s digits are all valid hex, so it parsed as hex
+    under the just-switched `BASE` before `.` ever ran; fixed by
+    reordering to `255 HEX .`, and the gotcha itself got its own
+    explicit test (`HEX 10 DECIMAL` leaves `16`, not `10`). Full
+    engine suite: 237 passed (232+5). Live-verified via WebMCP, zero
+    console errors — see `DEVELOPING.md` §16.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

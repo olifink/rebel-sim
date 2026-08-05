@@ -1589,6 +1589,36 @@ generically) picked all 13 up with zero changes of its own, exactly as
 `arena.js` import). New `low-level-batch.test.ts` (13 cases + edge
 cases). No `repl.ts`/`dictionary.ts`/`inner.ts`/`system.fth` change.
 
+### 1.45 `BASE`/`HEX`/`DECIMAL` — radix control from Forth source (M24, `DEVELOPING.md` §16)
+
+`FORTH.BASE` already drove both numeric parsing (`parseNumber` in
+`repl.ts`) and output formatting (`.`/`.S`) — nothing let Forth source
+itself read or change it. `BASE` (token 114) closes that the same way
+`LATEST-ADDR` (M13) closed it for `LATEST`: `ctx.sysvars.fieldOffset(
+'FORTH', 'BASE')` pushed as an address, so `BASE @`/`n BASE !` work
+exactly like a real Forth variable — not a read-only value word the
+way `HERE`/`LATEST` are. `HEX`/`DECIMAL` (115/116) are two-line
+`setBase(16)`/`setBase(10)` calls onto the `Sysvars` method `repl.ts`'s
+own boot code already used.
+
+**A real gotcha, documented before it bit anything in production, then
+actually encountered while writing the test for it:** `parseNumber`
+re-reads `BASE` per token, not per line — so `HEX` doesn't just affect
+non-numeric-looking input, it affects *every* subsequent numeric
+token, including ones that look like decimal numbers (`10` under
+`BASE 16` is decimal sixteen). A first-draft test, `HEX 255 .`,
+intended to demonstrate hex output, instead got bitten by exactly
+this: `255`'s own digits are all valid hex digits, so it parsed as hex
+under the just-switched base before `.` ever ran. Fixed by reordering
+(`255 HEX .` — the literal parses while still decimal, only the print
+happens under the new base); the gotcha itself became its own
+explicit assertion (`HEX 10 DECIMAL` leaves `16` on the stack).
+
+*Implementation:* `rebel-opcodes.json` (3 new entries), `primitives.ts`
+(3 new `case` arms after 113, no new imports — `ctx.sysvars` was
+already accessible). Tests appended to `low-level-batch.test.ts`. No
+`repl.ts`/`dictionary.ts`/`inner.ts`/`system.fth` change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1719,5 +1749,6 @@ exactly as it would be on the bare-metal target.
 | **M21** | `CREATE-BANK` (§1.42): `CREATE-BANK ( size "tag" -- addr )` (token 100) — calls `MemoryMap`'s allocator directly from a primitive, genuinely no host round-trip. Name always equals the (truncated) tag, no auto-serial, no out-of-space check. At the time: invisible to `getAllBanks()`/`findBank()`/`storage.ts`/`read_banks`/the inspector panel — closed by M22. | `rebel-opcodes.json`, `primitives.ts` |
 | **M22** | `MMAP` becomes the real source of truth, no cached state anywhere (§1.43): `mmap.ts` gains `allocate()` (finds a free slot + computes base by scanning all 64 slots' `ACTIVE` bits, no cursor cell), replacing `addBank()`/`getNextFree()`/`getSlotCount()` outright. `BankTable` fully delegates reads/allocation to `mmap`, closing M21's visibility gap and fixing a real overlap bug (host and Forth creation used to drift apart). `MMAP_SIZE` shrinks to 1540. Object identity no longer stable across reads. | `mmap.ts`, `banks.ts`, `primitives.ts` |
 | **M23** | A batch of 13 low-level primitives (§1.44, tokens 101-113): `XOR`, `.S`, `2SWAP`, `2OVER`, `CELLS`, `CELL+`, `FILL`, `CMOVE`, `BL`, `SPACE`, `WITHIN`, `PICK`, `ROLL` — real gaps against M8's own §9 batch. Plain stack-effect primitives, zero `repl.ts`/`dictionary.ts`/`inner.ts` changes needed. `WITHIN` deliberately plain-signed (not full ANS wraparound semantics); no `CMOVE>`/`LSHIFT`/`RSHIFT` added (nothing needs them yet). | `rebel-opcodes.json`, `primitives.ts` |
+| **M24** | `BASE`/`HEX`/`DECIMAL` (§1.45, tokens 114-116): `BASE ( -- addr )` exposes `FORTH.BASE`'s sysvar address, same `fieldOffset()` pattern `LATEST-ADDR` (M13) used — a real variable, `BASE @`/`n BASE !`, not a read-only value word. `HEX`/`DECIMAL` are thin `setBase()` sugar. A real gotcha (every subsequent numeric token, not just this one, parses under the new base) documented in `DEVELOPING.md` §16, then actually tripped a first-draft test before being fixed and turned into its own explicit assertion. | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -93,3 +93,30 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     expect(run('1 2 3 2 ROLL')).toEqual([1, 3, 2]); // ROT: a b c -> b c a
   });
 });
+
+describe('BASE/HEX/DECIMAL (DEVELOPING.md §16, M24)', () => {
+  it('BASE defaults to 10 on a fresh Machine', () => {
+    expect(run('BASE @')).toEqual([10]);
+  });
+
+  it('HEX sets BASE to 16, DECIMAL sets it back to 10', () => {
+    expect(run('HEX BASE @')).toEqual([16]);
+    expect(run('HEX DECIMAL BASE @')).toEqual([10]);
+  });
+
+  it('BASE is a real writable variable, not just HEX/DECIMAL private state', () => {
+    expect(run('16 BASE ! BASE @')).toEqual([16]);
+  });
+
+  it('HEX changes how . formats output', () => {
+    const m = new Machine();
+    // 255 is parsed while still decimal, HEX only affects formatting on .
+    m.interpret('255 HEX .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('ff');
+  });
+
+  it('after HEX, every subsequent numeric token parses as hex too — a real, documented consequence, not a bug', () => {
+    // "10" under BASE 16 is decimal 16, not decimal 10.
+    expect(run('HEX 10 DECIMAL')).toEqual([16]);
+  });
+});

@@ -785,6 +785,18 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    // --- DEVELOPING.md §16, M24: radix control from Forth source ---
+    case 114: // BASE ( -- addr ) — a real variable, same fieldOffset
+      // pattern as LATEST-ADDR (case 95).
+      s.push(ctx.sysvars.fieldOffset('FORTH', 'BASE'));
+      break;
+    case 115: // HEX ( -- )
+      ctx.sysvars.setBase(16);
+      break;
+    case 116: // DECIMAL ( -- )
+      ctx.sysvars.setBase(10);
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

@@ -138,7 +138,11 @@
     { "id": 110, "name": "SPACE", "note": "( -- ) DEVELOPING.md §15, M23: BL EMIT as one word." },
     { "id": 111, "name": "WITHIN", "note": "( n lo hi -- flag ) DEVELOPING.md §15, M23: TRUE if lo <= n < hi. Deliberately plain signed, non-wraparound semantics, not full ANS WITHIN's modular-arithmetic definition — U<(92) already covers the one place unsigned comparison was actually needed, and no current caller needs wraparound ranges." },
     { "id": 112, "name": "PICK", "note": "( xu ... x1 x0 u -- xu ... x1 x0 xu ) DEVELOPING.md §15, M23: generalizes OVER (1 PICK = OVER, 0 PICK = DUP) to arbitrary depth." },
-    { "id": 113, "name": "ROLL", "note": "( xu ... x1 x0 u -- xu-1 ... x1 x0 xu ) DEVELOPING.md §15, M23: generalizes ROT (2 ROLL = ROT) — pops u, then the item u cells down, shifting everything above it down by one and pushing the rolled item on top." }
+    { "id": 113, "name": "ROLL", "note": "( xu ... x1 x0 u -- xu-1 ... x1 x0 xu ) DEVELOPING.md §15, M23: generalizes ROT (2 ROLL = ROT) — pops u, then the item u cells down, shifting everything above it down by one and pushing the rolled item on top." },
+
+    { "id": 114, "name": "BASE", "note": "( -- addr ) DEVELOPING.md §16, M24: pushes the arena address of the FORTH.BASE sysvar cell — a real Forth variable, not a read-only value word like HERE/LATEST. Read with BASE @, write with n BASE !. Same fieldOffset() reuse pattern LATEST-ADDR(95) established for VOCABULARY/USE." },
+    { "id": 115, "name": "HEX", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 16." },
+    { "id": 116, "name": "DECIMAL", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 10." }
   ],
 
   "bankTags": {
