@@ -1912,3 +1912,212 @@ documented `BASE`-affects-every-token-uniformly behavior).
   `DECIMAL BASE @ .` → `10`; `16 BASE ! FF .` → `ff` (confirms `BASE
   !` and `HEX` are genuinely the same mechanism, not two independent
   code paths that happen to agree). Zero console errors.
+
+## 17. `CURSEN`/`CURSDIS` — a visible, inverse-video text cursor — done, M25
+
+### Motivation
+
+`CURSOR-X`/`CURSOR-Y` (`CORE` group) already exist on both targets —
+but checked directly against real code on both sides
+(`screenmodule.cpp`'s `SetCursor`/`AdvanceCursor`, `screen.ts`'s
+same-named methods) confirms neither has ever rendered a *visible*
+cursor. They're pure write-position trackers for `EMIT`/`AT-XY`. This
+is genuinely new ground, not a HAL gap or a cross-target fact to
+reconcile against.
+
+**Layer decision, reasoned through, not guessed:** not HAL, not pure
+Forth — the `Screen` class (`screen.ts`), same tier as `CLS`/`AT-XY`/
+`INK`/`PAPER` already live at. `Screen.writeChar()` is the one
+choke-point every content-writing path (`EMIT`, `CHAR!`, and any
+future bitblt primitive) already funnels through before calling
+`ScreenHal.blitGlyph()` — putting cursor-awareness there would be
+wrong for a different reason (below), but the *general* principle —
+one shared place above the HAL, not duplicated into every write site
+or into every future HAL backend — is why this is a `Screen`-level
+feature. `HAL.md`'s `blitGlyph`/`clearScreen` stay exactly as they are
+today, zero interface change.
+
+**Why `writeChar()` itself must NOT auto-invert, though — worked
+through by tracing `EMIT`'s real call sequence
+(`screen.ts:138-156`):** `EMIT` calls
+`writeChar(cursorCol, cursorRow, code)` *while the cursor sysvars
+still point at that exact cell*, then calls `advanceCursor()`
+afterward. If `writeChar` auto-inverted "whichever cell currently
+equals `CURSOR-X`/`Y`," it would invert the character the user is
+*actively typing*, not the cell the cursor is about to occupy — wrong
+behavior, not just an edge case. The correct terminal-style split:
+content writes (`writeChar`) always use their real, given ink/paper,
+never invert; a *separate* cursor-redraw step runs only when the
+cursor's position changes (`setCursor`) or its visibility toggles
+(`CURSEN`/`CURSDIS`) — and because `setCursor` is already the single
+place both `advanceCursor()` and `EMIT`'s `CR`/`LF` handling and the
+`AT-XY` primitive route through, hooking it there covers every
+cursor-movement path for free, with no change needed at any of those
+call sites.
+
+**Restoring the cell the cursor moves away from costs nothing new —
+confirmed against real code, not assumed:** `CHAR` only ever stores
+the character code (`screen.ts`'s `arena.writeByte` in `writeChar`),
+never per-cell color — so "un-invert the old cell" is just
+`readChar(oldCol, oldRow)` re-blitted with the *current* global
+`INK`/`PAPER`, nothing to remember or restore. `rebel-rom` itself
+relies on exactly this same fact already:
+`CScreenModule::Redraw()` (`screenmodule.h:119-122`, private,
+called from `AttachArena()`) repaints every cell purely from
+`m_pCharBank`'s stored bytes — real, existing precedent for
+"redrawing from `CHAR` content alone is always correct," not a new
+assumption this design introduces.
+
+### The words
+
+| Token | Word | Stack effect | Notes |
+|---|---|---|---|
+| 117 | `CURSEN` | `( -- )` | Turns the cursor on: sets `SCREEN.CURSOR-VISIBLE` `TRUE`, immediately redraws the current cursor cell inverted. |
+| 118 | `CURSDIS` | `( -- )` | Turns it off: sets `SCREEN.CURSOR-VISIBLE` `FALSE`, immediately redraws the current cell normal. |
+
+No dedicated query word — `SCREEN.CURSOR-VISIBLE` is a real sysvar
+cell, already reachable from pure Forth via the existing
+`BANK@ SYSV <offset> + @` mechanism (`BANK@`'s own note,
+`rebel-opcodes.json`) without adding anything new for it, the same
+free side-benefit `LATEST-ADDR`/`BASE` get from living in the sysvar
+table instead of a private field.
+
+### New sysvar: `SCREEN.CURSOR-VISIBLE`
+
+Offset 32 in the `SCREEN` group (`INK`/`PAPER` end at 28-32; next free
+slot). **The reverse of this group's usual direction, same situation
+`CORE.ARENA-SIZE` (M19) was in**: checked directly against
+`rebel-rom/src/sysvars.h`'s real `TScreenSysVars` — it has no such
+field either, since no cursor rendering exists there yet — so this is
+a genuine cross-target candidate proposed from the Rebel-Sim side, not
+a Rebel-Sim-only addition. `HAL boolean convention` (`TRUE=-1`,
+`FALSE=0`) applies, defaults to `FALSE` at boot — the feature is fully
+opt-in; nothing visually changes for any existing Forth source unless
+`CURSEN` is actually called.
+
+### Implementation sketch
+
+- `rebel-opcodes.json`: `SCREEN.CURSOR-VISIBLE` sysvar field (offset
+  32), two new primitive entries, tokens 117-118.
+- `screen.ts`:
+  - New private `redrawCursorAt(col, row, inverted): void` — guarded
+    by the existing private `inBounds()` check (out-of-range cursor
+    silently doesn't render, matching `CHAR!`'s existing
+    silent-no-op-on-out-of-range precedent, not a special case);
+    reads `readChar(col, row)`, computes `ink`/`paper` (swapped if
+    `inverted`), calls `this.hal.blitGlyph(...)` **directly** — not
+    `writeChar()` — since nothing about the cell's actual content
+    changes, only how this one blit call renders it; re-storing the
+    same byte back into `CHAR` via `writeChar` would be harmless but
+    semantically wrong (a redraw is not a write).
+  - New private `isCursorVisible(): boolean` — reads
+    `SCREEN.CURSOR-VISIBLE` from `sysvars`.
+  - `setCursor(col, row)` gains the redraw hook: capture the *old*
+    `(getCursorCol(), getCursorRow())` before overwriting the sysvars;
+    after writing the new position, if `isCursorVisible()`,
+    `redrawCursorAt(oldCol, oldRow, false)` then
+    `redrawCursorAt(col, row, true)`. Zero extra cost when the cursor
+    is off (the common case today) — the `isCursorVisible()` check
+    short-circuits before either redraw call.
+  - New public `showCursor(): void` / `hideCursor(): void` — set the
+    sysvar, then `redrawCursorAt(getCursorCol(), getCursorRow(),
+    <true|false>)` once at the current position (not routed through
+    `setCursor`, since the position itself isn't changing — would
+    otherwise do one redundant extra blit).
+  - **A real ordering bug found while tracing `cls()`, not
+    assumed — fixed as part of this change, not a separate pass:**
+    `cls()` currently calls `setCursor(0, 0)` *before*
+    `hal.clearScreen()` (`screen.ts:160-165`). Under the new
+    `setCursor` hook, that would draw the inverted cursor at `(0,0)`
+    and then immediately paint over it with `clearScreen()`'s
+    full-framebuffer paper fill — cursor invisible right after `CLS`
+    until the next cursor movement. Fix: reorder `cls()` to
+    `hal.clearScreen()` *then* `setCursor(0, 0)`, so the redraw (if
+    the cursor is visible) happens after the screen is actually
+    clear. No behavior change for the `CURSOR-VISIBLE=FALSE` case
+    (today's default) — `clearScreen()`/`setCursor()`'s own effects
+    don't depend on their relative order when there's no redraw hook
+    firing.
+- `primitives.ts`: two `case` arms, `ctx.screen.showCursor()` /
+  `ctx.screen.hideCursor()`. No `dictionary.ts`/`inner.ts`/`repl.ts`
+  change — plain stack-effect-free primitives, same shape as `CLS`.
+
+### Explicitly out of scope here
+
+- **Blinking** — the user asked for enable/disable + static inverse
+  video, not animation. A timed toggle would need to be driven from
+  `packages/app`'s existing `requestAnimationFrame` render loop (the
+  one place periodic redraw already happens, per `PORTING-WEB.md`'s
+  "don't run the interpreter's hot loop, do drive rendering via rAF"
+  rule) — not the engine, not Forth, since neither has any notion of
+  wall-clock time today. Real, separate follow-on if wanted later.
+- **Cat's split cursor** — named explicitly by the user as *not* this;
+  a single `CURSOR-X`/`CURSOR-Y`-anchored cursor only.
+- **Attribute file (per-cell `INK`/`PAPER`)** — a related but
+  genuinely bigger, separate feature. Not needed for this design:
+  cursor redraw only ever needs the *current global* `INK`/`PAPER`
+  (see "restoring... costs nothing new" above), because no per-cell
+  color exists to restore. **Named dependency for later**: if a
+  per-cell attribute bank is ever added, `redrawCursorAt`'s "read
+  `CHAR`, reapply *global* ink/paper" logic would need to instead
+  pull the per-cell stored color for a non-cursor cell — a real
+  future coupling between the two features, not decided now.
+  `rebel-rom`'s own `SCREEN-MODULE.md` (§7) already frames
+  palette/attribute modes as configurable-later, truecolor-as-default,
+  so there's no existing cross-target fact to reconcile against
+  either.
+- No wiring `CURSEN` into `packages/app`'s boot sequence or the
+  on-screen REPL (`repl.ts`'s `startRepl`) — whether the REPL prompt
+  should show a live cursor while typing is a real, separate UX
+  decision (same "primitive first, policy wired up separately" split
+  M8/M9 already used), not decided by scoping the primitive itself.
+
+### Verification — done
+
+- A new `describe` block in `screen.test.ts`, using the exact
+  `spyHal()`/`toHaveBeenCalledWith` technique the existing `CHAR!`/
+  `EMIT`/`CLS` tests already use: `CURSEN` redraws the current cell
+  inverted; moving the cursor (`AT-XY`) while visible restores the old
+  cell and inverts the new one (asserted as two ordered
+  `toHaveBeenNthCalledWith` calls); `CURSDIS` restores normal; an
+  out-of-range `AT-XY` while visible doesn't throw; `CLS` shows the
+  cursor at `(0,0)` *after* the framebuffer clear (the last `blitGlyph`
+  call in the sequence), not painted over — the exact ordering bug
+  this change also fixed, verified directly rather than just
+  asserted-by-construction; a fresh `Machine` triggers zero extra
+  `blitGlyph` calls when the cursor is never enabled (the "opt-in,
+  zero overhead" claim, checked, not assumed).
+- **One test written wrong on the first pass, caught immediately by
+  the suite, not shipped**: a "typing a character draws it normally,
+  not inverted" test assumed exactly two `blitGlyph` calls (content
+  write, then inverted redraw at the new position). Actual: three —
+  `EMIT`'s content write, then `setCursor`'s own "restore the old
+  cell" redraw (which re-reads `CHAR` at the *old* position — now
+  holding the just-typed character, not a space — and redraws it
+  normally, a harmless duplicate blit exactly as this section's
+  implementation sketch predicted), then the real inverted redraw at
+  the new position. Confirmed against the built `dist/` via a
+  throwaway `node -e` script before fixing the test, not guessed from
+  the failure message. Fixed by asserting all three calls in order —
+  the predicted redundancy became a real, checked test case instead
+  of an assumption.
+- Full engine suite: 244 passed (237 + 7). App suite (10) and both
+  builds unaffected — no `dictionary.ts`/`inner.ts`/`repl.ts` change.
+- Live, via WebMCP + screenshots (this genuinely needed visual
+  confirmation — `read_screen`'s plain-text dump can't show a color
+  change): `CLS 5 5 AT-XY CURSEN` showed a solid green block at
+  column 5 (a space cell with `INK`/`PAPER` swapped, boot defaults
+  green-on-black — a swapped blank cell renders as a solid block,
+  exactly as expected) with nothing else on screen to confuse it.
+  Confirmed the cursor block reliably tracks the REPL's own live
+  typing position (it's driven by the same `CURSOR-X`/`Y` the
+  `ACCEPT` echo already advances) by reading `CURSOR-X`/`Y` directly
+  via `BANK@ SYSV 16 + @`/`BANK@ SYSV 20 + @` (`CORE`'s `baseOffset`
+  16 plus each field's own offset) and cross-checking against where
+  the block actually rendered — matched exactly once the REPL's own
+  prompt-redraw cycle was accounted for (an early screenshot looked
+  "wrong" until this cross-check showed it was actually correct — the
+  block was always exactly where `ACCEPT`'s echo cursor legitimately
+  was, not a bug, just an easy position to misjudge from a screenshot
+  alone). `CURSDIS` removed the block cleanly on the next prompt.
+  Zero console errors throughout.

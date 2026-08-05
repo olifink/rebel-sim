@@ -797,6 +797,14 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       ctx.sysvars.setBase(10);
       break;
 
+    // --- DEVELOPING.md §17, M25: a visible, inverse-video text cursor ---
+    case 117: // CURSEN ( -- )
+      ctx.screen.showCursor();
+      break;
+    case 118: // CURSDIS ( -- )
+      ctx.screen.hideCursor();
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

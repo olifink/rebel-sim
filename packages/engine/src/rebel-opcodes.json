@@ -142,7 +142,10 @@
 
     { "id": 114, "name": "BASE", "note": "( -- addr ) DEVELOPING.md §16, M24: pushes the arena address of the FORTH.BASE sysvar cell — a real Forth variable, not a read-only value word like HERE/LATEST. Read with BASE @, write with n BASE !. Same fieldOffset() reuse pattern LATEST-ADDR(95) established for VOCABULARY/USE." },
     { "id": 115, "name": "HEX", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 16." },
-    { "id": 116, "name": "DECIMAL", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 10." }
+    { "id": 116, "name": "DECIMAL", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 10." },
+
+    { "id": 117, "name": "CURSEN", "note": "( -- ) DEVELOPING.md §17, M25: turns the visible text cursor on — sets SCREEN.CURSOR-VISIBLE TRUE and immediately redraws the current cursor cell inverted (ink/paper swapped). Screen-level, not HAL: hooks into Screen.setCursor() so AT-XY/EMIT's auto-advance/CR/LF all move the visible cursor correctly for free." },
+    { "id": 118, "name": "CURSDIS", "note": "( -- ) DEVELOPING.md §17, M25: turns the visible text cursor off — sets SCREEN.CURSOR-VISIBLE FALSE and redraws the current cell normally." }
   ],
 
   "bankTags": {
@@ -179,7 +182,8 @@
         "CHAR-COLS": { "offset": 16, "note": "character grid width = SCREEN-WIDTH / CHAR-CELL-W; the actual addressing stride into the CHAR bank (docs/SCREEN-MODULE.md §3.2), not recomputed on the fly" },
         "CHAR-ROWS": { "offset": 20, "note": "character grid height = SCREEN-HEIGHT / CHAR-CELL-H" },
         "INK": { "offset": 24, "note": "default foreground color (0xRRGGBB) for character writes" },
-        "PAPER": { "offset": 28, "note": "default background color (0xRRGGBB) for character writes" }
+        "PAPER": { "offset": 28, "note": "default background color (0xRRGGBB) for character writes" },
+        "CURSOR-VISIBLE": { "offset": 32, "note": "DEVELOPING.md §17, M25: HAL boolean (TRUE=-1/FALSE=0), defaults FALSE. The reverse of this group's usual direction, same situation CORE.ARENA-SIZE (M19) was in: checked directly against rebel-rom/src/sysvars.h's real TScreenSysVars — it has no such field either, since no target renders a visible cursor yet — a genuine cross-target candidate proposed from the Rebel-Sim side, not Rebel-Sim-only." }
       },
       "groupSizeBytes": 64
     },

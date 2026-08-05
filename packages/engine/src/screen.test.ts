@@ -78,3 +78,91 @@ describe('Screen', () => {
     expect(hal.clearScreen).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
+  it('a fresh Machine has no visible cursor until CURSEN is called', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.interpret('5 5 AT-XY'); // moving the cursor before CURSEN triggers no redraw
+
+    expect(hal.blitGlyph).not.toHaveBeenCalled();
+  });
+
+  it('CURSEN redraws the current cursor cell inverted (ink/paper swapped)', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret('3 4 AT-XY');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('CURSEN');
+
+    // space (32) at (3,4); boot defaults are ink=0x00ff00 (green), paper=0x000000 (black), swapped
+    expect(hal.blitGlyph).toHaveBeenCalledWith(3, 4, 32, 0x000000, 0x00ff00);
+  });
+
+  it('moving the cursor while visible restores the old cell and inverts the new one', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret('5 5 AT-XY CURSEN');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('6 5 AT-XY');
+
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(1, 5, 5, 32, 0x00ff00, 0x000000); // old cell, restored normal
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(2, 6, 5, 32, 0x000000, 0x00ff00); // new cell, inverted
+  });
+
+  it('CURSDIS redraws the current cell normally', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret('2 2 AT-XY CURSEN');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('CURSDIS');
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(2, 2, 32, 0x00ff00, 0x000000);
+  });
+
+  it('typing a character at the cursor draws it normally, not inverted', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret('0 0 AT-XY CURSEN');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('65 EMIT'); // 'A'
+
+    // The typed character itself must never be inverted — DEVELOPING.md
+    // §17's own worked-through reasoning about EMIT's call sequence.
+    // Three calls happen, not two: EMIT's content write (normal), then
+    // setCursor(1,0)'s "restore the old cell" redraw — which redraws the
+    // just-typed 'A' again, harmlessly, since CHAR already holds it by
+    // then (the documented "wasted-but-harmless double-blit") — then the
+    // real new-position redraw, inverted.
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(1, 0, 0, 65, 0x00ff00, 0x000000);
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(2, 0, 0, 65, 0x00ff00, 0x000000);
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(3, 1, 0, 32, 0x000000, 0x00ff00);
+    expect(hal.blitGlyph).toHaveBeenCalledTimes(3);
+  });
+
+  it('an out-of-range AT-XY while visible does not throw', () => {
+    const m = new Machine();
+    m.interpret('1 1 AT-XY CURSEN');
+    expect(() => m.interpret('9999 9999 AT-XY')).not.toThrow();
+  });
+
+  it('CLS shows the cursor at (0,0) after the framebuffer clear, not painted over by it', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret('3 3 AT-XY CURSEN');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('CLS');
+
+    // Last blitGlyph call is the inverted redraw at the new (0,0)
+    // position — proves it happened after clearScreen()'s full-framebuffer
+    // paint, not before (the ordering bug this change also fixed).
+    expect(hal.blitGlyph.mock.calls.at(-1)).toEqual([0, 0, 32, 0x000000, 0x00ff00]);
+  });
+});

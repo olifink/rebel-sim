@@ -1619,6 +1619,67 @@ explicit assertion (`HEX 10 DECIMAL` leaves `16` on the stack).
 already accessible). Tests appended to `low-level-batch.test.ts`. No
 `repl.ts`/`dictionary.ts`/`inner.ts`/`system.fth` change.
 
+### 1.46 A visible, inverse-video text cursor: `CURSEN`/`CURSDIS` (M25, `DEVELOPING.md` §17)
+
+Checked directly against both targets before designing anything:
+neither `screenmodule.cpp` nor `screen.ts` has ever rendered a visible
+cursor — `CURSOR-X`/`CURSOR-Y` are pure write-position trackers. New
+ground, not a HAL gap.
+
+**Layer, reasoned through by tracing `EMIT`'s real call sequence, not
+guessed:** `Screen`-level (`screen.ts`), not HAL, not Forth.
+`writeChar()` never auto-inverts — `EMIT` calls it while the cursor
+sysvars still point at the cell being typed into, so an auto-invert
+there would highlight the character being actively typed, not the
+cursor's actual resting place. Instead, `setCursor()` itself gained
+the redraw hook: capture the old `(col, row)` before overwriting the
+sysvars, and if `SCREEN.CURSOR-VISIBLE` is set, redraw the old cell
+plain then the new cell inverted. Because `advanceCursor()`, `EMIT`'s
+`CR`/`LF` handling, and the `AT-XY` primitive all already route
+through `setCursor()`, every cursor-movement path gets correct
+behavior for free — zero changes needed at any of those call sites.
+
+Restoring the cell the cursor leaves costs nothing new: `CHAR` only
+ever stores the character code, never per-cell color, so
+`redrawCursorAt()` just re-blits `readChar(col, row)` with the
+*current* global `INK`/`PAPER` — nothing to remember. `rebel-rom`
+itself leans on the identical fact already: `CScreenModule::Redraw()`
+(`screenmodule.h`) repaints every cell purely from `m_pCharBank`'s
+stored bytes, real precedent for "`CHAR` content is always enough to
+redraw correctly," not a new assumption.
+
+**A real ordering bug, found while tracing `cls()`, not assumed, fixed
+as part of this change:** `cls()` used to call `setCursor(0, 0)`
+*before* `hal.clearScreen()` — under the new redraw hook, that would
+draw the inverted cursor at `(0,0)` and then immediately paint over it
+with the full-framebuffer clear. Fixed by reordering: clear first,
+then reset the cursor, so any redraw happens after the screen is
+actually clear.
+
+New sysvar `SCREEN.CURSOR-VISIBLE` (offset 32, `HAL` boolean
+convention, defaults `FALSE`) — the reverse of this group's usual
+direction, same situation `CORE.ARENA-SIZE` (M19) was in:
+`rebel-rom/src/sysvars.h`'s real `TScreenSysVars` has no such field
+either, since no target renders a cursor yet, so this is a genuine
+cross-target candidate proposed from the Rebel-Sim side.
+
+**A first-draft test caught its own wrong assumption, not shipped
+wrong:** "typing a character draws it normally, not inverted" assumed
+exactly two `blitGlyph` calls. Actual is three — `EMIT`'s content
+write, then `setCursor`'s "restore the old cell" redraw (which now
+reads back the *just-typed* character, not a space, and redraws it
+normally — a harmless duplicate blit, exactly the "wasted-but-harmless
+double-blit" the scoping doc predicted before any code was written),
+then the real inverted redraw at the new position. Confirmed against
+the built `dist/` via a throwaway script before fixing the test.
+
+*Implementation:* `screen.ts` (`redrawCursorAt()`, `isCursorVisible()`,
+`showCursor()`/`hideCursor()`, `setCursor()`'s redraw hook, `cls()`
+reordered), `rebel-opcodes.json` (`SCREEN.CURSOR-VISIBLE` field, 2 new
+primitive entries), `primitives.ts` (2 new `case` arms). Tests in a
+new `describe` block in `screen.test.ts`. No `dictionary.ts`/
+`inner.ts`/`repl.ts` change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1750,5 +1811,6 @@ exactly as it would be on the bare-metal target.
 | **M22** | `MMAP` becomes the real source of truth, no cached state anywhere (§1.43): `mmap.ts` gains `allocate()` (finds a free slot + computes base by scanning all 64 slots' `ACTIVE` bits, no cursor cell), replacing `addBank()`/`getNextFree()`/`getSlotCount()` outright. `BankTable` fully delegates reads/allocation to `mmap`, closing M21's visibility gap and fixing a real overlap bug (host and Forth creation used to drift apart). `MMAP_SIZE` shrinks to 1540. Object identity no longer stable across reads. | `mmap.ts`, `banks.ts`, `primitives.ts` |
 | **M23** | A batch of 13 low-level primitives (§1.44, tokens 101-113): `XOR`, `.S`, `2SWAP`, `2OVER`, `CELLS`, `CELL+`, `FILL`, `CMOVE`, `BL`, `SPACE`, `WITHIN`, `PICK`, `ROLL` — real gaps against M8's own §9 batch. Plain stack-effect primitives, zero `repl.ts`/`dictionary.ts`/`inner.ts` changes needed. `WITHIN` deliberately plain-signed (not full ANS wraparound semantics); no `CMOVE>`/`LSHIFT`/`RSHIFT` added (nothing needs them yet). | `rebel-opcodes.json`, `primitives.ts` |
 | **M24** | `BASE`/`HEX`/`DECIMAL` (§1.45, tokens 114-116): `BASE ( -- addr )` exposes `FORTH.BASE`'s sysvar address, same `fieldOffset()` pattern `LATEST-ADDR` (M13) used — a real variable, `BASE @`/`n BASE !`, not a read-only value word. `HEX`/`DECIMAL` are thin `setBase()` sugar. A real gotcha (every subsequent numeric token, not just this one, parses under the new base) documented in `DEVELOPING.md` §16, then actually tripped a first-draft test before being fixed and turned into its own explicit assertion. | `rebel-opcodes.json`, `primitives.ts` |
+| **M25** | A visible, inverse-video text cursor: `CURSEN`/`CURSDIS` (§1.46, tokens 117-118). Neither target has ever rendered a visible cursor. `Screen`-level, not HAL, not Forth — `setCursor()` gains a redraw hook every existing cursor-movement path already routes through for free; `writeChar()` itself never auto-inverts (would highlight the character being typed, not the cursor). New `SCREEN.CURSOR-VISIBLE` sysvar, a genuine cross-target candidate like `CORE.ARENA-SIZE`. A real `cls()` ordering bug (cursor drawn before the framebuffer clear, then painted over) found and fixed as part of this change. | `screen.ts`, `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

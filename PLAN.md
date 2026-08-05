@@ -302,6 +302,26 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     explicit test (`HEX 10 DECIMAL` leaves `16`, not `10`). Full
     engine suite: 237 passed (232+5). Live-verified via WebMCP, zero
     console errors — see `DEVELOPING.md` §16.
+27. **M25 — `CURSEN`/`CURSDIS`: a visible, inverse-video text cursor**
+    — **done**: neither target has ever rendered a visible cursor —
+    `CURSOR-X`/`Y` are pure write-position trackers on both sides,
+    checked directly against `screenmodule.cpp` and `screen.ts`.
+    `Screen`-level, not HAL, not Forth: `setCursor()` gains a redraw
+    hook (restore the old cell plain, invert the new one) that every
+    existing cursor-movement path (`AT-XY`, `EMIT`'s auto-advance/
+    `CR`/`LF`) already routes through for free. New
+    `SCREEN.CURSOR-VISIBLE` sysvar (a genuine cross-target candidate,
+    same situation `CORE.ARENA-SIZE` was in at M19). A real ordering
+    bug found while tracing `cls()` — it set the cursor *before*
+    clearing the framebuffer, which would have painted over a
+    freshly-drawn cursor — fixed as part of this change. A first-draft
+    test assumed 2 `blitGlyph` calls when typing at the cursor;
+    actual is 3 (content write, a harmless duplicate redraw of the
+    old — now just-typed — cell, then the real inverted redraw at the
+    new position), confirmed against the built `dist/` before fixing
+    the test. Full engine suite: 244 passed (237+7). Live-verified via
+    WebMCP screenshots (a genuinely visual feature `read_screen` can't
+    confirm) — see `DEVELOPING.md` §17.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

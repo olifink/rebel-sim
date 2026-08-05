@@ -34,6 +34,10 @@ const SPACE = 32;
 const CR = 13;
 const LF = 10;
 
+// HAL boolean convention (FORTH-ARCHITECTURE.md §7): TRUE = -1, FALSE = 0.
+const TRUE = -1;
+const FALSE = 0;
+
 export class Screen {
   readonly cols: number;
   readonly rows: number;
@@ -69,10 +73,53 @@ export class Screen {
 
   /** No bounds-checking, matching CScreenModule::SetCursor — an
    * out-of-range cursor self-corrects on the next emit() via
-   * advanceCursor()'s wrap. */
+   * advanceCursor()'s wrap. DEVELOPING.md §17, M25: also the single
+   * choke-point every cursor-movement path (AT-XY, EMIT's
+   * auto-advance/CR/LF) already routes through, so the visible-cursor
+   * redraw hooks in here once rather than at each call site. */
   setCursor(col: number, row: number): void {
+    const oldCol = this.getCursorCol();
+    const oldRow = this.getCursorRow();
     this.sysvars.set('CORE', 'CURSOR-X', col);
     this.sysvars.set('CORE', 'CURSOR-Y', row);
+    if (this.isCursorVisible()) {
+      this.redrawCursorAt(oldCol, oldRow, false);
+      this.redrawCursorAt(col, row, true);
+    }
+  }
+
+  private isCursorVisible(): boolean {
+    return this.sysvars.get('SCREEN', 'CURSOR-VISIBLE') !== FALSE;
+  }
+
+  /** Re-blits a cell purely from its already-stored CHAR-bank content,
+   * ink/paper swapped if `inverted` — never touches CHAR itself (this
+   * is a redraw, not a write), matching CScreenModule::Redraw()'s own
+   * "CHAR content is always enough to redraw correctly" precedent
+   * (screenmodule.h). Silently no-ops out of range, same convention
+   * writeChar()/readChar() already use. */
+  private redrawCursorAt(col: number, row: number, inverted: boolean): void {
+    if (!this.inBounds(col, row)) {
+      return;
+    }
+    const code = this.readChar(col, row);
+    const ink = inverted ? this.getPaper() : this.getInk();
+    const paper = inverted ? this.getInk() : this.getPaper();
+    this.hal.blitGlyph(col, row, code, ink, paper);
+  }
+
+  /** CURSEN — DEVELOPING.md §17, M25: shows the cursor, inverted, at
+   * its current position. */
+  showCursor(): void {
+    this.sysvars.set('SCREEN', 'CURSOR-VISIBLE', TRUE);
+    this.redrawCursorAt(this.getCursorCol(), this.getCursorRow(), true);
+  }
+
+  /** CURSDIS — DEVELOPING.md §17, M25: hides the cursor, redrawing its
+   * current cell normally. */
+  hideCursor(): void {
+    this.sysvars.set('SCREEN', 'CURSOR-VISIBLE', FALSE);
+    this.redrawCursorAt(this.getCursorCol(), this.getCursorRow(), false);
   }
 
   getInk(): number {
@@ -156,13 +203,17 @@ export class Screen {
   }
 
   /** CLS — fills the CHAR bank with spaces, clears the framebuffer to
-   * the current PAPER, resets the cursor to 0,0. */
+   * the current PAPER, resets the cursor to 0,0. DEVELOPING.md §17,
+   * M25: clearScreen() now runs *before* setCursor(0, 0) — a real
+   * ordering bug found while adding the visible-cursor redraw hook:
+   * the old order drew the cursor first, then immediately painted
+   * over it with the full-framebuffer clear. */
   cls(): void {
     for (let i = 0; i < this.charBank.size; i++) {
       this.arena.writeByte(this.charBank.base + i, SPACE);
     }
-    this.setCursor(0, 0);
     this.hal.clearScreen(this.getPaper());
+    this.setCursor(0, 0);
   }
 
   /** Reads one row as a plain string — a diagnostics/test convenience,
