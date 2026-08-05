@@ -2121,3 +2121,91 @@ opt-in; nothing visually changes for any existing Forth source unless
   was, not a bug, just an easy position to misjudge from a screenshot
   alone). `CURSDIS` removed the block cleanly on the next prompt.
   Zero console errors throughout.
+
+## 18. Wiring `CURSEN` into the interactive REPL — done, M26
+
+### Motivation
+
+§17 shipped the mechanism but deliberately didn't wire it up — named
+explicitly as a separate, undecided UX question ("whether the REPL
+prompt should show a live cursor while typing"). Left as-is, the
+on-screen REPL still booted with no visible cursor at all, unusable in
+practice without a human remembering to type `CURSEN` first.
+
+**Not as simple as defaulting the sysvar — checked, not assumed.**
+`SCREEN.CURSOR-VISIBLE` defaulting to `TRUE` at boot would flip
+`isCursorVisible()`'s answer, but nothing would actually *draw*
+anything: the redraw only fires from inside `setCursor()`/
+`showCursor()`/`hideCursor()`, never from the sysvar write itself, so
+a bare default would sit invisible until the very first cursor
+movement (the first keystroke) — not the "visible from the first
+prompt" behavior actually wanted. And doing it in `Machine`'s
+constructor (the only place that default would naturally go) would
+affect *every* `new Machine()` caller — all 240+ engine tests,
+`mmap.test.ts`, `low-level-batch.test.ts`, anything using
+`interpret()`/`beginLine()` programmatically — not just the
+interactive REPL, breaking §17's own "opt-in, zero overhead unless
+enabled" contract and its own test asserting exactly that.
+
+**The right entry point, confirmed from `repl.ts`'s own header
+comment:** `startRepl()` is explicitly "a self-contained,
+never-completing on-screen REPL," a different entry point from
+`beginLine()`/`interpret()` ("feeding a line programmatically (tests,
+mainly)") — the two share one session slot but are conceptually
+distinct call sites. A single `this.screen.showCursor()` call at the
+top of `startRepl()` (before the generator that drives the actual
+prompt loop is even created) shows the cursor immediately, at
+`(0, 0)`, before the first `'> '` is even emitted — then the very
+first `emitString('> ')` call naturally moves and redraws it, via the
+same `setCursor()` hook §17 already built, to right after the prompt.
+Zero changes to `replLoop()` itself, `app.ts`, or any programmatic
+caller.
+
+### Implementation
+
+- `repl.ts`: one line, `this.screen.showCursor();`, added at the top
+  of `startRepl()`.
+
+### Verification
+
+- Two new tests in `screen.test.ts`'s existing cursor `describe`
+  block: `startRepl()` shows the cursor immediately (asserted via
+  `spyHal`, one inverted `blitGlyph` call at `(0,0)` — the prompt
+  hasn't even been emitted yet at that point, confirming this doesn't
+  wait for the first `step()`); a plain `interpret()` session never
+  shows a cursor (confirms §17's opt-in contract survives this change
+  — checked directly, not just assumed from "I only touched
+  `startRepl()`").
+- Full engine suite: 246 passed (244 + 2), all pre-existing tests
+  unchanged — direct confirmation that scoping this to `startRepl()`
+  really did leave every programmatic caller untouched. App suite (10)
+  and both builds unaffected.
+- Live, via WebMCP + screenshots: a fresh page load now shows the
+  cursor block immediately after the very first `>` prompt, with no
+  keystroke needed — the actual gap this section closes, confirmed
+  visually, not just by a passing test. Typing `2 3 +` and pressing
+  enter showed the block correctly move to the next prompt line
+  afterward. Zero console errors.
+
+## 19. Cross-repo heads-up gap, found and closed
+
+M23 ( §15, low-level primitives)/M24 (§16, `BASE`/`HEX`/`DECIMAL`)/M25
+(§17, visible cursor) all shipped without a corresponding
+`rebel-rom/CHANGES.md` entry, unlike `MMAP` (§11-§14), which got one
+at every stage. Checked, not assumed, before deciding what (if
+anything) needed backfilling: M23/M24 are pure primitive-token
+additions with no real C++ analog to reconcile against yet
+(`rebel-rom`'s Forth executor doesn't exist — *every* token in
+`rebel-opcodes.json` is equally something a future Phase 11 would need
+to mirror wholesale, not a specific fork-point decision the way
+`MMAP`'s memory-layout choice was) — nothing added there. M25's new
+`SCREEN.CURSOR-VISIBLE` sysvar is different in kind: a real
+`TScreenSysVars` layout proposal, explicitly flagged in its own scoping
+section as "the reverse of this group's usual direction... a genuine
+cross-target candidate," the same category of fact `CORE.ARENA-SIZE`
+(M19) was in — and that one *did* get a `CHANGES.md` mention at the
+time. A matching entry for the cursor design was added to
+`rebel-rom/CHANGES.md` to close this gap (untracked file in that sibling
+repo, not committed there, same as every prior entry — a heads-up for
+whoever picks up `rebel-rom`'s own Forth phase, not a coordinated
+cross-repo commit).

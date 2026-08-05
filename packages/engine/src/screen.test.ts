@@ -165,4 +165,27 @@ describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
     // paint, not before (the ordering bug this change also fixed).
     expect(hal.blitGlyph.mock.calls.at(-1)).toEqual([0, 0, 32, 0x000000, 0x00ff00]);
   });
+
+  it('startRepl() shows the cursor immediately, before the first keystroke (DEVELOPING.md §18, M26)', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.startRepl();
+
+    // At startRepl() time the cursor is still at (0,0) — the '> '
+    // prompt hasn't been emitted yet (that happens on the first
+    // step()). One inverted redraw, no content write.
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 32, 0x000000, 0x00ff00);
+  });
+
+  it('a plain interpret()/beginLine() session never shows a cursor — opt-in stays scoped to startRepl()', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.interpret('1 2 + .');
+
+    expect(hal.blitGlyph.mock.calls.every((call) => call[3] !== 0x000000 || call[4] !== 0x00ff00)).toBe(true);
+  });
 });

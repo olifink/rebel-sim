@@ -363,6 +363,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     if (this.session) {
       throw new Error('a previous line is still running or blocked — call step() to continue it');
     }
+    // DEVELOPING.md §17/§18, M25/M26: the interactive on-screen REPL
+    // shows a live cursor from its very first prompt — deliberately
+    // scoped to *this* entry point, not Machine's constructor (would
+    // make every programmatic interpret()/beginLine() caller, tests
+    // included, pay for cursor redraws it never asked for) and not
+    // packages/app (keeps this REPL-level behavior, not app-specific
+    // UI policy — any host driving startRepl() gets it for free).
+    this.screen.showCursor();
     this.session = this.replLoop();
   }
 

@@ -322,6 +322,24 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     the test. Full engine suite: 244 passed (237+7). Live-verified via
     WebMCP screenshots (a genuinely visual feature `read_screen` can't
     confirm) — see `DEVELOPING.md` §17.
+28. **M26 — wire `CURSEN` into the interactive REPL** — **done**: one
+    line, `this.screen.showCursor()`, added to `startRepl()` (not
+    `Machine`'s constructor — would've made every programmatic
+    `interpret()`/`beginLine()` caller, tests included, pay for cursor
+    redraws it never asked for; not just defaulting the sysvar either
+    — the redraw only fires from inside `setCursor()`/`showCursor()`,
+    so a bare default sysvar wouldn't actually draw anything until the
+    first keystroke). Shows the cursor immediately at the very first
+    `'> '` prompt, before any typing. Full engine suite: 246 passed
+    (244+2). Live-verified: a fresh page load now shows the cursor
+    block right away — see `DEVELOPING.md` §18.
+29. **Cross-repo heads-up gap, found and closed**: M23/M24/M25 shipped
+    without a `rebel-rom/CHANGES.md` entry, unlike `MMAP`. Checked:
+    M23/M24 are pure primitive-token additions with nothing in
+    `rebel-rom` to reconcile against yet; M25's new
+    `SCREEN.CURSOR-VISIBLE` sysvar is a real layout proposal, same
+    category as `CORE.ARENA-SIZE` (M19), which *did* get an entry —
+    added the matching one for M25. See `DEVELOPING.md` §19.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

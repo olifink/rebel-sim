@@ -1680,6 +1680,36 @@ primitive entries), `primitives.ts` (2 new `case` arms). Tests in a
 new `describe` block in `screen.test.ts`. No `dictionary.ts`/
 `inner.ts`/`repl.ts` change.
 
+### 1.47 Wiring the cursor into the interactive REPL (M26, `DEVELOPING.md` §18)
+
+§1.46 shipped the mechanism but left it unwired — the on-screen REPL
+booted with no visible cursor until a human typed `CURSEN` first.
+**Not simply "default the sysvar to `TRUE`"**: the redraw only ever
+fires from inside `setCursor()`/`showCursor()`/`hideCursor()`, never
+from the sysvar write itself, so a bare default would stay invisible
+until the first keystroke moved the cursor — not "visible from the
+first prompt." And doing it in `Machine`'s constructor (the only
+natural place for a default) would affect every `interpret()`/
+`beginLine()` caller across the whole engine test suite, not just the
+interactive REPL, breaking §1.46's own opt-in contract.
+
+`repl.ts`'s own header comment already names the right boundary:
+`startRepl()` is "a self-contained, never-completing on-screen REPL,"
+distinct from `beginLine()`/`interpret()` ("feeding a line
+programmatically (tests, mainly)"). One line —
+`this.screen.showCursor();` — at the top of `startRepl()`, before the
+prompt-loop generator is even created, shows the cursor at `(0,0)`
+immediately; the first `emitString('> ')` then naturally moves and
+redraws it via the same hook §1.46 already built.
+
+*Implementation:* `repl.ts` only, one line in `startRepl()`. Two new
+tests in `screen.test.ts`'s cursor `describe` block (shows
+immediately; a plain `interpret()` session never shows one). Full
+engine suite: 246 passed (244+2), zero pre-existing tests changed —
+direct confirmation every programmatic caller stayed untouched.
+Live-verified: a fresh page load now shows the cursor at the very
+first prompt, no keystroke needed.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1812,5 +1842,6 @@ exactly as it would be on the bare-metal target.
 | **M23** | A batch of 13 low-level primitives (§1.44, tokens 101-113): `XOR`, `.S`, `2SWAP`, `2OVER`, `CELLS`, `CELL+`, `FILL`, `CMOVE`, `BL`, `SPACE`, `WITHIN`, `PICK`, `ROLL` — real gaps against M8's own §9 batch. Plain stack-effect primitives, zero `repl.ts`/`dictionary.ts`/`inner.ts` changes needed. `WITHIN` deliberately plain-signed (not full ANS wraparound semantics); no `CMOVE>`/`LSHIFT`/`RSHIFT` added (nothing needs them yet). | `rebel-opcodes.json`, `primitives.ts` |
 | **M24** | `BASE`/`HEX`/`DECIMAL` (§1.45, tokens 114-116): `BASE ( -- addr )` exposes `FORTH.BASE`'s sysvar address, same `fieldOffset()` pattern `LATEST-ADDR` (M13) used — a real variable, `BASE @`/`n BASE !`, not a read-only value word. `HEX`/`DECIMAL` are thin `setBase()` sugar. A real gotcha (every subsequent numeric token, not just this one, parses under the new base) documented in `DEVELOPING.md` §16, then actually tripped a first-draft test before being fixed and turned into its own explicit assertion. | `rebel-opcodes.json`, `primitives.ts` |
 | **M25** | A visible, inverse-video text cursor: `CURSEN`/`CURSDIS` (§1.46, tokens 117-118). Neither target has ever rendered a visible cursor. `Screen`-level, not HAL, not Forth — `setCursor()` gains a redraw hook every existing cursor-movement path already routes through for free; `writeChar()` itself never auto-inverts (would highlight the character being typed, not the cursor). New `SCREEN.CURSOR-VISIBLE` sysvar, a genuine cross-target candidate like `CORE.ARENA-SIZE`. A real `cls()` ordering bug (cursor drawn before the framebuffer clear, then painted over) found and fixed as part of this change. | `screen.ts`, `rebel-opcodes.json`, `primitives.ts` |
+| **M26** | Wiring the cursor into the interactive REPL (§1.47): one line, `showCursor()`, added to `startRepl()` — not the constructor (would affect every programmatic caller) and not just defaulting the sysvar (wouldn't actually draw anything until the first keystroke). Cursor now visible from the very first prompt, confirmed live. | `repl.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
