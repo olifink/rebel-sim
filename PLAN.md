@@ -218,15 +218,34 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     The smaller, more contained half of M19's "Follow-on, not
     resolved" note; Forth-side bank creation stays separately scoped,
     not touched here. Detailed below.
-22. Later/open: multi-arena isolation (deliberately unenforced — full
+22. **M21 — `CREATE-BANK`** — **done**: Forth-side bank creation, the
+    larger, harder-to-walk-back half of M19's own follow-on note.
+    `CREATE-BANK ( size "tag" -- addr )` calls the exact same
+    `MemoryMap.addBank()` `BankTable.createBank()` already uses
+    internally, invoked straight from a primitive — genuinely no host
+    round-trip, matching `DEVELOPING.md` §11's original design.
+    Real, named consequence: a bank created this way is invisible to
+    `BankTable.getAllBanks()`/`findBank()` and everything built on
+    them (`storage.ts`, `read_banks`, the inspector panel) — only
+    `BANK@` (M20) and raw `MMAP` reads see it, confirmed live via
+    WebMCP, not just asserted. Name always equals the (possibly
+    truncated) tag, no auto-serial, no uniqueness check, no
+    out-of-space validation beyond `MMAP`'s own 64-slot cap — all
+    deliberate, matching "no host validation." Found a real gotcha
+    while testing: a tag over 4 characters truncates on write but
+    `BANK@` never truncates its search string, so it's only findable
+    by its first 4 characters — not a new inconsistency, the first
+    time anything could actually create a tag violating the
+    already-existing 4-character convention. Detailed below.
+23. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
     `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
     sysvar lookup (`SYSV@`, considered and explicitly declined —
-    `BANK@` + a hardcoded offset covers the real need), Forth-side bank
-    creation via `MMAP` (the larger half of M19's follow-on, not
-    scoped in detail yet), Web Worker migration — see
-    `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9 for the full
-    open-decisions list.
+    `BANK@` + a hardcoded offset covers the real need), making
+    `BankTable.getAllBanks()`/`read_banks`/the inspector panel `MMAP`-
+    aware (would close M21's own documented visibility gap, not
+    scoped), Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
+    `PORTING-WEB.md` §9 for the full open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -2317,5 +2336,73 @@ matching `read_banks`' own rows exactly; `BANK@ NOPE` still printed
 `? unknown bank: NOPE`, unchanged. Zero console errors.
 
 **Tests:** 212 engine tests total (208 before this milestone, 4 new in
+`mmap.test.ts`), confirmed via a full test run. 10 app tests and the
+full build unaffected — no Angular/UI changes.
+
+## M21 — `CREATE-BANK` — done
+
+Scoped in `DEVELOPING.md` §13 as the larger, harder-to-walk-back half
+of M19's own "Follow-on, not resolved" note — `DEVELOPING.md` §11 had
+already committed to "no host round-trip needed" for creation, not
+just lookup, so this section made that concrete rather than reopening
+whether it was the right call.
+
+**What shipped:** one new primitive, `CREATE-BANK ( size "tag" -- addr
+)`, token 100 — pops `size`, parses the next input token like `BANK@`
+does, uppercases it, and calls `ctx.banks.mmap.addBank(tag, tag,
+mmap.getNextFree(), size, RESIDENT | ACTIVE)` directly — **the exact
+same `MemoryMap.addBank()` method `BankTable.createBank()` already
+calls internally (M19)**, just invoked straight from a primitive
+instead of through the host. Name always equals the (truncated) tag —
+deliberately no auto-serial naming, since a primitive bypassing
+`BankTable` entirely has no business reaching its private serial
+counter, and inventing a second, independent counter would let two
+counters collide by construction. No out-of-space check beyond
+`MMAP`'s own 64-slot cap — relies on `DataView`'s own bounds-checking
+at first real access, the same precedent M19's `BankTable` constructor
+already established.
+
+**The real, named consequence:** a bank created this way is invisible
+to `BankTable.getAllBanks()`/`findBank()`, and everything built on
+them — `storage.ts`'s project save/load, the app's `read_banks` WebMCP
+tool, the inspector panel — because `CREATE-BANK` never touches
+`BankTable`'s own array, only `MMAP`. It's real, addressable, and
+correctly findable via `BANK@` (M20) and any raw `MMAP` read — genuinely
+invisible to host-array readers, not partially. This is the direct,
+structural cost of "no host round-trip," not an oversight; a future
+consumer wanting the inspector panel to show Forth-created banks too
+would need `getAllBanks()` itself to start reading `MMAP` — real,
+separate follow-on work, now tracked in the open-items list.
+
+**A real gotcha, found while writing this milestone's own tests, not
+theorized in advance:** a tag longer than 4 characters (the fixed
+width every real tag already respects by convention — `SYSV`, `DICT`,
+`DATA`, …) silently truncates on write, but `BANK@`'s lookup compares
+the *full*, untruncated token against a slot's stored (always ≤4 char)
+tag. `4096 CREATE-BANK MYDATA` creates a bank findable only via
+`BANK@ MYDA`, never `BANK@ MYDATA`. Not a new inconsistency —
+`BANK@` has always compared full strings against real tags that were
+always ≤4 characters by convention, never enforced by code — just the
+first time anything could actually *create* a tag violating that
+convention, surfacing a sharp edge that was latent before. Left as-is,
+matching "no host validation."
+
+**Verified via the engine test suite** (`mmap.test.ts`, 6 new tests):
+a bank created via `CREATE-BANK` is immediately findable via `BANK@`
+at the same address; it lands exactly at `MMAP`'s prior next-free
+offset and advances that cell by exactly its size; its memory is
+genuinely usable (`@`/`!` round-trips); it names itself after its
+(possibly-truncated) tag; the table throws once all 64 slots are used;
+and, explicitly, it does *not* appear in `getAllBanks()`/`findBank()`
+— a test asserting the documented gap exists, not just hoping it
+doesn't regress silently. **Live-verified in the browser** via WebMCP:
+`4096 CREATE-BANK DAT1 . BANK@ DAT1 .` printed `84924 84924` (both
+agreeing, at `MMAP`'s real next-free offset); `1234 BANK@ DAT1 !
+BANK@ DAT1 @ .` printed `1234` — genuinely usable memory, not just a
+descriptor; `read_banks` and an inspector-panel screenshot both
+confirmed `DAT1` doesn't appear there, cross-checking the documented
+gap live. Zero console errors.
+
+**Tests:** 218 engine tests total (212 before this milestone, 6 new in
 `mmap.test.ts`), confirmed via a full test run. 10 app tests and the
 full build unaffected — no Angular/UI changes.

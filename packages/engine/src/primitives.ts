@@ -20,7 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
-import { BankTable } from './banks.js';
+import { BankTable, BankFlagResident, BankFlagActive } from './banks.js';
 import { alignCell } from './arena.js';
 import {
   compileCell,
@@ -681,6 +681,15 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
         throw new Error(`? unknown bank: ${tag}`);
       }
       s.push(addr);
+      break;
+    }
+
+    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13, M21
+      const size = s.pop();
+      const tag = ctx.nextInputToken().toUpperCase();
+      const base = ctx.banks.mmap.getNextFree();
+      ctx.banks.mmap.addBank(tag, tag, base, size, BankFlagResident | BankFlagActive);
+      s.push(base);
       break;
     }
 

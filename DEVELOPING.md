@@ -1341,3 +1341,132 @@ argument for it.
   `BankTable`, just becoming `BANK@`'s particular read path.
 - No `PrimitiveContext` shape change — no new field, no API churn
   beyond `BANK@`'s single call site.
+
+## 13. Forth-side bank creation (`CREATE-BANK`) — done, M21
+
+### Motivation
+
+The second, larger half of §11's original "Follow-on, not resolved"
+note, and the harder-to-walk-back half: §11's own design already
+committed to "no host round-trip needed" for creation, not just
+lookup — *"a word creating a bank reads the next-free cell to know
+where to place it, writes a descriptor, then advances that same cell
+— no host round-trip needed for either step."* This section makes that
+concrete rather than reopening whether it's the right call.
+
+### Design
+
+One new primitive, **`CREATE-BANK ( size "tag" -- addr )`** — pops
+`size`, parses the next input token (same `nextInputToken()` mechanism
+`BANK@`/`'`/`CREATE` already use), uppercases it, and calls
+`ctx.banks.mmap.addBank(tag, tag, base, size, flags)` directly —
+**the exact same `MemoryMap.addBank()` method `BankTable.createBank()`
+already calls internally (M19)**, just invoked straight from a
+primitive instead of through the host. `base` is read fresh via
+`mmap.getNextFree()` immediately before the call; `flags` defaults to
+`RESIDENT | ACTIVE`, matching every other bank's default. Not
+`IMMEDIATE`, same reasoning as `BANK@`/`'` — consumes its input-cursor
+token at runtime.
+
+**Name equals tag, truncated to 8 bytes — no auto-serial scheme, no
+uniqueness check.** `BankTable`'s own `generateSerialName()` counter is
+private, host-side bookkeeping a primitive bypassing `BankTable`
+entirely has no business reaching into — inventing a *second*,
+independent serial counter for `MMAP`'s own header would let two
+counters produce colliding names by construction, worse than not
+having one. Using the tag itself sidesteps the problem rather than
+solving it cleverly: it costs nothing (`MMAP` doesn't enforce name
+uniqueness today either, since nothing has needed
+`findBankByName()`-style access to `MMAP` yet) and stays honest about
+what's actually guaranteed.
+
+**No out-of-space check beyond `MMAP`'s own existing 64-slot cap.**
+`BankTable.createBank()` checks `nextFree + size > arena.sizeBytes`
+before allocating; this primitive doesn't duplicate that check. Same
+precedent M19's own `BankTable` constructor already relies on
+("`DataView` already enforces this for free... relied on deliberately,
+not duplicated"): a bank "created" past the arena's real end will
+`RangeError` the moment something actually reads or writes into it,
+not at creation time. Consistent with "no host validation," not a gap.
+
+### The real consequence, named plainly: Forth-created banks are invisible to every host-array reader
+
+`BankTable.getAllBanks()`/`findBank()` — and everything built on top of
+them: `storage.ts`'s project save/load, the app's `read_banks` WebMCP
+tool, the inspector panel — only ever see banks the *host* created,
+because `CREATE-BANK` never touches `BankTable`'s own array, only
+`MMAP`. A bank Forth creates is real, addressable, and correctly
+findable via `BANK@` (M20, reads `MMAP` directly) and any raw `@`/`!`
+walk of `MMAP` — but genuinely doesn't exist as far as `getAllBanks()`
+is concerned. This is the direct, structural cost of the "no host
+round-trip" design, not an oversight: making the host aware would mean
+either polling `MMAP` for changes every tick (real overhead, real
+staleness-window questions) or giving up on "no host round-trip"
+entirely. Left as-is, named honestly rather than glossed over — a
+future consumer that needs the inspector panel to show Forth-created
+banks too would need `getAllBanks()` (or a new, separate read path) to
+start reading `MMAP` instead of the host array, which is real,
+separate follow-on work of its own.
+
+### Implementation sketch
+
+- `rebel-opcodes.json`: one new primitive, `CREATE-BANK`, next free
+  token (100).
+- `primitives.ts`: one case — pop `size`, parse+uppercase the tag,
+  `ctx.banks.mmap.addBank(tag, tag, ctx.banks.mmap.getNextFree(), size,
+  BankFlagResident | BankFlagActive)`, push the returned base. No
+  `PrimitiveContext` shape change — `banks: BankTable` (M18) already
+  covers reaching `.mmap`.
+- No `inner.ts` change — synchronous, same category as `BANK@`.
+
+### Verification
+
+- New engine tests, `mmap.test.ts`: a bank created via `CREATE-BANK` is
+  immediately findable via `BANK@` for the same tag, at the same
+  address; it lands exactly at `MMAP`'s prior next-free offset, and
+  advances that cell by exactly its size; its memory is actually usable
+  (`@`/`!` round-trips at the returned address); it names itself after
+  its (possibly-truncated) tag; the table throws once all 64 slots are
+  used, same as any other `addBank()` caller; **and, explicitly, that
+  it does *not* appear in `getAllBanks()`/`findBank()`** — a test
+  asserting the documented gap exists, not just hoping it doesn't
+  regress silently.
+- Live, via WebMCP: `4096 CREATE-BANK DAT1 . BANK@ DAT1 .` printed
+  `84924 84924` (both agreeing, at `MMAP`'s real next-free offset);
+  `1234 BANK@ DAT1 ! BANK@ DAT1 @ .` printed `1234` — the created
+  bank's memory is genuinely usable, not just a descriptor; `read_banks`
+  (host-side) confirmed to *not* list `DAT1`, and the inspector panel
+  screenshot confirms the same, cross-checking the documented gap live,
+  not just in the test suite. Zero console errors.
+- Full engine (218 tests) + app (10 tests) suites and `npm run build`
+  green, zero regressions.
+
+### A real gotcha, found while testing, not just theorized
+
+A tag longer than 4 characters (the fixed field width every real tag
+in this codebase already respects by convention — `SYSV`, `DICT`,
+`DATA`, …) silently truncates on write, but `BANK@`'s own lookup
+compares the *full*, untruncated token against a slot's (always ≤4
+char) stored tag. So `4096 CREATE-BANK MYDATA` creates a bank whose
+stored tag is `MYDA`, findable only via `BANK@ MYDA`, never
+`BANK@ MYDATA` — confirmed directly while writing this milestone's own
+tests. Not a new inconsistency `CREATE-BANK` introduces (`BANK@` has
+always compared full strings, untruncated, against real tags that
+were always ≤4 characters by convention, never enforced by code) —
+just the first time anything could actually *create* a tag violating
+that convention, surfacing a sharp edge that was latent before. Left
+as-is, matching "no host validation": `CREATE-BANK` doesn't reject or
+warn on an oversized tag any more than it validates anything else.
+
+### Scope cuts, explicit
+
+- No name uniqueness, no auto-serial naming — name always equals the
+  (truncated) tag.
+- No out-of-space validation — relies on `DataView`'s own
+  bounds-checking at first real access, not creation time.
+- No change to `BankTable`/`getAllBanks()`/`storage.ts`/`read_banks` to
+  make them `MMAP`-aware — the visibility gap above is accepted, not
+  fixed here.
+- No Forth-level word to *delete* or *resize* a bank — creation only,
+  matching the "arena grows monotonically, nothing is ever freed"
+  model this codebase already has everywhere else.

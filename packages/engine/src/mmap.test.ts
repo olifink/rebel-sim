@@ -130,3 +130,74 @@ describe('MemoryMap.findBankAddr (DEVELOPING.md §12, M20) — BANK@\'s real loo
     expect(result).toBe(m.banks.mmap.findBankAddr('SYSV'));
   });
 });
+
+describe('CREATE-BANK (DEVELOPING.md §13, M21) — Forth-side bank creation, no host round-trip', () => {
+  // Tags are conventionally exactly 4 characters throughout this
+  // codebase (SYSV, DICT, DATA, ...) — the tag field is a fixed 4-byte
+  // slot, so a longer tag silently truncates on write. Every tag below
+  // is deliberately 4 characters, matching real usage, except the one
+  // test that specifically demonstrates the truncation edge case.
+
+  it('creates a bank immediately findable via BANK@, at the address CREATE-BANK itself returned', () => {
+    const m = new Machine();
+    m.interpret('4096 CREATE-BANK DAT1');
+    const createdAddr = m.stack.pop();
+
+    m.interpret('BANK@ DAT1');
+    expect(m.stack.pop()).toBe(createdAddr);
+  });
+
+  it("places the new bank right at MMAP's next-free offset, and advances it by exactly its size", () => {
+    const m = new Machine();
+    const before = m.banks.mmap.getNextFree();
+    m.interpret('256 CREATE-BANK SCR1');
+    const addr = m.stack.pop();
+
+    expect(addr).toBe(before);
+    expect(m.banks.mmap.getNextFree()).toBe(before + 256);
+  });
+
+  it('the created bank is real, usable memory — @ and ! round-trip at its address', () => {
+    const m = new Machine();
+    m.interpret('64 CREATE-BANK SCR2');
+    const addr = m.stack.pop();
+
+    m.interpret(`42 ${addr} ! ${addr} @`);
+    expect(m.stack.pop()).toBe(42);
+  });
+
+  it('is invisible to BankTable.getAllBanks()/findBank() — the documented gap, not a silent regression', () => {
+    const m = new Machine();
+    const before = m.banks.getAllBanks().length;
+    m.interpret('128 CREATE-BANK GAP1');
+
+    expect(m.banks.getAllBanks().length).toBe(before); // unchanged
+    expect(m.banks.findBank('GAP1')).toBeUndefined();
+    // ...yet BANK@ (M20, reads MMAP directly) sees it fine.
+    expect(() => m.interpret('BANK@ GAP1')).not.toThrow();
+  });
+
+  it('names the bank after its (truncated) tag — no auto-serial, matching DEVELOPING.md §13', () => {
+    const m = new Machine();
+    // Deliberately >4 chars, to demonstrate the truncation edge case
+    // directly (not via BANK@, which never truncates its search tag —
+    // a >4-char CREATE-BANK tag is only findable by its first 4 chars).
+    m.interpret('32 CREATE-BANK LONGNAMETAG');
+    const addr = m.stack.pop();
+
+    const slot = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr)!;
+    expect(slot.tag).toBe('LONGNAMETAG'.slice(0, 4)); // TAG_SIZE
+    expect(slot.name).toBe('LONGNAMETAG'.slice(0, 8)); // BANK_NAME_LEN
+  });
+
+  it('throws once MMAP itself is full, same as any other addBank() caller', () => {
+    const m = new Machine();
+    // Machine already created 9 banks (MMAP + 8); fill the rest.
+    const remaining = MMAP_MAX_SLOTS - m.banks.getAllBanks().length;
+    for (let i = 0; i < remaining; i++) {
+      m.interpret('16 CREATE-BANK FILL');
+      m.stack.pop();
+    }
+    expect(() => m.interpret('16 CREATE-BANK OVER')).toThrow(/MMAP is full/);
+  });
+});

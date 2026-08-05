@@ -1441,6 +1441,47 @@ passing exactly as before — the actual proof this didn't change
 99's one lookup line), `rebel-opcodes.json` (note update). No
 `PrimitiveContext`/`repl.ts` change.
 
+### 1.42 `CREATE-BANK` — Forth-side bank creation (M21, `DEVELOPING.md` §13)
+
+The larger, harder-to-walk-back half of M19's own follow-on —
+`DEVELOPING.md` §11 had already committed to "no host round-trip
+needed" for creation, not just lookup.
+
+`CREATE-BANK ( size "tag" -- addr )`, primitive 100: pops `size`,
+parses the next input token like `BANK@` does, uppercases it, and
+calls `ctx.banks.mmap.addBank(tag, tag, mmap.getNextFree(), size,
+RESIDENT | ACTIVE)` directly — the exact same `MemoryMap.addBank()`
+method `BankTable.createBank()` already calls internally (M19), now
+invoked straight from a primitive. Name always equals the (truncated)
+tag: no auto-serial naming (a primitive bypassing `BankTable` has no
+business reaching its private serial counter — a second, independent
+counter would let two counters collide by construction), no
+out-of-space check beyond `MMAP`'s own 64-slot cap (relies on
+`DataView`'s own bounds-checking at first real access, same precedent
+M19 already established).
+
+**Real, named consequence:** a bank created this way is invisible to
+`BankTable.getAllBanks()`/`findBank()` — and everything built on them
+(`storage.ts`, `read_banks`, the inspector panel) — since
+`CREATE-BANK` never touches `BankTable`'s own array, only `MMAP`.
+Genuinely findable via `BANK@` (M20) and raw `MMAP` reads, genuinely
+invisible to host-array readers. Not a bug — the direct cost of "no
+host round-trip," confirmed live (a created bank absent from
+`read_banks` and the inspector panel, present via `BANK@`).
+
+**A real gotcha, found while testing:** a tag over 4 characters
+truncates on write (the fixed field width every real tag already
+respects by convention), but `BANK@`'s lookup never truncates its
+search string — a bank created with a >4-char tag is only findable by
+its first 4 characters. Not new behavior in `BANK@` itself, just the
+first time anything could actually create a tag violating the
+already-existing convention.
+
+*Implementation:* `rebel-opcodes.json` (token 100), `primitives.ts`
+(case 100, imports `BankFlagResident`/`BankFlagActive`). No `mmap.ts`
+change — reuses `addBank()`/`getNextFree()` as-is. No
+`PrimitiveContext`/`repl.ts` change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1568,5 +1609,6 @@ exactly as it would be on the bare-metal target.
 | **M18** | `BANK@` (§1.39): `BANK@ ( "tag" -- addr )` (token 99) — parses the next input token like `'`/`CREATE`, uppercases it, looks up via `ctx.banks.findBank()`, pushes addr only (matching the `SOMETHING@` one-value convention) or throws `? unknown bank: <TAG>`. API-mediated, not arena-resident — `BankTable` is plain host-side TS. Built once a concrete need appeared: reaching any sysvar from Forth via `BANK@ SYSV <offset> + @`, a hardcoded-offset approach chosen over adding a second named-lookup primitive (`SYSV@`). | `rebel-opcodes.json`, `primitives.ts` |
 | **M19** | `MMAP` (§1.40): arena-resident bank table, bank 0, 64 slots (matches `rebel-rom`'s `BANK_TABLE_MAX_BANKS`) — every `createBank()` call, including `MMAP`'s own self-referential registration, mirrors into it, in addition to (not instead of) the existing host-side array. `Bank` gains a real `flags` field; new `ACTIVE` flag (atomic exclusion during flush) supersedes ever wiring up the confirmed-inert `DIRTY`. Mirror only — `findBank()`/`BANK@`/Forth-side bank creation are unchanged, real follow-on work. Also added `CORE.ARENA-SIZE`, a new sysvar exposing total arena size to Forth. | `mmap.ts` (new), `banks.ts`, `index.ts`, `rebel-opcodes.json`, `repl.ts` |
 | **M20** | `BANK@` reads `MMAP` directly (§1.41): new `MemoryMap.findBankAddr()` walks `MMAP`'s slots instead of `BANK@` calling `BankTable.findBank()` — a pure read-path swap, `BANK@`'s observable behavior unchanged (proven by the unmodified `bank-access.test.ts` suite passing as-is). The smaller half of M19's follow-on; Forth-side bank creation still doesn't exist. | `mmap.ts`, `primitives.ts`, `rebel-opcodes.json` |
+| **M21** | `CREATE-BANK` (§1.42): `CREATE-BANK ( size "tag" -- addr )` (token 100) — calls `MemoryMap.addBank()` directly from a primitive, genuinely no host round-trip. Name always equals the (truncated) tag, no auto-serial, no out-of-space check. Real, named consequence: invisible to `getAllBanks()`/`findBank()`/`storage.ts`/`read_banks`/the inspector panel — findable only via `BANK@` and raw `MMAP` reads. The larger half of M19's follow-on, now closed. | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
