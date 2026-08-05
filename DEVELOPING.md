@@ -860,7 +860,7 @@ into one long-lived session — gets the new recovery behavior.
 - `interpret()`/`runLine()`'s host-facing error contract is unchanged
   — only the interactive `replLoop` gets stack-reset-on-error.
 
-## 10. Forth-visible bank access (`BANK@`) — scoped, not yet built
+## 10. Forth-visible bank access (`BANK@`) — done, M18
 
 `FORTH-ARCHITECTURE.md` §9 item 4 has flagged this as open since it was
 written: whether the bank table needs to become arena-resident memory
@@ -931,7 +931,7 @@ directly. Same shape as `PAD ( -- addr )`/`LATEST-ADDR` (M16/M13) —
 expose something the host already tracks via a small primitive, rather
 than duplicating it as arena bytes with no other consumer.
 
-**`BANK@ ( "tag" -- addr size )`** — parses the next input token
+**`BANK@ ( "tag" -- addr )`** — parses the next input token
 directly (the same `nextInputToken()` mechanism `'`/`CREATE`/`VARIABLE`/
 `CONSTANT`/`S"`/`VOCABULARY`/`USE` already all use), not a string
 `addr len` off the stack — there's no reason to route a 4-character tag
@@ -947,18 +947,19 @@ convention as `'` throwing on an unrecognized word rather than pushing
 a sentinel — consistency with the one existing primitive this is
 closest to in shape.
 
-**Descriptor kept minimal, on purpose:** just `addr`/`size`, not the
-full `{tag, name, base, size, flags}` shape `Bank`
-(`banks.ts`)/`BankDescriptor` (`membank.h`) already carry internally.
-`name` needs no exposure yet — nothing in Forth source today needs to
-disambiguate same-tag banks (the multiple-`DATA`-banks case is a
-storage/project-loading concern that doesn't touch Forth source
-directly). `flags` doesn't exist on Rebel-Sim's own `Bank` interface at
-all today (no `RESIDENT`/`EXTERNAL`/`SWAPPABLE`/`DIRTY` — `SCRN` isn't
-even an arena bank in Rebel-Sim, per `rebel-opcodes.json`'s own note),
-so there's nothing real to return yet. Both are documented future
-extensions (`BANK-NAME@`, a flags cell), not built ahead of an actual
-need for them.
+**Addr only, not `addr size` — matching the `SOMETHING@` convention
+directly (2026-08-05, direct call):** every other `@`-suffixed word in
+this dictionary fetches exactly one value (`C@`/`HERE`/`LATEST`/a
+sysvar cell read); a two-value stack effect reads as a different kind
+of word wearing `@`'s name. `Bank.size` — and `name`/`flags`, the rest
+of `Bank`'s `{tag, name, base, size}` shape (`banks.ts`) — simply
+isn't returned. `name` needs no exposure yet (the multiple-`DATA`-banks
+disambiguation case is a storage/project-loading concern, not a Forth
+one); `flags` doesn't exist on Rebel-Sim's own `Bank` interface at all
+today (no `RESIDENT`/`EXTERNAL`/`SWAPPABLE`/`DIRTY`). All three are
+documented future extensions (a `BANK-SIZE@`/`BANK-NAME@`-style
+inspection word, or a fuller descriptor word, once something concrete
+needs them) — not built ahead of an actual need now.
 
 ### Shared banks: `BANK@` reaches them too, no special-casing
 
@@ -1002,8 +1003,10 @@ wanted.
 
 - No name-based lookup (`BANK@` resolves by tag only, first match —
   same as `findBank(tag)`'s existing one-argument semantics today).
-- No `flags` in the returned descriptor — nothing on the Rebel-Sim side
-  has one yet.
+- No `size`/`name`/`flags` returned — `BANK@` pushes `addr` only,
+  matching every other `SOMETHING@` word's one-value convention. A
+  separate bank-inspection word can add any of these later if a real
+  need shows up.
 - No shared-bank / cross-arena access control of any kind — decided
   directly, not deferred: full mutual accessibility across arenas is
   the intended v1 model, not a gap. A future security-focused variant

@@ -174,12 +174,28 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     push had no `try`/`finally`, so it leaked one entry per uncaught
     error, forever — confirmed empirically (0 → 1 → 2 across two
     errors) before fixing it. Detailed below.
-19. Later/open: multi-arena isolation (deliberately unenforced — full
+19. **M18 — `BANK@`** — **done**: `BANK@ ( "tag" -- addr )` (token
+    99), the API-mediated primitive scoped in `DEVELOPING.md` §10 —
+    parses the next input token like `'`/`CREATE` do, uppercases it,
+    looks up via `ctx.banks.findBank()`, pushes `addr` or throws
+    `? unknown bank: <TAG>`. Addr only, not `addr size` — matches the
+    `SOMETHING@` convention (fetch one value); `size` deliberately not
+    returned, left to a future bank-inspection word if a real need
+    shows up. Reaches shared and per-arena banks identically, no
+    special-casing (isolation stays a confirmed non-goal). The
+    concrete need that finally justified building it: reaching any
+    sysvar from pure Forth source via `BANK@ SYSV <offset> + @`, using
+    each sysvar group's known `baseOffset` (`rebel-opcodes.json`) — a
+    hardcoded-offset approach the user explicitly preferred over a
+    second named-lookup primitive (`SYSV@`), to avoid a redirection
+    layer for no real gain. Detailed below.
+20. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
-    `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), `BANK@`
-    (scoped, `DEVELOPING.md` §10, not implemented ahead of an actual
-    need), Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
-    `PORTING-WEB.md` §9 for the full open-decisions list.
+    `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
+    sysvar lookup (`SYSV@`, considered and explicitly declined —
+    `BANK@` + a hardcoded offset covers the real need), Web Worker
+    migration — see `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9
+    for the full open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -2068,3 +2084,86 @@ console errors; `read_dictionary` shows `ABORT` registered correctly.
 **Tests:** 193 engine tests total (187 after M16, 6 new in
 `abort.test.ts`), confirmed via a full test run. 10 app tests and the
 full build unaffected — no Angular/UI changes.
+
+## M18 — `BANK@` — done
+
+Scoped since `DEVELOPING.md` §10 (originating from a 2026-08-02
+question about shared-bank access, resolved 2026-08-05 by settling
+multi-arena isolation as a confirmed non-goal) but explicitly not
+built ahead of an actual need. That need arrived directly: the user
+asked about generalizing `LATEST-ADDR`'s one-off pattern into a named
+sysvar lookup (`SYSV@ ( "group" "field" -- addr )`, mirroring
+`BANK@`'s own tag-based lookup) so Forth source could reach any sysvar
+by name. Considered, then explicitly declined by the user in favor of
+something simpler: implement `BANK@` alone, and reach a specific
+sysvar by combining `BANK@ SYSV`'s base address with a **hardcoded**
+group/field offset (already known, cheap to read off
+`rebel-opcodes.json`'s `sysvarGroups` table) rather than adding a
+second named-lookup primitive purely to avoid one layer of
+redirection.
+
+**What shipped:** one new primitive, `BANK@ ( "tag" -- addr )`, token
+99 (next free after `ABORT`, M17) — parses the next input token via
+the same `nextInputToken()` mechanism `'`/`CREATE`/`VARIABLE`/
+`CONSTANT`/`S"`/`VOCABULARY`/`USE` already use (not a stack-based
+string), uppercases it to match `findWord`'s case-insensitivity, looks
+up the first bank of that tag via `ctx.banks.findBank()` (already
+existed, no change), pushes `addr`, or throws `? unknown bank: <TAG>`
+on no match — same convention as `'` on an unrecognized word.
+`PrimitiveContext` gained a `banks: BankTable` field; `Machine`
+already satisfied it structurally (no constructor change, same
+precedent as `padBase`/`padSize`, M16). No `inner.ts` change — a plain
+synchronous case, like `PAD`/`LATEST-ADDR`, not `EXECUTE`/`CATCH`.
+
+**Addr only, not `addr size`** — a direct follow-up correction, same
+day: every other `SOMETHING@` word in this dictionary fetches exactly
+one value; `Bank.size` (and `name`/`flags`) simply isn't returned. A
+dedicated bank-inspection word can add any of these later if a real
+need shows up — not built ahead of one now.
+
+**Not immediate, deliberately** — same reasoning as `'`: `BANK@`
+consumes its input-cursor token at *runtime*, so it can be called from
+inside a compiled definition to consume whatever the *caller* typed
+next, but writing a literal tag directly after `BANK@` inside a `:
+... ;` body doesn't work (the compiler tries to compile a call to that
+name instead) — confirmed live during verification, not a regression,
+just the same known limitation `'` already has without a `[']`-style
+compile-time-literal word, which this project hasn't built either.
+
+**Verified via the engine test suite** (`bank-access.test.ts`, new,
+6 tests): resolves a known tag to the same base address
+`getAllBanks()`/`findBank()` report; case-insensitive lookup; every
+bank tag `Machine`'s constructor actually creates is reachable, not
+just a subset; an unknown tag throws; a repeated tag resolves to the
+first-created bank, matching `findBank(tag)`'s own semantics; a sysvar
+cell (`FORTH.STATE`) reached via `BANK@ SYSV <offset> + @` reads back
+the same value `Sysvars.getState()` reports — the actual motivating
+use case. **Live-verified in the browser** via WebMCP's
+`execute_webmcp_tool`/`read_dictionary`/`read_banks`, against the
+original `addr size` shape before the same-day addr-only trim: `BANK@
+SYSV . .` printed the same base/size `read_banks` reported for `SYSV`;
+`BANK@ NOPE` printed `? unknown bank: NOPE` (the same pre-existing
+`? ?` double-prefix every primitive that throws its own `? `-prefixed
+message already has, e.g. plain unrecognized-word errors — confirmed
+not a new regression); `BANK@ PAD DROP PAD = .` printed `-1`,
+confirming `BANK@`'s resolved `PAD` address matches the dedicated
+`PAD` primitive's address exactly; `read_dictionary` shows `BANK@`
+registered. The addr-only trim afterward is a stack-effect
+simplification with no behavioral risk (fewer values pushed, same
+lookup/error path), re-verified by the updated engine test suite
+rather than a second live pass.
+
+**A dev-environment gotcha hit and resolved along the way, worth
+recording:** Angular's `ng serve` (Vite-backed) pre-bundles workspace
+dependencies like `@rebel-sim/engine` into `.angular/cache/*/vite/deps/`
+and does not reliably reinvalidate that cache when only the
+*dependency's* built output changes (package.json/lockfile unchanged)
+— a plain reload, and even a full dev-server restart, kept serving a
+pre-`BANK@` snapshot until `.angular/cache` itself was deleted. Not an
+engine or app bug; a Vite dependency-optimization staleness issue
+worth remembering for future live-verification sessions if a just-added
+primitive mysteriously doesn't show up in `read_dictionary`.
+
+**Tests:** 199 engine tests total (193 after M17, 6 new in
+`bank-access.test.ts`), confirmed via a full test run. App build
+unaffected — no Angular/UI changes.

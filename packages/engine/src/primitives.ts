@@ -20,6 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
+import { BankTable } from './banks.js';
 import { alignCell } from './arena.js';
 import {
   compileCell,
@@ -47,6 +48,10 @@ export interface PrimitiveContext extends DictionaryContext {
    * case 68/70 note below). */
   readonly padBase: number;
   readonly padSize: number;
+  /** DEVELOPING.md §10, M18: the bank table BANK@ looks up tags in —
+   * mirrors the padBase/padSize precedent (M16), exposing something the
+   * host already tracks rather than duplicating it as arena bytes. */
+  readonly banks: BankTable;
   getBase(): number;
   /** Consumes the next word directly from whatever line the outer
    * interpreter is currently walking — see repl.ts's header comment on
@@ -668,6 +673,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 98: // ABORT ( -- ) — DEVELOPING.md §9, M17
       s.clear();
       throw new Error('ABORT');
+
+    case 99: { // BANK@ ( "tag" -- addr ) — DEVELOPING.md §10, M18
+      const tag = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.findBank(tag);
+      if (!bank) {
+        throw new Error(`? unknown bank: ${tag}`);
+      }
+      s.push(bank.base);
+      break;
+    }
 
     default:
       throw new Error(`unknown primitive token ${tokenId}`);

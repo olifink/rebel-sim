@@ -1305,6 +1305,56 @@ behavior.
 (token 98), `primitives.ts` (case 98), `repl.ts` (`replLoop`'s catch
 block clears both stacks).
 
+### 1.39 `BANK@` (M18, `DEVELOPING.md` §10)
+
+Scoped since `DEVELOPING.md` §10 but deliberately not built ahead of
+an actual need. The need: reaching sysvars purely from Forth source.
+Considered generalizing `LATEST-ADDR` into a named lookup (`SYSV@
+( "group" "field" -- addr )`, mirroring `BANK@`'s own tag lookup) —
+declined in favor of something simpler: `BANK@` alone, plus a
+**hardcoded** group/field offset (`rebel-opcodes.json`'s
+`sysvarGroups` table already has these) added to the bank's base
+address, avoiding a second named-lookup primitive for one layer of
+redirection that wasn't needed.
+
+`BANK@ ( "tag" -- addr )`, primitive 99: parses the next input token
+via the same `nextInputToken()` mechanism `'`/`CREATE`/`VARIABLE`/
+`CONSTANT`/`S"`/`VOCABULARY`/`USE` already use (not a stack-based
+string), uppercases it (`findWord`'s own case-insensitivity
+convention), looks up the first bank of that tag via
+`ctx.banks.findBank()` (pre-existing, unchanged), pushes `addr`, or
+throws `? unknown bank: <TAG>` — same convention as `'` on an
+unrecognized word. `PrimitiveContext` gains a `banks: BankTable`
+field; `Machine` already satisfied it structurally, same precedent as
+`padBase`/`padSize` (M16). No `inner.ts` change — a plain synchronous
+case.
+
+**Addr only, not `addr size`:** matches every other `SOMETHING@`
+word's one-value convention. `Bank.size` (and `name`/`flags`) isn't
+returned — left to a future bank-inspection word if a real need shows
+up, not built ahead of one.
+
+API-mediated rather than an arena-resident table, purely on
+implementation economics: `BankTable` (`banks.ts`) is plain host-side
+TS, not arena-backed data, so a primitive avoids inventing a wire
+format with no other consumer. Reaches shared and per-arena banks
+identically — multi-arena memory-access isolation is a confirmed
+non-goal (`DEVELOPING.md` §10), not something `BANK@` needs to
+enforce.
+
+**Not immediate**, matching `'`: consumes its input-cursor token at
+*runtime*. This means it can be called from inside a compiled
+definition to consume whatever the *caller* typed next, but a literal
+tag written directly after `BANK@` inside a `: ... ;` body doesn't
+work — the compiler tries to compile a call to that name instead.
+Confirmed live during verification, not a regression — the same known
+limitation `'` already has without a `[']`-style compile-time-literal
+word (not built in this project either).
+
+*Implementation:* `rebel-opcodes.json` (token 99), `primitives.ts`
+(`PrimitiveContext` gains `banks: BankTable`, case 99), no `repl.ts`
+change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1429,5 +1479,6 @@ exactly as it would be on the bare-metal target.
 | **M15** | `EXECUTE` (§1.36): one new primitive (token 96, `( xt -- )`), the indirect-call gap M13/M14 both flagged and deferred. Special-cased in `inner.ts`'s `dispatch()` (not `primitives.ts`) — recurses into `executeXT()` itself, so `DOCOL`/`DOVAR`/`DOCON`/`DODOES` dispatch, breakpoints, and nested blocking all work identically to a direct call, reusing the shared `rstack` sentinel `threadFrom` already manages on every call. | `rebel-opcodes.json`, `inner.ts` |
 | **M16** | `S"`/`."` real interpret-time behavior (§1.37): `compileOnly` dropped from both; each now branches on `STATE` in `primitives.ts` instead of throwing while interpreting. A new `PAD` bank (128 bytes, like `TIB`) holds interpreted `S"`'s text; interpreted `."` needs no `PAD` at all. New primitive 97, `PAD ( -- addr )`. Rejected reusing `TIB` — an implicit, undocumented coupling with `ACCEPT` instead of a named contract. `inner.ts` untouched. | `rebel-opcodes.json`, `repl.ts`, `primitives.ts` |
 | **M17** | `ABORT` (§1.38): scoped in full as `THROW`/`CATCH`/`ABORT`, deliberately trimmed to just `ABORT` (token 98) before implementing — no consumer for the rest without `CATCH`, and this project doesn't track ANS conformance closely. Empties the data stack (`DataStack.clear()`, new) and throws a plain `Error`. Found and fixed a real, independent bug along the way: `threadFrom`'s rstack sentinel leaked one entry per uncaught error, forever — `replLoop`'s catch now clears both stacks on any error, not just `ABORT`. `interpret()`'s contract is unchanged. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
+| **M18** | `BANK@` (§1.39): `BANK@ ( "tag" -- addr )` (token 99) — parses the next input token like `'`/`CREATE`, uppercases it, looks up via `ctx.banks.findBank()`, pushes addr only (matching the `SOMETHING@` one-value convention) or throws `? unknown bank: <TAG>`. API-mediated, not arena-resident — `BankTable` is plain host-side TS. Built once a concrete need appeared: reaching any sysvar from Forth via `BANK@ SYSV <offset> + @`, a hardcoded-offset approach chosen over adding a second named-lookup primitive (`SYSV@`). | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
