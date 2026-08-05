@@ -210,13 +210,23 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     the way. Exact slot byte layout isn't a finalized cross-target
     contract yet — mirrored into `rebel-rom/CHANGES.md` for whoever
     picks this up on that side. Detailed below.
-21. Later/open: multi-arena isolation (deliberately unenforced — full
+21. **`BANK@` reads `MMAP` directly** — scoped (`DEVELOPING.md` §12,
+    2026-08-05), not built: a pure read-path swap, `BANK@` calling a
+    new `MemoryMap.findBankAddr()` (walks `MMAP`'s slots directly)
+    instead of `ctx.banks.findBank()` (the host TS array) — same
+    observable behavior, proven by the existing `bank-access.test.ts`
+    suite passing unmodified. The smaller, more contained half of
+    M19's "Follow-on, not resolved" note; Forth-side bank creation
+    stays separately scoped, not touched here.
+22. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
     `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
     sysvar lookup (`SYSV@`, considered and explicitly declined —
-    `BANK@` + a hardcoded offset covers the real need), Web Worker
-    migration — see `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9
-    for the full open-decisions list.
+    `BANK@` + a hardcoded offset covers the real need), Forth-side bank
+    creation via `MMAP` (the larger half of M19's follow-on, not
+    scoped in detail yet), Web Worker migration — see
+    `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9 for the full
+    open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

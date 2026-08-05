@@ -1262,3 +1262,76 @@ see the section above; nothing about M19 changes that boundary.
   what Rebel-Sim actually built is documented above and mirrored into
   `rebel-rom/CHANGES.md`, but still needs that side's real agreement
   once `rebel-rom` picks this up.
+
+## 12. `BANK@` reads `MMAP` directly — scoped, not yet built
+
+### Motivation
+
+§11 landed `MMAP` as a mirror only — `BANK@` (M18) still calls
+`ctx.banks.findBank(tag)`, the host-side TS array, even though the
+exact same data now also sits in arena bytes. This is the smaller,
+more contained half of §11's "Follow-on, not resolved" note (the
+other, larger half — letting Forth source *create* a bank — needs real
+allocation/validation design decisions and stays separately scoped,
+not touched here). This is purely a **read-path swap**: same observable
+behavior, different implementation underneath.
+
+### Design
+
+- `MemoryMap` (`mmap.ts`) gains one new method:
+  `findBankAddr(tag: string): number | undefined` — walks `getSlot(i)`
+  for `i` in `0..slotCount`, returns the first slot's `base` whose
+  `tag` matches, `undefined` if none. Mirrors `findBank(tag)`'s exact
+  "first match, in creation order" semantics, since `MMAP`'s slots are
+  written in that same creation order (M19's own test coverage already
+  confirms this).
+- `primitives.ts`'s case 99 (`BANK@`) changes its one lookup line from
+  `ctx.banks.findBank(tag)` to `ctx.banks.mmap.findBankAddr(tag)` —
+  everything else about `BANK@` (parsing via `nextInputToken()`,
+  uppercasing, the `? unknown bank: <TAG>` error, not being
+  `IMMEDIATE`) stays exactly as it is.
+- `PrimitiveContext`'s shape doesn't change — `banks: BankTable` was
+  already there (M18); this only changes what `BANK@`'s single call
+  site does with it (`ctx.banks.mmap` instead of `ctx.banks` directly).
+- No change to `BankTable.findBank()`/`getAllBanks()` themselves — they
+  keep reading the host array. This scoping is specifically about
+  `BANK@`, not a blanket migration of every `BankTable` consumer
+  (`storage.ts`, the app's `read_banks` WebMCP tool included).
+
+### Why this is safe, not just probably-fine
+
+`MMAP` is a verified-correct mirror of `BankTable`'s own array — M19's
+test suite already confirms every host-created bank ends up in `MMAP`,
+in the same order, with matching fields. Since `BANK@`'s current
+behavior already *is* "first bank of that tag, in creation order," and
+`MMAP`'s slots are written in that exact same order, `findBankAddr()`
+and `findBank()` are guaranteed to return equivalent results for every
+bank that exists today. `BANK@ SYSV` returns the identical address
+either way — the entire, unmodified `bank-access.test.ts` suite passing
+against the new lookup path is the actual proof of that, not just an
+argument for it.
+
+### Verification plan
+
+- `bank-access.test.ts`'s existing 7 tests should all pass completely
+  unmodified — the primary evidence this is a safe migration, not a
+  behavior rewrite.
+- New test(s) for `findBankAddr()` itself: a known tag resolves to the
+  right base; an unknown tag returns `undefined`; first-match-on-a-
+  repeated-tag semantics hold, matching `findBank()`'s own test
+  coverage.
+- Live, via WebMCP: the same `BANK@ SYSV`/`BANK@ NOPE`/`BANK@ PAD`
+  checks already done for M18, confirming identical results after the
+  migration.
+
+### Scope cuts, explicit
+
+- No Forth-side bank creation — the separate, larger follow-on named
+  in §11, not touched here.
+- No change to `findBank()`/`getAllBanks()` or any other `BankTable`
+  consumer — they keep reading the host array; this is `BANK@`-specific.
+- No removal of `BankTable`'s own `banks` array or `findBank()` method
+  — still real, still used elsewhere. `MMAP` isn't replacing
+  `BankTable`, just becoming `BANK@`'s particular read path.
+- No `PrimitiveContext` shape change — no new field, no API churn
+  beyond `BANK@`'s single call site.
