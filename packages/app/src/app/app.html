@@ -53,14 +53,14 @@
     </div>
 
     <div class="inspector-section">
-      <div class="inspector-label">banks:</div>
+      <div class="inspector-label">banks arena 1, {{ formatBankSize(bankUsedBytes()) }} of {{ formatBankSize(arenaSizeBytes()) }}:</div>
       <table class="bank-table">
         @for (b of bankTable(); track b.name) {
           <tr>
             <td>{{ b.tag }}</td>
             <td>{{ b.name }}</td>
-            <td>{{ b.base }}</td>
-            <td>{{ b.size }}</td>
+            <td>{{ formatBankAddr(b.base) }}</td>
+            <td>{{ formatBankSize(b.size) }}</td>
           </tr>
         }
       </table>

@@ -37,6 +37,13 @@ export class App implements AfterViewInit, OnDestroy {
   protected readonly returnStack = signal<number[]>([]);
   protected readonly dictionaryWords = signal<DictionaryEntry[]>([]);
   protected readonly bankTable = signal<readonly Bank[]>([]);
+  // Fixed for the lifetime of a Machine (Arena's size never changes after
+  // construction) — set once alongside bankTable's initial value below,
+  // not re-polled on every tick like bankTable itself is.
+  protected readonly arenaSizeBytes = signal(0);
+  protected readonly bankUsedBytes = computed(() =>
+    this.bankTable().reduce((sum, b) => sum + b.size, 0),
+  );
   protected readonly storageStatus = signal<string>('checking…');
 
   // DEBUGGING.md (M10) UI: `undefined` while running; the paused
@@ -114,6 +121,7 @@ export class App implements AfterViewInit, OnDestroy {
     });
     this.screenRef.nativeElement.focus();
     this.bankTable.set(this.machine.banks.getAllBanks());
+    this.arenaSizeBytes.set(this.machine.arena.sizeBytes);
     this.lastBankCount = this.machine.banks.getAllBanks().length;
     this.registerWebMcpTools();
 
@@ -475,6 +483,19 @@ export class App implements AfterViewInit, OnDestroy {
 
   protected clearBreakpointByName(name: string): void {
     this.machine.clearBreakpoint(name);
+  }
+
+  // Inspector-panel display only — Bank itself stays plain decimal
+  // numbers everywhere else (engine, WebMCP's read_banks, tests).
+  protected formatBankAddr(addr: number): string {
+    return '0x' + addr.toString(16).toUpperCase().padStart(4, '0');
+  }
+
+  protected formatBankSize(bytes: number): string {
+    const unit = bytes >= 1024 * 1024 ? 1024 * 1024 : bytes >= 1024 ? 1024 : 1;
+    const label = unit === 1024 * 1024 ? 'MB' : unit === 1024 ? 'kB' : 'B';
+    const value = (bytes / unit).toFixed(2).replace(/\.?0+$/, '');
+    return `${value} ${label}`;
   }
 
   // WebMCP is an experimental browser feature
