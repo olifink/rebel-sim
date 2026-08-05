@@ -175,7 +175,9 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     error, forever — confirmed empirically (0 → 1 → 2 across two
     errors) before fixing it. Detailed below.
 19. Later/open: multi-arena isolation, `THROW`/`CATCH` (tabled, M17),
-    Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
+    `BANK@` (scoped, `DEVELOPING.md` §10 — gated on multi-arena landing
+    and a real shared-bank access-control decision, not implemented
+    yet), Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
     `PORTING-WEB.md` §9 for the full open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is

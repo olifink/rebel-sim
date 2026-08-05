@@ -859,3 +859,150 @@ into one long-lived session — gets the new recovery behavior.
 - No `ABORT"`.
 - `interpret()`/`runLine()`'s host-facing error contract is unchanged
   — only the interactive `replLoop` gets stack-reset-on-error.
+
+## 10. Forth-visible bank access (`BANK@`) — scoped, not yet built
+
+`FORTH-ARCHITECTURE.md` §9 item 4 has flagged this as open since it was
+written: whether the bank table needs to become arena-resident memory
+Forth walks via raw address arithmetic, or whether an API-mediated
+primitive (calling into the host bank table, the way `CBankTable::
+FindBank` already exists in C++) is sufficient — "`docs/MEMORY-MODEL.md`
+§3.2 explicitly left this as a 'revisit once Forth is actually
+reading/writing through it' question." Raised directly (2026-08-02):
+shared banks should probably be reachable the same way, by type — which
+surfaced a real, previously-unflagged problem this section exists to
+resolve before picking a mechanism, not after.
+
+### The finding that shapes this design: memory-access isolation isn't enforced anywhere today
+
+Checked against `rebel-rom/docs/MEMORY-MODEL.md` §2, directly, not
+assumed: *"There is no separate 'special' memory kind from Forth's
+point of view; everything is reachable by address"* — no MMU, no
+bounds-checking, deliberately ("full read/write... it should feel like
+real, physical, fully-accessible memory"). This means `MEMORY-MODEL.md`
+§3.7's "isolation as the default" claim for multi-arena is, today, a
+*convention* (a task simply isn't handed another arena's base address),
+not an *enforcement* — nothing stops a stray or crafted offset from one
+arena's Forth code reaching another arena's private `DICT`/`SYSV`, or a
+shared bank like `KMAP`, since there's no distinction at the addressing
+level once an address is computed. This isn't flagged anywhere in
+`rebel-rom`'s own docs — a genuine gap surfaced by asking "should
+shared banks be `BANK@`-reachable too," not a restatement of something
+already tracked.
+
+**Rebel-Sim already has a structural advantage here it isn't exploiting
+yet.** Checked `arena.ts`: it does zero bounds-checking of its own — it
+relies entirely on `DataView`, and (confirmed empirically, `node -e`)
+`DataView` throws a real `RangeError` on any out-of-range offset,
+positive or negative. So a Rebel-Sim arena already can't be corrupted
+from *outside its own `ArrayBuffer`* — a guarantee bare-metal C++
+cannot get for free. That boundary is around the *whole arena* today,
+not per-bank — within one arena's buffer, `KMAP` is exactly as exposed
+as `DICT` is, matching Rebel-ROM. But it points at a real option once
+multi-arena lands here: put genuinely-shared banks in a **separate
+`ArrayBuffer`** that a per-arena Forth program is never handed a raw
+offset-space into at all — real enforcement, essentially for free, via
+the same JS mechanism, rather than mirroring Rebel-ROM's "just more
+flat address space" approach by default.
+
+### Design direction: API-mediated, not an arena-resident table
+
+Given the isolation gap above, an arena-resident bank table Forth walks
+via raw `@`/`C@` (`FORTH-ARCHITECTURE.md` §9 item 4's first option) is
+the wrong direction to build toward: once the table is just memory,
+there's no interception point left for a future access-control decision
+("which banks can this arena's Forth code reach," left unresolved
+below) to hook into — the data being readable *is* the access. A
+primitive is the right shape precisely because it's a checkpoint: today
+it can just
+answer "where's the bank with this tag," and later, once multi-arena
+and shared-bank policy are actually decided, the same call site is
+where "is the caller's arena allowed to see this bank" would get
+checked, with zero redesign.
+
+**`BANK@ ( "tag" -- addr size )`** — parses the next input token
+directly (the same `nextInputToken()` mechanism `'`/`CREATE`/`VARIABLE`/
+`CONSTANT`/`S"`/`VOCABULARY`/`USE` already all use), not a string
+`addr len` off the stack — there's no reason to route a 4-character tag
+through `PAD`/`S"` when every other "resolve a source-level name to
+something" primitive already has a simpler, established pattern to
+follow. Uppercased before lookup, matching `findWord`'s own
+case-insensitivity (`dictionary.ts`) — bank tags are always stored
+uppercase (`'DICT'`, `'SYSV'`, …). Looks up via `ctx.banks.findBank(tag)`
+— first bank of that tag, matching the existing method's own semantics
+(tags repeat; name-based disambiguation is a separate, unbuilt need,
+see scope cuts). Throws (`? unknown bank: <TAG>`) on no match, same
+convention as `'` throwing on an unrecognized word rather than pushing
+a sentinel — consistency with the one existing primitive this is
+closest to in shape.
+
+**Descriptor kept minimal, on purpose:** just `addr`/`size`, not the
+full `{tag, name, base, size, flags}` shape `Bank`
+(`banks.ts`)/`BankDescriptor` (`membank.h`) already carry internally.
+`name` needs no exposure yet — nothing in Forth source today needs to
+disambiguate same-tag banks (the multiple-`DATA`-banks case is a
+storage/project-loading concern that doesn't touch Forth source
+directly). `flags` doesn't exist on Rebel-Sim's own `Bank` interface at
+all today (no `RESIDENT`/`EXTERNAL`/`SWAPPABLE`/`DIRTY` — `SCRN` isn't
+even an arena bank in Rebel-Sim, per `rebel-opcodes.json`'s own note),
+so there's nothing real to return yet. Both are documented future
+extensions (`BANK-NAME@`, a flags cell), not built ahead of an actual
+need for them.
+
+### Shared-bank access control: deliberately not resolved here
+
+This section fixes the *shape* (a primitive, not raw address
+arithmetic) specifically so a real access-control decision doesn't
+require retrofitting the mechanism later — it does not make that
+decision. Rebel-Sim has zero multi-arena support today (`Machine`'s
+constructor creates exactly one `Arena`, unconditionally,
+`HAL.md` §3), so there is currently nothing to distinguish "this
+arena's own bank" from "a shared bank" — every bank `BANK@` could ever
+find lives in the one arena that exists. `BANK@` as scoped here works
+correctly and identically for that entire single-arena case with zero
+access-control logic, and stays forward-compatible with adding it once
+multi-arena is actually being built.
+
+### Implementation sketch
+
+- `rebel-opcodes.json`: one new primitive, `BANK@`, next free token.
+- `primitives.ts`: `PrimitiveContext` gains a `banks: BankTable` field
+  (mirrors the `padBase`/`padSize` precedent, M16); one case, parsing
+  the token, uppercasing, calling `ctx.banks.findBank()`, pushing
+  `addr`/`size` or throwing.
+- `repl.ts`: `Machine` already has `readonly banks: BankTable` — just
+  needs to satisfy the widened `PrimitiveContext` interface, which it
+  already does structurally (no constructor change needed).
+- No `inner.ts` change — this is a plain synchronous case, same
+  category as `PAD`/`LATEST-ADDR`, not `EXECUTE`/`CATCH`.
+
+### Verification plan
+
+- New engine tests: `BANK@` against known banks (`SYSV`, `DICT`, `TIB`,
+  `PAD`, …) returns the same `addr`/`size` `getAllBanks()`/`findBank()`
+  already report; an unknown tag throws; two same-tag banks (once
+  something creates one, e.g. a future `DATA` asset) resolves to the
+  *first*-created one, matching `findBank`'s documented semantics, not
+  silently picking an arbitrary one.
+- Live, via WebMCP: `BANK@ DICT .` etc., cross-checked against
+  `read_banks`'s existing output for the same bank.
+- Confirm `read_banks` (WebMCP tool, host-side) is unaffected — it
+  already reads `getAllBanks()` directly and needs no change.
+
+### Scope cuts, explicit
+
+- No name-based lookup (`BANK@` resolves by tag only, first match —
+  same as `findBank(tag)`'s existing one-argument semantics today).
+- No `flags` in the returned descriptor — nothing on the Rebel-Sim side
+  has one yet.
+- No shared-bank / cross-arena access-control policy decided — this
+  section is preparation for that decision (the right mechanism shape),
+  not the decision itself. Revisit once multi-arena is actually being
+  built on the Rebel-Sim side, not before.
+- No arena-resident bank table (the rejected direction, reasoning
+  above) — API-mediated only.
+- Not implemented ahead of an actual need. This scoping exists so the
+  shape is right *when* a need appears (multi-arena landing, or a Forth
+  program wanting to dynamically discover another bank's extent),
+  matching this project's standing "minimum real mechanism, don't build
+  ahead of a concrete need" discipline (`CLAUDE.md`).
