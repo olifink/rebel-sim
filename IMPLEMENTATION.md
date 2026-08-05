@@ -1355,6 +1355,67 @@ word (not built in this project either).
 (`PrimitiveContext` gains `banks: BankTable`, case 99), no `repl.ts`
 change.
 
+### 1.40 `MMAP` — the arena-resident bank table, and `CORE.ARENA-SIZE` (M19, `DEVELOPING.md` §11)
+
+Full motivation in `DEVELOPING.md` §11: a persistence/snapshot
+discussion flagged `BankTable` as host-side (can't reconstruct bank
+layout from a raw arena-byte dump alone); a separate finding confirmed
+`DIRTY` is genuinely inert on both this project and `rebel-rom`; and
+`rebel-rom/docs/MEMORY-MODEL.md` §3.2 itself confirms arena-resident
+bank data was the *original* Phase 3 design, deliberately deferred
+until Forth needed raw address access — exactly what's arriving here.
+
+New module `mmap.ts`: `MemoryMap` (arena-byte accessor — header
+init, next-free/slot-count tracking, per-slot read/write) plus wire
+constants `MMAP_TAG`, `MMAP_MAX_SLOTS = 64` (matches `rebel-rom`'s real
+`BANK_TABLE_MAX_BANKS`), `MMAP_SIZE` (12-byte header + 64 24-byte
+slots = 1548 bytes). Slot layout: `tag`(4) + `name`(8) + `base`(4-cell)
++ `size`(4-cell) + `flags`(4-cell) — proposed, not a finalized
+cross-target contract (mirrored into `rebel-rom/CHANGES.md`).
+
+`BankTable`'s constructor (`banks.ts`) reserves `MMAP`'s space first,
+writes its header, and registers + mirrors itself into its own slot 0
+— resolving the self-referential bootstrap by having `MMAP` describe
+itself, not treating itself as a special case. Every `createBank()`
+call after that mirrors its result into the next free `MMAP` slot and
+advances `MMAP`'s own next-free cell, **in addition to** the existing
+host-side `banks` array — `findBank()`/`getAllBanks()` are completely
+unchanged. This is a **mirror, not yet the source of truth**: Forth
+can't create banks yet, and `BANK@`/`Machine.banks` still read the
+host array, not `MMAP` — both real, explicit follow-on work.
+
+`Bank` gained a real `flags` field for the first time: `BankFlagResident`/
+`BankFlagExternal`/`BankFlagSwappable`/`BankFlagDirty` match
+`rebel-rom`'s real `TBankFlags` bit-for-bit; `BankFlagActive` (bit 4) is
+a new Rebel-Sim-first addition, default-on — atomic exclusion during a
+flush (`storage.ts`'s `saveAsset()` is genuinely `async`, the
+interpreter keeps stepping between awaits) instead of finally wiring up
+`DIRTY`, which needs a write-interception point neither side's `@`/`!`
+gives it.
+
+**A real bug, found and fixed:** the first pass had `mmap.ts` importing
+`BANK_NAME_LEN` from `banks.ts` while `banks.ts` imports `MemoryMap`
+from `mmap.ts` — a circular ES module dependency that left
+`BANK_NAME_LEN` `undefined` at `mmap.ts`'s module-init time, corrupting
+every slot-offset computation. Surfaced as "MMAP is full (64 slots)" on
+the *ninth* bank ever created, not an obvious `undefined` crash —
+root-caused by building to `dist/` and running a throwaway `node -e`
+script directly against it. Fixed by hardcoding the one needed value
+(`8`) in `mmap.ts` instead of importing it.
+
+Separately, `CORE.ARENA-SIZE` (`rebel-opcodes.json`'s `sysvarGroups`):
+total arena size in bytes, written once at `Machine` construction via
+`setUnsigned` (can exceed the signed 32-bit range at the theoretical 4
+GiB max), readable from Forth like any sysvar. `rebel-rom`'s real
+`TCoreSysVars` doesn't have this field either (checked directly) — a
+genuine new cross-target candidate, not something already there to
+match.
+
+*Implementation:* `mmap.ts` (new), `banks.ts` (`Bank` gains `flags`,
+flag constants, `BankTable` constructor + `createBank()` wire into
+`MemoryMap`), `index.ts` (new exports), `rebel-opcodes.json`
+(`CORE.ARENA-SIZE` field), `repl.ts` (one line setting `ARENA-SIZE`).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1480,5 +1541,6 @@ exactly as it would be on the bare-metal target.
 | **M16** | `S"`/`."` real interpret-time behavior (§1.37): `compileOnly` dropped from both; each now branches on `STATE` in `primitives.ts` instead of throwing while interpreting. A new `PAD` bank (128 bytes, like `TIB`) holds interpreted `S"`'s text; interpreted `."` needs no `PAD` at all. New primitive 97, `PAD ( -- addr )`. Rejected reusing `TIB` — an implicit, undocumented coupling with `ACCEPT` instead of a named contract. `inner.ts` untouched. | `rebel-opcodes.json`, `repl.ts`, `primitives.ts` |
 | **M17** | `ABORT` (§1.38): scoped in full as `THROW`/`CATCH`/`ABORT`, deliberately trimmed to just `ABORT` (token 98) before implementing — no consumer for the rest without `CATCH`, and this project doesn't track ANS conformance closely. Empties the data stack (`DataStack.clear()`, new) and throws a plain `Error`. Found and fixed a real, independent bug along the way: `threadFrom`'s rstack sentinel leaked one entry per uncaught error, forever — `replLoop`'s catch now clears both stacks on any error, not just `ABORT`. `interpret()`'s contract is unchanged. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
 | **M18** | `BANK@` (§1.39): `BANK@ ( "tag" -- addr )` (token 99) — parses the next input token like `'`/`CREATE`, uppercases it, looks up via `ctx.banks.findBank()`, pushes addr only (matching the `SOMETHING@` one-value convention) or throws `? unknown bank: <TAG>`. API-mediated, not arena-resident — `BankTable` is plain host-side TS. Built once a concrete need appeared: reaching any sysvar from Forth via `BANK@ SYSV <offset> + @`, a hardcoded-offset approach chosen over adding a second named-lookup primitive (`SYSV@`). | `rebel-opcodes.json`, `primitives.ts` |
+| **M19** | `MMAP` (§1.40): arena-resident bank table, bank 0, 64 slots (matches `rebel-rom`'s `BANK_TABLE_MAX_BANKS`) — every `createBank()` call, including `MMAP`'s own self-referential registration, mirrors into it, in addition to (not instead of) the existing host-side array. `Bank` gains a real `flags` field; new `ACTIVE` flag (atomic exclusion during flush) supersedes ever wiring up the confirmed-inert `DIRTY`. Mirror only — `findBank()`/`BANK@`/Forth-side bank creation are unchanged, real follow-on work. Also added `CORE.ARENA-SIZE`, a new sysvar exposing total arena size to Forth. | `mmap.ts` (new), `banks.ts`, `index.ts`, `rebel-opcodes.json`, `repl.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

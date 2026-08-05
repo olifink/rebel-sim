@@ -4,7 +4,10 @@ import { BankTable } from './banks.js';
 import { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 
 function makeStack(bankSize = 16) {
-  const arena = new Arena(64);
+  // Big enough for MMAP's own fixed overhead (DEVELOPING.md §11, M19 —
+  // every BankTable reserves bank 0 for it) plus this test's tiny DSTK
+  // bank, not just the DSTK bank alone.
+  const arena = new Arena(1 << 12);
   const banks = new BankTable(arena);
   const bank = banks.createBank('DSTK', bankSize);
   return new DataStack(arena, bank);

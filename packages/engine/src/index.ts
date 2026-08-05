@@ -1,6 +1,22 @@
 export { Arena, MAX_ARENA_SIZE } from './arena.js';
-export { BankTable, roundToSizeClass, BankSizeXS, BankSizeS, BankSizeM, BankSizeL, BankSizeXL, BankSizeXXL } from './banks.js';
+export {
+  BankTable,
+  roundToSizeClass,
+  BankSizeXS,
+  BankSizeS,
+  BankSizeM,
+  BankSizeL,
+  BankSizeXL,
+  BankSizeXXL,
+  BankFlagResident,
+  BankFlagExternal,
+  BankFlagSwappable,
+  BankFlagDirty,
+  BankFlagActive,
+} from './banks.js';
 export type { Bank } from './banks.js';
+export { MemoryMap, MMAP_TAG, MMAP_MAX_SLOTS, MMAP_SIZE } from './mmap.js';
+export type { MMapSlot } from './mmap.js';
 export { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 export { Sysvars } from './sysvars.js';
 export { executePrimitive, TRUE, FALSE } from './primitives.js';

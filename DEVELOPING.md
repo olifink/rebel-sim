@@ -1019,3 +1019,246 @@ wanted.
   program wanting to dynamically discover another bank's extent),
   matching this project's standing "minimum real mechanism, don't build
   ahead of a concrete need" discipline (`CLAUDE.md`).
+
+## 11. Arena-resident memory map (`MMAP`) — done, M19 (mirror only — see below)
+
+Grew out of two threads from the same conversation (2026-08-05): a
+question about whether preserving live system state is as simple as
+copying out the arena's used bytes (it mostly is, but `BankTable` being
+host-side TS was flagged as a real gap — you can't reconstruct bank
+layout from raw bytes alone), and a separate observation that this
+project's `DIRTY` bank flag can't actually work as designed, because
+Forth's `@`/`!` gives no write-interception point to hook it from. Both
+threads converge on the same fix: make the bank table itself arena-
+resident, so it's just more bytes both a snapshot and Forth source can
+read directly, and replace change-detection (`DIRTY`, which needs
+write-interception this engine deliberately doesn't have) with a
+cheaper, real primitive — atomic exclusion during flush.
+
+**This directly reopens §10's "API-mediated, not an arena-resident
+table" call for `BANK@`, not something layered cleanly on top of it.**
+That section chose a primitive specifically because "`BankTable` is
+plain host-side TS, not arena-backed data... inventing a wire format
+[had] no other consumer." Portability, Forth-side bank creation, and
+the persistence-snapshot gap are exactly the "other consumer" that
+tips the balance now — worth being honest that this walks back a
+decision from days earlier, not that it was wrong then.
+
+### A genuine precedent, found not assumed: this was the original plan
+
+Checked directly against `rebel-rom/docs/MEMORY-MODEL.md` §3.2, not
+assumed: the bank table living inside the arena, not as a host object,
+was **the original design** — Phase 3 deliberately simplified away from
+it, and said so explicitly at the time: *"the table itself is a plain
+C++ object owned by the kernel (`CBankTable`)... rather than data
+living inside the arena **as originally sketched here** — simpler for
+now, and nothing stops moving it into the arena later (**Phase 11**) if
+Forth ever needs to inspect it via raw address arithmetic rather than a
+primitive calling into `CBankTable`'s API."* Phase 11 — the Forth
+executor — is exactly what doesn't exist on that side yet and what
+Rebel-Sim exists to design ahead of (`CLAUDE.md`). This isn't new
+complexity being invented; it's returning to the original sketch now
+that the thing it was waiting for (a real Forth side needing raw
+address access) has arrived, here first.
+
+### Also checked: `rebel-rom`'s bank table isn't arena-resident either, today
+
+Confirmed by reading `rebel-rom/src/membank.h` directly: `CBankTable`'s
+`CBank m_Banks[BANK_TABLE_MAX_BANKS]` is a plain member array on the
+`CBankTable` object itself, living outside the memory range
+`Initialize(pArenaBase, pArenaSize)` claims as the arena. So both real
+implementations independently duplicate "host owns a bank descriptor
+array" today — a TS array here, a C++ array there — which is exactly
+the kind of duplication `CLAUDE.md`'s "single source-of-truth artifact"
+goal says to flag rather than let drift. `MMAP` replaces both
+independent copies with one shared, portable contract instead of adding
+a third form on top.
+
+### Also checked: `DIRTY` is genuinely inert on the `rebel-rom` side, not just here
+
+`rebel-rom/src/membank.h`: `BankFlagDirty = 1 << 3 // reserved - still
+inert`. Grepped `rebel-rom/src/*.cpp`/`*.h` for `BankFlagDirty` and any
+flag-setting call — zero real usage anywhere, confirmed not assumed.
+This directly contradicts `rebel-rom/docs/STORAGE.md` §6's own text
+("closing a project writes back only the banks marked dirty... Phase 9
+is what finally wires that flag up to do something") — a real,
+pre-existing doc/code mismatch on that side, found while checking this,
+worth fixing there independently of anything here.
+
+### Design: `MMAP` as bank 0
+
+`MMAP` becomes the very first bank created — at absolute arena base 0,
+ahead of even `SYSV` (today's first bank). Every other bank's base
+offset shifts down by `MMAP`'s own fixed size as a direct consequence;
+harmless, since addresses are always per-arena offsets
+(`FORTH-ARCHITECTURE.md`) and nothing in this codebase hardcodes a
+bank's absolute base — but worth naming, since `SYSV` no longer sitting
+at address 0 could otherwise surprise.
+
+A small header, mirroring `Sysvars.initHeader()`'s existing
+magic-plus-version pattern (`sysvars.ts`) rather than inventing a new
+convention: magic `'M','M'`, a version byte, a reserved byte, then two
+cells — **next-free offset** and **slot count in use** — the arena-
+resident equivalent of `BankTable`'s private `nextFree` /
+`CBankTable`'s `m_nNextOffset`/`m_nCount`. This is what actually makes
+Forth-side bank creation possible: a word creating a bank reads the
+next-free cell to know where to place it, writes a descriptor, then
+advances that same cell — no host round-trip needed for either step.
+
+Followed by a **fixed 64 slots** — matching `rebel-rom`'s existing
+`BANK_TABLE_MAX_BANKS = 64` exactly, not a separately-chosen number, so
+the two sides start aligned rather than needing reconciliation later.
+64 also already doubles as a soft cap on simultaneously-loaded project
+assets (`docs/STORAGE.md`'s one-file-per-bank model), so it's a real
+constraint either side would hit at the same point.
+
+### Slot layout — proposed here, not finalized, pending `rebel-rom`-side input
+
+Each slot: `tag` (4 bytes) + `name` (8 bytes) + `base` (4-byte cell) +
+`size` (4-byte cell) + `flags` (4-byte cell) = 24 bytes, cell-aligned.
+Matches this project's actually-*built* `Bank` shape (`banks.ts`:
+`{tag, name, base, size}`, raw byte `size`) rather than
+`MEMORY-MODEL.md` §3.2's older `size_class`-only sketch — `CBank`
+itself already stores a raw `size_t m_nSize` too (`GetSize()`), so raw
+bytes is what both sides actually implemented, `size_class` was only
+ever the size *requested* at creation time.
+
+**Deliberately not finalized as a byte-for-byte spec here.** `CBank`'s
+real `tag`/`name` accessors return null-terminated C strings
+(`GetTag()`/`GetName()`) via manual `char[]` fields, not a pre-agreed
+fixed wire format — a native C++ struct's own layout/padding isn't
+automatically wire-compatible with a hand-specified byte scheme just
+because the field sizes match on paper. Whoever implements this on the
+`rebel-rom` side needs to make that call for real (almost certainly an
+explicit serialize/deserialize into this exact byte layout, not
+treating `CBank` as directly memory-mapped) — which is exactly why this
+gets written up in `rebel-rom/CHANGES.md` too, not decided unilaterally
+here and presented as settled.
+
+### `ACTIVE`, not `DIRTY` — atomicity instead of change-detection
+
+One new flag bit, `ACTIVE` (`1 << 4`, next free after `rebel-rom`'s
+existing `RESIDENT`(0)/`EXTERNAL`(1)/`SWAPPABLE`(2)/`DIRTY`(3) — those
+four stay exactly as reserved/inert as they are today on both sides;
+nothing here wires them up). Default on, same as `RESIDENT`.
+
+This is a real, concrete need in Rebel-Sim specifically, not a
+speculative addition: `storage.ts`'s `saveAsset()` is genuinely
+`async`, while the interpreter keeps stepping on `requestAnimationFrame`
+ticks between `await`s — a save spanning one of those awaits could
+observe a half-written bank if Forth resumes and mutates it mid-flush.
+A single-bit flag flip is atomic at the memory level (one aligned
+write), so "the host skips inactive banks when flushing, Forth flips a
+bank inactive before a multi-step mutation and flips it back on after"
+is a cheap, real guarantee.
+
+`ACTIVE` isn't standing in for what `DIRTY` was supposed to do — it's
+replacing the need for it. Change-detection (does this bank differ from
+what's on disk) stays unsolved on purpose, matching what both sides
+already do in practice (`storage.ts`'s `saveAsset()` already "always
+persists whatever bank you hand it" — see §10's earlier note); `ACTIVE`
+just makes that safe under concurrency instead of trying to make
+persistence smarter.
+
+### No host validation, by design — same stance as arena isolation
+
+Extending the same "confirmed non-goal, not an oversight" position §10
+already settled for cross-arena access: if Forth writes a bad
+descriptor into `MMAP` — overlapping `base`/`size`, a corrupted
+next-free cursor, a duplicate `name` — nothing stops it or detects it.
+The host reads whatever's actually there. Bank *lookup* and bank
+*creation* both become "trust `MMAP`" operations, uniformly; deciding
+this on purpose here rather than discovering it as a gap later.
+
+### Follow-on, not resolved in this scoping pass: `BANK@` and `Machine.banks`
+
+Once `MMAP` is real, `BANK@` (M18) no longer needs to call into a host
+`BankTable` — it could become a plain Forth definition walking `MMAP`'s
+slots via `@`/`C@`, the same "native primitive only where actually
+needed" precedent `WORDS`/`SEE` already set (M12). Likewise,
+`Machine.banks`/`BankTable` (TS-side) might become a read-only cache
+derived from `MMAP`, or go away in favor of always reading `MMAP`
+directly. Left open — downstream of `MMAP` existing at all, not a
+prerequisite for scoping it.
+
+### What shipped (M19)
+
+A new module, `mmap.ts`, holding `MemoryMap` (the arena-byte accessor —
+`initHeader()`/`getNextFree()`/`getSlotCount()`/`addBank()`/`getSlot()`/
+`getAllSlots()`) and the wire-format constants (`MMAP_TAG`,
+`MMAP_MAX_SLOTS = 64`, `MMAP_SIZE`). `BankTable`'s constructor
+(`banks.ts`) reserves `MMAP`'s fixed space first, writes its header, and
+registers + mirrors itself into its own slot 0, before any caller ever
+gets to run — the self-referential bootstrap resolved exactly as
+sketched above. Every subsequent `createBank()` call (`banks.ts`) mirrors
+its result into the next free `MMAP` slot and advances `MMAP`'s own
+next-free cell, in addition to (not instead of) the existing host-side
+`banks` array — `findBank()`/`getAllBanks()` are unchanged, still read
+that array directly, exactly matching the "mirror only, not yet the
+source of truth" scope this section always described. `Bank` gained a
+real `flags` field (`BankFlagResident`/`BankFlagExternal`/
+`BankFlagSwappable`/`BankFlagDirty`/`BankFlagActive` — the first four
+matching `rebel-rom`'s real `TBankFlags` bit-for-bit, `ACTIVE` the new
+Rebel-Sim-first addition), defaulting to `RESIDENT | ACTIVE`, resolving
+the "nothing real to return yet" scope-cut §10 left open for it.
+`createBank()` also gained an optional fourth `flags` parameter,
+matching `CBankTable::CreateBank`'s own `nFlags = BankFlagResident`
+default-parameter shape.
+
+**A real implementation bug worth recording:** the first pass had
+`mmap.ts` importing `BANK_NAME_LEN` from `banks.ts` while `banks.ts`
+imports `MemoryMap` from `mmap.ts` — a circular ES module dependency
+that left `BANK_NAME_LEN` `undefined` at `mmap.ts`'s module-init time,
+silently corrupting every slot-offset computation downstream (surfaced
+as a baffling "MMAP is full (64 slots)" thrown on the *ninth* bank
+ever created). Fixed by hardcoding the matching value (`8`) directly in
+`mmap.ts` with a comment explaining why, rather than importing it —
+`mmap.ts` needed the number, not any actual behavior from `banks.ts`.
+
+**Forth-side bank creation and rewriting `BANK@`/`Machine.banks` to
+read `MMAP` directly are still real follow-on work, not done here** —
+see the section above; nothing about M19 changes that boundary.
+
+### Verification
+
+- Engine tests, `mmap.test.ts` (new, 8 tests) + two existing tests
+  updated for `MMAP` always being bank 0 (`banks.test.ts`'s
+  `getAllBanks` test, `stack.test.ts`'s hand-rolled tiny arena needing
+  room for `MMAP`'s own fixed overhead now): `MMAP` created
+  automatically as bank 0 at base 0; it registers itself in its own
+  slot 0 correctly; `getNextFree()` tracks the real allocation cursor
+  as banks are created; every created bank mirrors into `MMAP` in
+  creation order, matching `getAllBanks()` field-for-field; a
+  caller-supplied `flags` value is respected and mirrored; the table
+  throws once all 64 slots are used; every bank `Machine` itself
+  creates (including `MMAP`) ends up correctly mirrored; a slot is
+  readable directly via raw `@` from Forth source and matches what
+  `BANK@` resolves for the same bank.
+- Live, via WebMCP: `read_banks` after a fresh `Machine` shows `MMAP`
+  as bank 0 at `0x0000`, sized `1.51 kB`, with every other bank's base
+  shifted accordingly (`SYSV` now at `0x060C`, matching `MMAP_SIZE`
+  exactly); a raw Forth `@` walk of `MMAP`'s `DICT` slot
+  (`108 12 + @`/`108 16 + @`) printed `13836 65536`, matching
+  `read_banks`' own `DICT` row exactly — proving the mirrored data is
+  correct, read purely from arena bytes, no host round-trip. Zero
+  console errors.
+- Full engine (208 tests) + app (10 tests) suites and `npm run build`
+  green, zero regressions.
+
+### Scope cuts, explicit
+
+- No host validation of Forth-written `MMAP` data, of any kind —
+  decided directly, not deferred, same reasoning as arena isolation.
+  (Moot for M19 specifically — only the host writes `MMAP` today.)
+- No change-detection / real `DIRTY` implementation — superseded by
+  `ACTIVE`, not built alongside it.
+- No change to `RESIDENT`/`EXTERNAL`/`SWAPPABLE` semantics on either
+  side.
+- No rewrite of `BANK@` or `Machine.banks` to read `MMAP` — real
+  follow-on work, not required to land `MMAP` itself.
+- No Forth-visible bank-creation word — `MMAP` is written by the host
+  only, for now; nothing yet lets Forth source create a bank.
+- Exact slot byte layout not finalized as a cross-target contract —
+  what Rebel-Sim actually built is documented above and mirrored into
+  `rebel-rom/CHANGES.md`, but still needs that side's real agreement
+  once `rebel-rom` picks this up.

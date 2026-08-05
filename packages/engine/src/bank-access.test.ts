@@ -51,4 +51,14 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
     m.interpret(`BANK@ SYSV ${offset} + @`);
     expect(m.stack.toArray()).toEqual([m.sysvars.getState()]);
   });
+
+  it('CORE.ARENA-SIZE reports the real arena size, reachable the same way', () => {
+    const m = new Machine();
+    const arenaSizeAddr = m.sysvars.fieldOffset('CORE', 'ARENA-SIZE');
+    const sysv = m.banks.findBank('SYSV')!;
+    const offset = arenaSizeAddr - sysv.base;
+
+    m.interpret(`BANK@ SYSV ${offset} + @`);
+    expect(m.stack.toArray()).toEqual([m.arena.sizeBytes]);
+  });
 });

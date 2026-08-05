@@ -175,6 +175,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.sysvars.set('SCREEN', 'PAPER', DEFAULT_PAPER);
     this.sysvars.set('CORE', 'CURSOR-X', 0);
     this.sysvars.set('CORE', 'CURSOR-Y', 0);
+    this.sysvars.setUnsigned('CORE', 'ARENA-SIZE', this.arena.sizeBytes);
 
     const charBank = this.banks.createBank('CHAR', charCols * charRows);
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);

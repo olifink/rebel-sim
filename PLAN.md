@@ -189,7 +189,28 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     hardcoded-offset approach the user explicitly preferred over a
     second named-lookup primitive (`SYSV@`), to avoid a redirection
     layer for no real gain. Detailed below.
-20. Later/open: multi-arena isolation (deliberately unenforced — full
+20. **M19 — `MMAP`** — **done**: an arena-resident bank table (bank 0,
+    64 slots, matching `rebel-rom`'s existing `BANK_TABLE_MAX_BANKS`)
+    — the original Phase 3 design on the `rebel-rom` side, per its own
+    `docs/MEMORY-MODEL.md` §3.2, deliberately deferred until Forth
+    needed raw address access to it. Shipped as a **mirror**:
+    `BankTable.createBank()` (`banks.ts`) writes every bank it creates,
+    including `MMAP` itself (self-referential bootstrap, slot 0), into
+    a new arena-resident `MemoryMap` (`mmap.ts`) in addition to its
+    existing host-side array — `findBank()`/`getAllBanks()` are
+    unchanged, still the real read path. `Bank` gained a real `flags`
+    field (`RESIDENT`/`EXTERNAL`/`SWAPPABLE`/`DIRTY` matching
+    `rebel-rom`'s real `TBankFlags` bit-for-bit; `ACTIVE`, bit 4, a
+    Rebel-Sim-first addition — atomic exclusion during flush instead of
+    finally wiring up `DIRTY`, which is confirmed genuinely inert on
+    both sides). Forth-side bank creation and rewriting `BANK@`
+    (M18)/`Machine.banks` to read `MMAP` directly are explicit,
+    deliberate follow-on work, not done here. Found and fixed a real
+    circular-import bug (`mmap.ts` importing back from `banks.ts`) along
+    the way. Exact slot byte layout isn't a finalized cross-target
+    contract yet — mirrored into `rebel-rom/CHANGES.md` for whoever
+    picks this up on that side. Detailed below.
+21. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
     `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
     sysvar lookup (`SYSV@`, considered and explicitly declined —
@@ -2167,3 +2188,89 @@ primitive mysteriously doesn't show up in `read_dictionary`.
 **Tests:** 199 engine tests total (193 after M17, 6 new in
 `bank-access.test.ts`), confirmed via a full test run. App build
 unaffected — no Angular/UI changes.
+
+## M19 — `MMAP` — done
+
+Scoped in full in `DEVELOPING.md` §11 before implementing — see that
+section for the complete motivation (a persistence/snapshot discussion
+flagging `BankTable` as host-side, a separate finding that `DIRTY` is
+genuinely inert on both sides, and confirmation via `rebel-rom/docs/
+MEMORY-MODEL.md` §3.2 that arena-resident bank data was the *original*
+Phase 3 design, deliberately deferred). Along the way, `CORE.ARENA-SIZE`
+was added as a small, separate sysvar addition (total arena size in
+bytes, readable from Forth via `BANK@ SYSV 24 + @` or any other
+`SYSV`-relative path) — motivated by the app inspector's own "banks
+arena 1, X of Y" label wanting the same fact Forth code might want too.
+
+**What shipped:** a new module, `mmap.ts`, holding `MemoryMap` (the
+arena-byte accessor: header init, next-free/slot-count tracking,
+per-slot read/write) and the wire-format constants (`MMAP_TAG`,
+`MMAP_MAX_SLOTS = 64` — matching `rebel-rom`'s real
+`BANK_TABLE_MAX_BANKS`, not a separately-chosen number — and
+`MMAP_SIZE`, the computed total: a 12-byte header plus 64 24-byte
+slots, 1548 bytes). `BankTable`'s constructor (`banks.ts`) now reserves
+`MMAP`'s fixed space first, writes its header, and registers +
+mirrors itself into its own slot 0 before anything else runs — the
+self-referential bootstrap `DEVELOPING.md` §11 sketched, resolved
+exactly as described. Every subsequent `createBank()` call mirrors its
+result into the next free `MMAP` slot and advances `MMAP`'s own
+next-free cell, in addition to (not instead of) the existing host-side
+array — `findBank()`/`getAllBanks()` are completely unchanged, still
+the real read path, matching the "mirror only, not yet the source of
+truth" boundary the scoping doc drew. `Bank` gained a real `flags`
+field for the first time (`BankFlagResident`/`External`/`Swappable`/
+`Dirty` matching `rebel-rom`'s real `TBankFlags` bit-for-bit; `Active`,
+bit 4, the new Rebel-Sim-first addition, default-on) — resolving the
+"nothing real to return yet" scope-cut M18 left open. `createBank()`
+gained an optional fourth `flags` parameter, matching
+`CBankTable::CreateBank`'s own default-parameter shape.
+
+**A real implementation bug found and fixed, not just a design
+question:** the first pass had `mmap.ts` importing `BANK_NAME_LEN` from
+`banks.ts` while `banks.ts` imports `MemoryMap` from `mmap.ts` — a
+circular ES module dependency. This left `BANK_NAME_LEN` `undefined` at
+`mmap.ts`'s module-init time, corrupting every slot-offset computation
+downstream, which didn't fail cleanly — it surfaced as a baffling
+"MMAP is full (64 slots)" error thrown on the *ninth* bank ever
+created (`TIB`, inside `Machine`'s own constructor), not an obvious
+`undefined`-related crash. Root-caused by building the engine to
+`dist/` and running a throwaway `node -e` script directly against it
+rather than guessing from the test failures alone. Fixed by hardcoding
+the one value `mmap.ts` actually needed (`8`) rather than importing
+it, since it needed the number, not any real behavior from `banks.ts`.
+
+**Deliberately not done here, per the scoping doc's own boundary:**
+Forth-side bank creation (nothing yet lets Forth source write a new
+`MMAP` slot and have it mean anything), and rewriting `BANK@` (M18) or
+`Machine.banks`/`BankTable`'s read path to treat `MMAP` as the actual
+source of truth rather than a verified mirror of it. Both real,
+named follow-on work, not silently skipped.
+
+**Verified via the engine test suite** (`mmap.test.ts`, new, 8 tests;
+`banks.test.ts`'s `getAllBanks` test and `stack.test.ts`'s hand-rolled
+tiny-arena helper both updated for `MMAP` always being bank 0 now):
+`MMAP` created automatically as bank 0 at base 0 with the right
+size/flags; it registers itself in its own slot 0 correctly;
+`getNextFree()` tracks the real allocation cursor as banks are
+created; every created bank mirrors into `MMAP` in creation order,
+matching `getAllBanks()` field-for-field; a caller-supplied `flags`
+value is respected and mirrored; the table throws once all 64 slots
+are used; every bank a real `Machine` creates (including `MMAP` itself)
+ends up correctly mirrored; a slot is readable directly via raw `@`
+from Forth source and matches what `BANK@` resolves for the same bank.
+**Live-verified in the browser** via WebMCP: `read_banks` on a fresh
+`Machine` shows `MMAP` as bank 0 at `0x0000`/`1.51 kB`, every other
+bank's base shifted by exactly `MMAP_SIZE` (`SYSV` now at `0x060C` =
+1548 decimal); a raw Forth `@` walk of `MMAP`'s `DICT` slot
+(`108 12 + @ .` / `108 16 + @ .`) printed `13836 65536`, matching
+`read_banks`' own `DICT` row exactly — the mirrored data, read purely
+from arena bytes with zero host round-trip, is correct. Zero console
+errors. `CORE.ARENA-SIZE` separately verified: `BANK@ SYSV 24 + @ .`
+printed `1048576`, the real default arena size.
+
+**Tests:** 208 engine tests total (200 before this milestone, 8 new in
+`mmap.test.ts`, plus 1 earlier for `CORE.ARENA-SIZE` in
+`bank-access.test.ts`), confirmed via a full test run. 10 app tests and
+the full build unaffected — no Angular/UI changes this milestone (the
+inspector panel's hex/kB formatting and arena-usage label were a
+separate, earlier UI-only change).

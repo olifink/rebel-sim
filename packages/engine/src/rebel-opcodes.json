@@ -143,7 +143,8 @@
       "note": "matches src/sysvars.h's SYSVARS_CORE_OFFSET (0x010). Real TCoreSysVars also has SCREEN-MODE/COLOR-DEPTH/PALETTE-BANK/KEYMAP/LAST-ERROR — not implemented in Rebel-Sim yet, added when something needs them, same reserved-slot precedent as everywhere else in this table.",
       "fields": {
         "CURSOR-X": { "offset": 0, "note": "text cursor column. M3: owned by Screen, not bounds-checked on write (matches Rebel-ROM's SetCursor)" },
-        "CURSOR-Y": { "offset": 4, "note": "text cursor row" }
+        "CURSOR-Y": { "offset": 4, "note": "text cursor row" },
+        "ARENA-SIZE": { "offset": 8, "note": "total arena size in bytes (Arena.sizeBytes), written once at Machine construction, read via getUnsigned/setUnsigned since it can exceed the signed 32-bit range (MAX_ARENA_SIZE is 4 GiB). The reverse of this group's usual direction: real TCoreSysVars doesn't have this field either (checked src/sysvars.h directly, not assumed) — CBankTable::GetArenaSize() is the equivalent C++-side fact, just not exposed as a sysvar there yet. A genuine cross-target candidate, not Rebel-Sim-only like the FORTH group's fields." }
       },
       "groupSizeBytes": 48
     },

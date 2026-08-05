@@ -51,11 +51,17 @@ describe('BankTable', () => {
     expect(() => banks.requireBank('DATA', 'MISSING')).toThrow(/not found/);
   });
 
-  it('getAllBanks lists every bank in creation order', () => {
+  it('getAllBanks lists every bank in creation order, MMAP always first', () => {
+    // DEVELOPING.md §11, M19: MMAP is bank 0, created automatically by
+    // BankTable itself — never an empty table, even before any
+    // deliberate createBank() call.
     const banks = new BankTable(new Arena(1 << 16));
-    expect(banks.getAllBanks()).toEqual([]);
+    const initial = banks.getAllBanks();
+    expect(initial).toHaveLength(1);
+    expect(initial[0].tag).toBe('MMAP');
+
     const a = banks.createBank('DSTK', 64);
     const b = banks.createBank('RSTK', 64);
-    expect(banks.getAllBanks()).toEqual([a, b]);
+    expect(banks.getAllBanks()).toEqual([initial[0], a, b]);
   });
 });

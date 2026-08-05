@@ -17,8 +17,22 @@
  */
 
 import { Arena } from './arena.js';
+import { MemoryMap, MMAP_SIZE, MMAP_TAG } from './mmap.js';
 
 export const BANK_NAME_LEN = 8;
+
+/** Matches rebel-rom's real TBankFlags (src/membank.h) bit-for-bit for
+ * the first four; ACTIVE (DEVELOPING.md §11, M19) is a Rebel-Sim-first
+ * addition, next free bit after DIRTY. RESIDENT/EXTERNAL/SWAPPABLE/
+ * DIRTY all stay exactly as reserved/inert as they are on both sides —
+ * this doesn't wire any of them up. */
+export const BankFlagResident = 1 << 0;
+export const BankFlagExternal = 1 << 1;
+export const BankFlagSwappable = 1 << 2; // reserved, inert
+export const BankFlagDirty = 1 << 3; // reserved, inert — DEVELOPING.md §11
+export const BankFlagActive = 1 << 4; // DEVELOPING.md §11, M19
+
+const DEFAULT_FLAGS = BankFlagResident | BankFlagActive;
 
 /** Standard bank size classes (docs/MEMORY-MODEL.md §3.1): each 4x the
  * previous. XS matches ARM's native page size — a nod to alignment, not
@@ -46,6 +60,7 @@ export interface Bank {
   readonly name: string;
   readonly base: number;
   readonly size: number;
+  readonly flags: number;
 }
 
 export class BankTable {
@@ -53,13 +68,38 @@ export class BankTable {
   private nextFree = 0;
   private nextSerial = 0;
 
-  constructor(private readonly arena: Arena) {}
+  /** DEVELOPING.md §11, M19: the arena-resident mirror of this table.
+   * Public so tests/tooling can verify it directly — not yet the real
+   * source of truth for findBank()/getAllBanks(), see mmap.ts's header
+   * comment. */
+  readonly mmap: MemoryMap;
+
+  constructor(private readonly arena: Arena) {
+    // MMAP is always bank 0 — reserve its fixed space before any
+    // createBank() call, then register + mirror itself into its own
+    // slot 0. A too-small arena fails here with DataView's own
+    // RangeError (relied on deliberately, not duplicated — same
+    // "DataView already enforces this for free" precedent used
+    // elsewhere in this codebase) rather than a custom check.
+    this.mmap = new MemoryMap(arena, 0);
+    this.mmap.initHeader();
+    const mmapBank: Bank = {
+      tag: MMAP_TAG,
+      name: MMAP_TAG,
+      base: 0,
+      size: MMAP_SIZE,
+      flags: DEFAULT_FLAGS,
+    };
+    this.banks.push(mmapBank);
+    this.nextFree = MMAP_SIZE;
+    this.mmap.addBank(mmapBank.tag, mmapBank.name, mmapBank.base, mmapBank.size, mmapBank.flags);
+  }
 
   private generateSerialName(): string {
     return String(this.nextSerial++).padStart(BANK_NAME_LEN, '0');
   }
 
-  createBank(tag: string, size: number, name?: string): Bank {
+  createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {
     const bankName = (name ?? this.generateSerialName()).slice(0, BANK_NAME_LEN);
     if (this.findBankByName(bankName)) {
       throw new Error(`bank name ${bankName} already exists`);
@@ -69,9 +109,10 @@ export class BankTable {
         `arena out of space: cannot create bank ${tag}/${bankName} of size ${size}`,
       );
     }
-    const bank: Bank = { tag, name: bankName, base: this.nextFree, size };
+    const bank: Bank = { tag, name: bankName, base: this.nextFree, size, flags };
     this.banks.push(bank);
     this.nextFree += size;
+    this.mmap.addBank(bank.tag, bank.name, bank.base, bank.size, bank.flags);
     return bank;
   }
 
