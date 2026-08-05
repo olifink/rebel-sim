@@ -1555,6 +1555,40 @@ delegate to `mmap`, `banks`/`nextFree` fields removed), `primitives.ts`
 (case 100 calls `allocate()` directly). No `PrimitiveContext`/`repl.ts`
 change.
 
+### 1.44 A batch of 13 low-level primitives (M23, `DEVELOPING.md` §15)
+
+Thirteen new primitives, tokens 101-113, filling real gaps a review of
+the token table against M8's own §9 ("STANDARD-for-now, native for
+now") turned up: `XOR` (the bitwise op `AND`/`OR`/`INVERT` never got a
+companion for), `.S` (non-destructive stack print — reuses `.`'s own
+digit-formatting loop, applied to `[...stack.toArray()].reverse()`
+since `toArray()` is top-to-bottom and classic `.S` prints
+deepest-first), `2SWAP`/`2OVER` (generalizing `SWAP`/`OVER` the way
+`2DUP`/`2DROP` already generalized `DUP`/`DROP`), `CELLS`/`CELL+`
+(cell-unit address arithmetic — removes the manual `4 *`/`4 +` every
+site did by hand), `FILL`/`CMOVE` (block memory ops — first real use
+is initializing a freshly `CREATE-BANK`'d region without a hand-rolled
+loop), `BL`/`SPACE` (named as candidates back in `CORE-VOCABULARY.md`
+§12, not added until now), `WITHIN` (deliberately plain-signed,
+non-wraparound — not full ANS `WITHIN`'s modular-arithmetic
+definition, since `U<` already covers the one place unsigned
+comparison was actually needed), and `PICK`/`ROLL` (generalizing
+`OVER`/`ROT` to arbitrary depth — `ROLL` is the one word here that
+isn't a handful of lines, needing an explicit pop-into-array/
+reorder/push-back loop since `DataStack` has no splice-at-depth
+primitive).
+
+Every one is a plain stack-effect primitive — none needed
+`IMMEDIATE`/`COMPILE_ONLY` or inner-interpreter special-casing, so
+`repl.ts`'s boot-registration loop (already walking `opcodes.primitives`
+generically) picked all 13 up with zero changes of its own, exactly as
+`dictionary.ts`/`inner.ts` predicted going in.
+
+*Implementation:* `rebel-opcodes.json` (13 new entries), `primitives.ts`
+(13 new `case` arms after 100, `CELL_SIZE` added to the existing
+`arena.js` import). New `low-level-batch.test.ts` (13 cases + edge
+cases). No `repl.ts`/`dictionary.ts`/`inner.ts`/`system.fth` change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1684,5 +1718,6 @@ exactly as it would be on the bare-metal target.
 | **M20** | `BANK@` reads `MMAP` directly (§1.41): new `MemoryMap.findBankAddr()` walks `MMAP`'s slots instead of `BANK@` calling `BankTable.findBank()` — a pure read-path swap, `BANK@`'s observable behavior unchanged (proven by the unmodified `bank-access.test.ts` suite passing as-is). The smaller half of M19's follow-on; Forth-side bank creation still doesn't exist. | `mmap.ts`, `primitives.ts`, `rebel-opcodes.json` |
 | **M21** | `CREATE-BANK` (§1.42): `CREATE-BANK ( size "tag" -- addr )` (token 100) — calls `MemoryMap`'s allocator directly from a primitive, genuinely no host round-trip. Name always equals the (truncated) tag, no auto-serial, no out-of-space check. At the time: invisible to `getAllBanks()`/`findBank()`/`storage.ts`/`read_banks`/the inspector panel — closed by M22. | `rebel-opcodes.json`, `primitives.ts` |
 | **M22** | `MMAP` becomes the real source of truth, no cached state anywhere (§1.43): `mmap.ts` gains `allocate()` (finds a free slot + computes base by scanning all 64 slots' `ACTIVE` bits, no cursor cell), replacing `addBank()`/`getNextFree()`/`getSlotCount()` outright. `BankTable` fully delegates reads/allocation to `mmap`, closing M21's visibility gap and fixing a real overlap bug (host and Forth creation used to drift apart). `MMAP_SIZE` shrinks to 1540. Object identity no longer stable across reads. | `mmap.ts`, `banks.ts`, `primitives.ts` |
+| **M23** | A batch of 13 low-level primitives (§1.44, tokens 101-113): `XOR`, `.S`, `2SWAP`, `2OVER`, `CELLS`, `CELL+`, `FILL`, `CMOVE`, `BL`, `SPACE`, `WITHIN`, `PICK`, `ROLL` — real gaps against M8's own §9 batch. Plain stack-effect primitives, zero `repl.ts`/`dictionary.ts`/`inner.ts` changes needed. `WITHIN` deliberately plain-signed (not full ANS wraparound semantics); no `CMOVE>`/`LSHIFT`/`RSHIFT` added (nothing needs them yet). | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

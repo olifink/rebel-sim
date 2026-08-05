@@ -1680,3 +1680,140 @@ really in `MMAP`, never from an assumption about it.
 - No Forth-level word to explicitly deactivate/"free" a bank — this
   section makes the *allocator* reuse-aware, but nothing yet sets
   `ACTIVE` to 0 on a real bank; that's still separate, unbuilt work.
+
+## 15. A batch of low-level primitives — `XOR`, `.S`, `2SWAP`/`2OVER`, `CELLS`/`CELL+`, `FILL`/`CMOVE`, `SPACE`/`BL`, `WITHIN`, `PICK`/`ROLL` — done, M23
+
+### Motivation
+
+A review of the current primitive table (`rebel-opcodes.json`, tokens
+1-100) against what M8's `CORE-VOCABULARY.md` §9 already flagged as
+"STANDARD-for-now, native for now" (§3's rationale: no `LOAD`
+subsystem exists inside `packages/engine` for these to be loaded from
+Forth source instead — `system.fth` is loaded by `packages/app` only,
+"nothing in packages/engine knows this file exists," so that rationale
+still applies unchanged today) turned up a real, mechanical gap: 13
+words in the same category as the ones §9 already shipped, genuinely
+missing rather than deliberately deferred. Same categorization logic
+applies to every word below — each is CORE (needs raw stack/memory
+access no combination of existing words can reach) or STANDARD-for-now
+(derivable once a real loader exists, shipped native today for the
+same "nowhere to load it from yet" reason as `NIP`/`TUCK`/etc.).
+
+### The words
+
+| Token | Word | Stack effect | Category | Notes |
+|---|---|---|---|---|
+| 101 | `XOR` | `( a b -- a^b )` | CORE | Same shape as `AND`(15)/`OR`(16) — a real bitwise op §9 never shipped, not stylistic. |
+| 102 | `.S` | `( -- )` | STANDARD-for-now | Non-destructive stack print, bottom-to-top, current `BASE`, matching `.`'s (18) digit-formatting exactly. |
+| 103 | `2SWAP` | `( a b c d -- c d a b )` | STANDARD-for-now | Swaps the top two cell-pairs. |
+| 104 | `2OVER` | `( a b c d -- a b c d a b )` | STANDARD-for-now | Copies the second-from-top pair to the top, generalizing `OVER`(4) the way `2DUP`/`2DROP`(71/72) generalized `DUP`/`DROP`. |
+| 105 | `CELLS` | `( n -- n*4 )` | STANDARD-for-now | `n * CELL_SIZE`. |
+| 106 | `CELL+` | `( addr -- addr+4 )` | STANDARD-for-now | `addr + CELL_SIZE`. Together, `CELLS`/`CELL+` remove the manual `4 *`/`4 +` every cell-address computation in `system.fth`/user code currently spells out by hand. |
+| 107 | `FILL` | `( addr len char -- )` | CORE | Classic ANS signature. Fills `len` bytes starting at `addr` with `char`'s low 8 bits, looped `arena.writeByte`. First real use: zeroing a freshly `CREATE-BANK`'d region, which today needs a hand-written loop. |
+| 108 | `CMOVE` | `( addr1 addr2 len -- )` | CORE | Copies `len` bytes `addr1`→`addr2`, low-to-high. Like real Forth's `CMOVE` (not `CMOVE>`), overlapping ranges where `addr2 < addr1 < addr2+len` corrupt data — a documented footgun, not a bug, matching the `>R`/`R>` imbalance precedent (§5/token 37's note). |
+| 109 | `BL` | `( -- 32 )` | STANDARD-for-now | Pushes the ASCII space code — CORE-VOCABULARY.md §12 already flagged this by name as "cheap enough to add ... if used often enough elsewhere," and it now is (`WORDS` in `system.fth` still spells out a bare `32 EMIT`). |
+| 110 | `SPACE` | `( -- )` | STANDARD-for-now | `BL EMIT` as one word — same §12 note, the other half of it. |
+| 111 | `WITHIN` | `( n lo hi -- flag )` | STANDARD-for-now | `TRUE` if `lo <= n < hi`. **Deliberately the plain signed version, not full ANS `WITHIN`** — the real ANS spec defines this with modular/wraparound semantics (true even when `hi < lo`, treating the range as circular) so that unsigned callers get well-defined behavior at the word boundary; this project already has a separate `U<`(92) for the one place unsigned comparison was actually needed, and no current caller needs wraparound ranges. Diverging on purpose and documenting it, same precedent as `S"`'s addr/len choice (§8). |
+| 112 | `PICK` | `( xu ... x1 x0 u -- xu ... x1 x0 xu )` | CORE | Generalizes `OVER` (`1 PICK` = `OVER`, `0 PICK` = `DUP`) to arbitrary depth — `s.peek(n)` after popping `u`, already exactly what `DataStack.peek(depthFromTop)` computes. |
+| 113 | `ROLL` | `( xu ... x1 x0 u -- xu-1 ... x1 x0 xu )` | CORE | Generalizes `ROT` (`2 ROLL` = `ROT`) — pops `u`, then the item `u` cells down, shifting everything above it down by one and pushing the rolled item on top. Needs an explicit pop-into-array/reorder/push-back loop (`DataStack` has no splice-at-depth primitive) — the one word in this batch that isn't a handful of lines. |
+
+### Implementation sketch
+
+- `rebel-opcodes.json`: 13 new entries appended to `"primitives"`,
+  tokens 101-113, one-line `note` each mirroring the table above (same
+  style as tokens 71-92's §9 batch).
+- `primitives.ts`: 13 new `case` arms in the same switch, inserted
+  after case 100 (`CREATE-BANK`). `XOR` sits naturally next to
+  `AND`/`OR`/`INVERT` (15-17) in reading order even though its token
+  number is 101 — token IDs are allocation order, not logical grouping,
+  same as `<>`(89) already being nowhere near `=`(11). `FILL`/`CMOVE`
+  import nothing new — `ctx.arena.writeByte`/`readByte` are already
+  imported via `ctx.arena` (see `C@`/`C!`, tokens 34/35). `CELLS`/
+  `CELL+` need `CELL_SIZE` added to the existing `from './arena.js'`
+  import (`alignCell` is already pulled from there). `.S` reuses `.`'s
+  (case 18) own digit-formatting loop (`v.toString(ctx.getBase())`),
+  applied to `[...s.toArray()].reverse()` (`toArray()` is top-to-bottom
+  per `stack.ts`'s own doc comment; classic `.S` prints bottom-to-top,
+  deepest first) instead of a single popped value, and never pops.
+- No `dictionary.ts`/`inner.ts`/`repl.ts` changes — every one of these
+  13 is a plain stack-effect primitive, none needs compile-time
+  (`IMMEDIATE`) behavior or inner-interpreter special-casing the way
+  `EXECUTE`/`ACCEPT`/`(DOES>)` do.
+- `system.fth`'s own `WORDS` definition is a natural, optional
+  follow-up cleanup (`32 EMIT` → `SPACE`) once this ships — not part
+  of this batch, since it's a pure readability win with zero behavior
+  change, and this project doesn't bundle unrelated cleanup into a
+  scoped change (top-level "Calibrating scope" rule in `CLAUDE.md`).
+
+### A real cross-target consequence, named up front
+
+`CORE-VOCABULARY.md` §13 and `FORTH-ARCHITECTURE.md` §0 both require
+new tokens to go into the canonical opcode source-of-truth *before*
+any target implements them — the exact failure mode that single
+source-of-truth artifact (still unbuilt, `CLAUDE.md`'s own listed gap)
+exists to prevent. Same situation `BRANCH`/`0BRANCH`/`DOVAR`/`DODOES`
+were in at M8: `rebel-opcodes.json` remains the only place these 13
+token IDs are assigned, `rebel-rom` has no Forth executor yet to
+reconcile against (per `HAL.md`), so there's nothing to keep in sync
+today — but the numbering here (101-113) is a real commitment once
+`rebel-rom`'s own Forth phase exists, not a free-to-renumber
+implementation detail.
+
+### Scope cuts, explicit
+
+- No `CMOVE>` (the overlap-safe, high-to-low counterpart) — not adding
+  a word for a problem (overlapping-region copies) nothing in this
+  codebase does yet; add it the day something actually needs it, same
+  "don't build ahead" discipline as `LEAVE` (§9/CORE-VOCABULARY.md
+  §11).
+- No `LSHIFT`/`RSHIFT` (general bit shifts) — `2*`/`2/`(87/88) already
+  cover the single-bit case every current use needs; a general shift
+  is a real future candidate but not scoped here since nothing asked
+  for it yet.
+- `WITHIN`'s signed-only, non-wraparound semantics (see table) — a
+  deliberate divergence from full ANS `WITHIN`, not an oversight.
+- No change to `system.fth` in this pass (see implementation sketch).
+- No new bank, sysvar, or HAL surface — this is a pure `switch`-arm
+  addition, the smallest-blast-radius category of change this codebase
+  makes.
+
+### Verification — done
+
+- New file `low-level-batch.test.ts` (the existing file organization
+  splits by topic, e.g. `stack-arith.test.ts` for the M8 §9 batch — a
+  new topic file matched that precedent better than folding into
+  `primitives.ts`'s own untested-directly switch), same `toArray()`
+  top-first assertion style as `stack-arith.test.ts`: one case per
+  word plus the edge cases named in the plan — `0 ROLL`/`0 PICK`/
+  `1 PICK` against `DUP`/`OVER`'s known results, `1 ROLL`/`2 ROLL`
+  against `SWAP`/`ROT`, `FILL`+readback on a freshly `CREATE-BANK`'d
+  region, `CMOVE` copying into a second offset of the same bank,
+  `WITHIN` at both boundaries, `.S` against both a 3-item stack
+  (confirms non-destructive via a follow-up `stack.toArray()` check)
+  and an empty stack (prints nothing, doesn't throw).
+- Full engine suite: 232 passed (219 + 13), zero changes to any
+  existing test. App suite (10 tests) and both workspace builds
+  unaffected — no `repl.ts`/`dictionary.ts`/`inner.ts` change was
+  needed (§'s own implementation sketch predicted this correctly:
+  `repl.ts`'s boot-registration loop already walks
+  `opcodes.primitives` generically, and none of these 13 are
+  `immediate`/`compileOnly`).
+- Live, via WebMCP (`type`/`read_screen`/`read_stack`, dev server
+  restarted with `.angular` cache cleared first, per the standard
+  Vite pre-bundling staleness precedent): `6 3 XOR .` → `5`;
+  `1 2 3 .S` → printed `1 2 3` with `read_stack` confirming `3 2 1`
+  still on the stack afterward (genuinely non-destructive, not just
+  asserted in a test); `5 CELLS .` → `20`, `100 CELL+ .` → `104`;
+  `WITHIN` at `n=5,10,-1` against `[0,10)` → `TRUE`/`FALSE`/`FALSE`
+  (hi exclusive, lo inclusive, confirmed exactly as scoped);
+  `1 2 1 ROLL .S` / `1 2 3 2 ROLL .S` → `2 1` / `2 3 1`, matching
+  `SWAP`/`ROT`; `BL EMIT 42 EMIT SPACE 43 EMIT` → printed a leading
+  space, `*`, a space, `+` (` * +`, exactly the four emitted
+  characters); a `CREATE-BANK`+`FILL`(8 bytes)+`CMOVE`(4 bytes to
+  offset+32)+`C@` readback sequence confirmed byte-exact — offset 0
+  and offset 32 both read `42` (filled/copied), offset 40 read `0`
+  (untouched, confirming `CMOVE` didn't overrun). Zero console errors
+  throughout. One self-inflicted `? DSTK stack underflow` along the
+  way, from a miscounted manual byte-walk in the live test line
+  itself (not a primitive bug) — confirmed the interpreter recovered
+  cleanly (empty stack, no corruption), a useful incidental check.

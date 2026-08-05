@@ -268,6 +268,24 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     (a new question item 23 itself raises, not decided), Web Worker
     migration — see `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9
     for the full open-decisions list.
+25. **M23 — a batch of 13 low-level primitives** — **done**: `XOR`,
+    `.S`, `2SWAP`, `2OVER`, `CELLS`, `CELL+`, `FILL`, `CMOVE`, `BL`,
+    `SPACE`, `WITHIN`, `PICK`, `ROLL` — tokens 101-113, same
+    "STANDARD-for-now, native for now" categorization
+    `CORE-VOCABULARY.md` §9 already used for the M8 batch, since
+    `packages/engine` still has no `LOAD` subsystem to shift these
+    into Forth source instead. Zero interpreter-loop/`repl.ts`/
+    `dictionary.ts` changes needed — `repl.ts`'s boot-registration
+    already walks `opcodes.primitives` generically, and none of these
+    13 are `immediate`/`compileOnly`. `WITHIN` deliberately ships
+    plain-signed, non-wraparound (not full ANS semantics); `CMOVE` is
+    low-to-high only, no `CMOVE>` added (nothing needs it yet). New
+    `low-level-batch.test.ts` (13 cases + edge cases: `0`/`1`/`2 ROLL`
+    against `SWAP`/`ROT`, `0`/`1 PICK` against `DUP`/`OVER`, `.S`
+    non-destructiveness, `FILL`+`CMOVE`+readback on a real
+    `CREATE-BANK`'d region). Full engine suite: 232 passed (219+13).
+    Live-verified via WebMCP end to end, zero console errors — see
+    `DEVELOPING.md` §15 for the full transcript.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

@@ -21,7 +21,7 @@ import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
 import { BankTable, BankFlagResident, BankFlagActive } from './banks.js';
-import { alignCell } from './arena.js';
+import { alignCell, CELL_SIZE } from './arena.js';
 import {
   compileCell,
   DictionaryContext,
@@ -689,6 +689,99 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const tag = ctx.nextInputToken().toUpperCase();
       const slot = ctx.banks.mmap.allocate(tag, tag, size, BankFlagResident | BankFlagActive);
       s.push(slot.base);
+      break;
+    }
+
+    // --- DEVELOPING.md §15, M23: a batch of low-level primitives ---
+    case 101: { // XOR ( a b -- a^b )
+      const b = s.pop();
+      const a = s.pop();
+      s.push(toCell(a ^ b));
+      break;
+    }
+    case 102: { // .S ( -- ) non-destructive stack print, bottom-to-top,
+      // current BASE — same digit formatting as `.` (case 18), applied
+      // to every cell instead of one popped value.
+      const base = ctx.getBase();
+      const items = [...s.toArray()].reverse();
+      for (const v of items) {
+        const digits = v.toString(base) + ' ';
+        for (const ch of digits) {
+          ctx.screen.emit(ch.charCodeAt(0));
+        }
+      }
+      break;
+    }
+    case 103: { // 2SWAP ( a b c d -- c d a b )
+      const d = s.pop();
+      const c = s.pop();
+      const b = s.pop();
+      const a = s.pop();
+      s.push(c);
+      s.push(d);
+      s.push(a);
+      s.push(b);
+      break;
+    }
+    case 104: { // 2OVER ( a b c d -- a b c d a b )
+      const a = s.peek(3);
+      const b = s.peek(2);
+      s.push(a);
+      s.push(b);
+      break;
+    }
+    case 105: // CELLS ( n -- n*4 )
+      s.push(toCell(s.pop() * CELL_SIZE));
+      break;
+    case 106: // CELL+ ( addr -- addr+4 )
+      s.push(toCell(s.pop() + CELL_SIZE));
+      break;
+    case 107: { // FILL ( addr len char -- )
+      const char = s.pop();
+      const len = s.pop();
+      const addr = s.pop();
+      for (let i = 0; i < len; i++) {
+        ctx.arena.writeByte(addr + i, char & 0xff);
+      }
+      break;
+    }
+    case 108: { // CMOVE ( addr1 addr2 len -- ) low-to-high; overlapping
+      // ranges where addr2 falls inside [addr1, addr1+len) corrupt data
+      // — documented footgun, not a bug (DEVELOPING.md §15).
+      const len = s.pop();
+      const addr2 = s.pop();
+      const addr1 = s.pop();
+      for (let i = 0; i < len; i++) {
+        ctx.arena.writeByte(addr2 + i, ctx.arena.readByte(addr1 + i));
+      }
+      break;
+    }
+    case 109: // BL ( -- 32 )
+      s.push(32);
+      break;
+    case 110: // SPACE ( -- )
+      ctx.screen.emit(32);
+      break;
+    case 111: { // WITHIN ( n lo hi -- flag ) plain signed, non-wraparound
+      // — deliberately not full ANS WITHIN (DEVELOPING.md §15).
+      const hi = s.pop();
+      const lo = s.pop();
+      const n = s.pop();
+      s.push(n >= lo && n < hi ? TRUE : FALSE);
+      break;
+    }
+    case 112: { // PICK ( xu ... x1 x0 u -- xu ... x1 x0 xu )
+      const n = s.pop();
+      s.push(s.peek(n));
+      break;
+    }
+    case 113: { // ROLL ( xu ... x1 x0 u -- xu-1 ... x1 x0 xu )
+      const n = s.pop();
+      if (n < 0) throw new Error('ROLL: negative index');
+      const items: number[] = [];
+      for (let i = 0; i <= n; i++) items.push(s.pop());
+      for (let i = n - 1; i >= 0; i--) s.push(items[i]);
+      s.push(items[n]);
       break;
     }
 
