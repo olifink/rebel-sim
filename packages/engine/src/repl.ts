@@ -193,8 +193,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     this.storage = new Storage(this.arena, this.banks, options.storageHal);
 
-    this.stack = new DataStack(this.arena, dstkBank);
-    this.rstack = new DataStack(this.arena, rstkBank);
+    this.stack = new DataStack(this.arena, dstkBank, this.sysvars, 'SP0', 'SP');
+    this.rstack = new DataStack(this.arena, rstkBank, this.sysvars, 'RP0', 'RP');
     this.inner = new Inner(this.arena, this.rstack, this, this.breakpoints);
 
     for (const p of opcodes.primitives) {

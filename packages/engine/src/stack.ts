@@ -4,22 +4,51 @@
  * bounds-checked against that bank's own size. `sp` starts at
  * `bank.base + bank.size` (empty) and decreases toward `bank.base` as
  * cells are pushed.
+ *
+ * DEVELOPING.md §21: the live pointer lives in a `FORTH` sysvar cell
+ * (`liveField`), not a private field — `Sysvars` is the one real place
+ * this state lives, the same "no engine-side copy" rule `HERE`/`LATEST`/
+ * `BASE`/`STATE` already follow. `baseField` (`SP0`/`RP0`) holds the
+ * constant empty-stack address, written once here and never mutated
+ * again.
  */
 
 import { Arena, CELL_SIZE as CELL } from './arena.js';
 import { Bank } from './banks.js';
+import { Sysvars } from './sysvars.js';
 
 export class StackUnderflowError extends Error {}
 export class StackOverflowError extends Error {}
 
 export class DataStack {
-  private sp: number;
-
   constructor(
     private readonly arena: Arena,
     private readonly bank: Bank,
+    private readonly sysvars: Sysvars,
+    private readonly baseField: 'SP0' | 'RP0',
+    private readonly liveField: 'SP' | 'RP',
   ) {
-    this.sp = bank.base + bank.size;
+    const empty = bank.base + bank.size;
+    sysvars.setUnsigned('FORTH', baseField, empty);
+    sysvars.setUnsigned('FORTH', liveField, empty);
+  }
+
+  private get sp(): number {
+    return this.sysvars.getUnsigned('FORTH', this.liveField);
+  }
+
+  private set sp(value: number) {
+    this.sysvars.setUnsigned('FORTH', this.liveField, value);
+  }
+
+  /** DEVELOPING.md §21: the only way outside code (SP@/RP@'s
+   * primitives) reaches the live pointer — `sp` itself stays private. */
+  getPointer(): number {
+    return this.sp;
+  }
+
+  setPointer(addr: number): void {
+    this.sp = addr;
   }
 
   get depth(): number {

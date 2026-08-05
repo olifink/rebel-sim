@@ -1771,6 +1771,66 @@ unit assertion. Full engine suite: 248 passed (246+2). Live-verified:
 byte-identical to before this change, `CREATE-BANK`'s serials now
 genuinely sequential with no collision.
 
+### 1.49 The stack pointer becomes a real sysvar: `SP@`/`SP!`/`SP0`, `RP@`/`RP!`/`RP0` (M28, `DEVELOPING.md` §21)
+
+Prompted by a Forth-tutorial question — why no `SP0`/`SP@`? Checking
+turned up the same shape of problem M27 (§1.48) fixed for the
+bank-naming counter: `FORTH.SP0`/`RP0` were already reserved in
+`rebel-opcodes.json` but never written, while the *real* live pointer
+was `DataStack`'s own private `sp` field, with no arena address at
+all. Corrected per direct instruction: sysvars should be the *only*
+place this state lives — the engine keeps no copy of its own,
+matching how `HERE`/`LATEST`/`BASE`/`STATE` already work, and how
+`Screen`/`Keyboard` already take a `Sysvars` reference rather than
+mirror sysvar-owned state locally.
+
+**Two sysvar fields per stack.** `SP0`/`RP0` (already reserved, `FORTH`
+group offsets 0/4) hold the constant address the pointer equals when
+empty — written once at construction, never touched again. Two new
+fields, `SP`/`RP` (offsets 24/28), hold the *live* pointer, read and
+written on every `push`/`pop`/`peek`/`clear`.
+
+`DataStack`'s constructor now takes `(arena, bank, sysvars, baseField,
+liveField)` instead of just `(arena, bank)`. Its private `sp: number`
+field is gone entirely, replaced by a private getter/setter pair over
+`sysvars.getUnsigned`/`setUnsigned('FORTH', this.liveField)` — every
+call site inside `push`/`pop`/`peek`/`depth`/`clear` still reads
+`this.sp`, textually unchanged; only where the four bytes physically
+live moved. A new public `getPointer()`/`setPointer(addr)` pair is the
+only way outside code (the new primitives) reaches the value — `sp`
+itself stays private. `repl.ts` constructs the two stacks as
+`new DataStack(arena, dstkBank, sysvars, 'SP0', 'SP')` and
+`new DataStack(arena, rstkBank, sysvars, 'RP0', 'RP')` — no
+construction-order problem, since `Sysvars` already exists well before
+either stack is built.
+
+Six new primitives, symmetric across both stacks: `SP0`/`RP0` push the
+constant base; `SP@`/`RP@` push the live pointer; `SP!`/`RP!` pop an
+address and become the new live pointer — the standard `SP0 SP!`
+stack-reset idiom, and the mechanism a future `THROW`/`CATCH` would
+build on. `RP!` carries a real risk worth naming: the return stack
+holds live return addresses for every word currently executing, so a
+wrong `RP!` mid-execution corrupts the call chain — standard Forth
+semantics, no host-side validation added, same "authentic risk" stance
+`MMAP` already takes for raw writes.
+
+*Implementation:* `stack.ts` (constructor signature, private
+getter/setter, `getPointer()`/`setPointer()`), `rebel-opcodes.json`
+(`SP`/`RP` fields added to the `FORTH` group; 6 new primitive entries),
+`primitives.ts` (6 new cases), `repl.ts` (both `DataStack`
+constructions updated). 11 new tests: `stack.test.ts` covers the
+pointer mechanics directly (base vs. live, `getPointer()`/
+`setPointer()` round-tripping depth, two `DataStack` instances sharing
+one `Sysvars` staying independent via distinct field names);
+`low-level-batch.test.ts` covers the primitives, including `RP@ RP0 -`
+run from inside a defined word's own body — proof the return stack's
+live pointer is real and observable mid-call, not simulated. Full
+engine suite: 259 passed (248+11). Live-verified via WebMCP, including
+a real, documented gotcha of the same shape as M24's `HEX 255 .` one:
+`SP0 SP@ =` on a single line reads `SP@` *after* `SP0`'s own push has
+already moved the live pointer — two stack-pointer words in sequence
+genuinely see different moments, not a bug.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1905,5 +1965,6 @@ exactly as it would be on the bare-metal target.
 | **M25** | A visible, inverse-video text cursor: `CURSEN`/`CURSDIS` (§1.46, tokens 117-118). Neither target has ever rendered a visible cursor. `Screen`-level, not HAL, not Forth — `setCursor()` gains a redraw hook every existing cursor-movement path already routes through for free; `writeChar()` itself never auto-inverts (would highlight the character being typed, not the cursor). New `SCREEN.CURSOR-VISIBLE` sysvar, a genuine cross-target candidate like `CORE.ARENA-SIZE`. A real `cls()` ordering bug (cursor drawn before the framebuffer clear, then painted over) found and fixed as part of this change. | `screen.ts`, `rebel-opcodes.json`, `primitives.ts` |
 | **M26** | Wiring the cursor into the interactive REPL (§1.47): one line, `showCursor()`, added to `startRepl()` — not the constructor (would affect every programmatic caller) and not just defaulting the sysvar (wouldn't actually draw anything until the first keystroke). Cursor now visible from the very first prompt, confirmed live. | `repl.ts` |
 | **M27** | A real bank-naming collision bug, found while reviewing storage (§1.48): `CREATE-BANK` bypassed the uniqueness check and named banks after their tag, so two Forth-created banks sharing a tag always collided — reproduced end-to-end through `saveAsset()`/`openProject()`. Fixed by moving the bank-naming serial counter into `MMAP`'s own header (available before `Sysvars` even exists, avoiding a sysvar-backed design's real chicken-and-egg problem). Header grows 4→16 bytes: `NEXT-BANK` (the fix), `ARENA-SIZE` (moved out of `CORE`), `ARENA-ID` (reserved, future multi-arena bookkeeping). | `mmap.ts`, `banks.ts`, `primitives.ts`, `repl.ts`, `rebel-opcodes.json` |
+| **M28** | The stack pointer becomes a real sysvar: `SP@`/`SP!`/`SP0`, `RP@`/`RP!`/`RP0` (§1.49, tokens 119-124). `DataStack`'s private `sp` field is gone — replaced by a getter/setter over two new `FORTH` sysvar fields (`SP`/`RP`, live) alongside the already-reserved-but-never-written `SP0`/`RP0` (constant base), matching how `HERE`/`LATEST`/`BASE`/`STATE` already avoid an engine-side copy. `SP0`/`RP0`/`SP@`/`RP@`/`SP!`/`RP!` push/pop through the sysvar directly; `RP!` carries a real, named risk (a wrong mid-execution write corrupts the live call chain), same "authentic risk" stance as `MMAP`'s raw writes. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

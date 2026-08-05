@@ -810,6 +810,26 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       ctx.screen.hideCursor();
       break;
 
+    // --- DEVELOPING.md §21, M28: the stack pointer as a real sysvar ---
+    case 119: // SP0 ( -- a-addr )
+      s.push(ctx.sysvars.getUnsigned('FORTH', 'SP0'));
+      break;
+    case 120: // SP@ ( -- a-addr )
+      s.push(s.getPointer());
+      break;
+    case 121: // SP! ( a-addr -- )
+      s.setPointer(s.pop());
+      break;
+    case 122: // RP0 ( -- a-addr )
+      s.push(ctx.sysvars.getUnsigned('FORTH', 'RP0'));
+      break;
+    case 123: // RP@ ( -- a-addr )
+      s.push(ctx.rstack.getPointer());
+      break;
+    case 124: // RP! ( a-addr -- )
+      ctx.rstack.setPointer(s.pop());
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

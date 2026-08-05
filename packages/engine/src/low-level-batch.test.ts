@@ -120,3 +120,57 @@ describe('BASE/HEX/DECIMAL (DEVELOPING.md §16, M24)', () => {
     expect(run('HEX 10 DECIMAL')).toEqual([16]);
   });
 });
+
+describe('SP@/SP!/SP0, RP@/RP!/RP0 (DEVELOPING.md §21, M28)', () => {
+  it('SP0 equals SP@ on an empty stack', () => {
+    const m = new Machine();
+    m.interpret('SP0');
+    const sp0 = m.stack.pop();
+    m.interpret('SP@'); // stack is empty again after the pop above
+    const spEmpty = m.stack.pop();
+    expect(spEmpty).toBe(sp0);
+  });
+
+  it('SP@ decreases by 4 (one cell) per push', () => {
+    const m = new Machine();
+    m.interpret('SP@');
+    const before = m.stack.pop();
+    m.interpret('99 SP@');
+    const after = m.stack.pop();
+    expect(before - after).toBe(4);
+  });
+
+  it('SP@ ... SP! round-trips depth back to zero — the standard stack-reset idiom', () => {
+    const m = new Machine();
+    m.interpret('SP@');
+    const saved = m.stack.pop();
+    m.interpret('1 2 3');
+    expect(m.stack.depth).toBe(3);
+    m.stack.push(saved);
+    m.interpret('SP!');
+    expect(m.stack.depth).toBe(0);
+  });
+
+  it('SP0 SP! empties the stack directly', () => {
+    const m = new Machine();
+    m.interpret('1 2 3 SP0 SP!');
+    expect(m.stack.depth).toBe(0);
+  });
+
+  it('RP0/RP@ mirror SP0/SP@ for the return stack, and reflect a real in-progress call', () => {
+    const m = new Machine();
+    m.interpret(': DEPTH-INSIDE RP@ RP0 - ; DEPTH-INSIDE');
+    // Inside DEPTH-INSIDE's own execution, the inner interpreter has
+    // pushed one return address — RP@ must read strictly below RP0.
+    expect(m.stack.pop()).toBeLessThan(0);
+  });
+
+  it('SP0/RP0 are independent constants — pushing onto one stack never moves the other', () => {
+    const m = new Machine();
+    m.interpret('RP0 RP@ =');
+    expect(m.stack.pop()).toBe(-1); // TRUE: return stack still empty at the top level
+    m.interpret('1 2 3'); // grows the data stack only
+    m.interpret('RP0 RP@ =');
+    expect(m.stack.pop()).toBe(-1); // still TRUE — RP unaffected by data-stack pushes
+  });
+});

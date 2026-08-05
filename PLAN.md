@@ -369,6 +369,35 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     Live-verified via WebMCP — `MMAP` now `1552` bytes, every existing
     bank's serial name unchanged, `CREATE-BANK`'s serials now
     genuinely sequential with no collision. See `DEVELOPING.md` §20.
+31. **M28 — `SP@`/`SP!`/`SP0`, `RP@`/`RP!`/`RP0`: the stack pointer
+    becomes a real sysvar** — **done**: asked (a Forth-tutorial
+    question) why `SP0`/`SP@` didn't exist yet — `FORTH.SP0`/`RP0` were
+    already reserved in `rebel-opcodes.json` but never written, and the
+    *real* live pointer was a private `DataStack.sp` field with no
+    arena address at all, the same shape of problem M27 fixed for the
+    bank-naming counter. Corrected per direct instruction: sysvars
+    should be the *only* place this state lives, not a copy the engine
+    also keeps internally. `DataStack` now takes a `Sysvars` reference
+    and two field names (`SP0`/`SP` for the data stack, `RP0`/`RP` for
+    the return stack); its private `sp` field is gone, replaced by a
+    getter/setter over `sysvars.getUnsigned`/`setUnsigned('FORTH', ...)`
+    — `push`/`pop`/`peek`/`depth`/`clear`'s own logic is textually
+    unchanged, only where the four bytes live moved. `SP0`/`RP0` (the
+    constant empty-stack address) are written once at construction,
+    finally populating what had been reserved-but-unused since M1. Six
+    new primitives: `SP0`/`RP0` (push the constant base), `SP@`/`RP@`
+    (push the live pointer), `SP!`/`RP!` (pop an address, become the
+    new live pointer — the standard reset idiom). 11 new tests across
+    `stack.test.ts` (pointer mechanics, independence between two
+    `DataStack` instances sharing one `Sysvars`) and
+    `low-level-batch.test.ts` (the primitives, including `RP@ RP0 -`
+    proving the return stack's live pointer is real and observable
+    mid-call). Full engine suite: 259 passed (248+11). Live-verified via
+    WebMCP, including a real, documented gotcha of the same shape as
+    M24's `HEX 255 .` one: `SP0 SP@ =` on one line sees `SP@` read the
+    pointer *after* `SP0`'s own push already moved it — not a bug, just
+    two stack-pointer words in sequence genuinely seeing different
+    moments. See `DEVELOPING.md` §21.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.

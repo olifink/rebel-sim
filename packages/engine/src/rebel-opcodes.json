@@ -145,7 +145,14 @@
     { "id": 116, "name": "DECIMAL", "note": "( -- ) DEVELOPING.md §16, M24: sets BASE to 10." },
 
     { "id": 117, "name": "CURSEN", "note": "( -- ) DEVELOPING.md §17, M25: turns the visible text cursor on — sets SCREEN.CURSOR-VISIBLE TRUE and immediately redraws the current cursor cell inverted (ink/paper swapped). Screen-level, not HAL: hooks into Screen.setCursor() so AT-XY/EMIT's auto-advance/CR/LF all move the visible cursor correctly for free." },
-    { "id": 118, "name": "CURSDIS", "note": "( -- ) DEVELOPING.md §17, M25: turns the visible text cursor off — sets SCREEN.CURSOR-VISIBLE FALSE and redraws the current cell normally." }
+    { "id": 118, "name": "CURSDIS", "note": "( -- ) DEVELOPING.md §17, M25: turns the visible text cursor off — sets SCREEN.CURSOR-VISIBLE FALSE and redraws the current cell normally." },
+
+    { "id": 119, "name": "SP0", "note": "( -- a-addr ) DEVELOPING.md §21, M28: pushes FORTH.SP0, the constant address the data stack pointer equals when empty." },
+    { "id": 120, "name": "SP@", "note": "( -- a-addr ) DEVELOPING.md §21, M28: pushes FORTH.SP, the live data stack pointer (the address of the current top-of-stack cell, or SP0 if empty)." },
+    { "id": 121, "name": "SP!", "note": "( a-addr -- ) DEVELOPING.md §21, M28: pops an address, writes it into FORTH.SP — the standard SP0 SP! stack-reset idiom. No bounds validation — an address outside DSTK isn't caught until the next push/pop/peek." },
+    { "id": 122, "name": "RP0", "note": "( -- a-addr ) DEVELOPING.md §21, M28: same as SP0, for the return stack (FORTH.RP0)." },
+    { "id": 123, "name": "RP@", "note": "( -- a-addr ) DEVELOPING.md §21, M28: same as SP@, for the return stack (FORTH.RP)." },
+    { "id": 124, "name": "RP!", "note": "( a-addr -- ) DEVELOPING.md §21, M28: same as SP!, for the return stack. Real risk, not hypothetical: the return stack holds live return addresses for every word currently executing — a wrong RP! mid-execution corrupts the call chain, same 'authentic risk, no host-side validation' stance as MMAP's raw writes." }
   ],
 
   "bankTags": {
@@ -216,12 +223,14 @@
       "baseOffset": 384,
       "note": "Rebel-Sim-only group (Rebel-ROM's Phase 11/Forth doesn't exist yet) — appended after Rebel-ROM's real groups (STORAGE ends at 0x180) rather than colliding with them, same 64-byte-slot incremental-reservation pattern.",
       "fields": {
-        "SP0": { "offset": 0, "note": "data stack base address (reserved, M1-M3 hardcode the DSTK bank size instead)" },
-        "RP0": { "offset": 4, "note": "return stack base address (reserved, M2-M3 hardcode the RSTK bank size instead)" },
+        "SP0": { "offset": 0, "note": "data stack base address (constant, = DSTK bank.base + bank.size) — written by DataStack's own constructor since DEVELOPING.md §21, M28" },
+        "RP0": { "offset": 4, "note": "return stack base address (constant, = RSTK bank.base + bank.size) — same, for RSTK's DataStack instance" },
         "HERE": { "offset": 8, "note": "dictionary next-free pointer, grows up within DICT (in use since M2)" },
         "LATEST": { "offset": 12, "note": "most recently defined dictionary entry's address, 0 = empty dictionary (in use since M2)" },
         "BASE": { "offset": 16, "note": "numeric input/output radix" },
-        "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (in use since M2)" }
+        "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (in use since M2)" },
+        "SP": { "offset": 24, "note": "live data stack pointer (DEVELOPING.md §21, M28) — DataStack's own private sp field, relocated here so it's genuinely sysvar-backed, not an engine-side copy" },
+        "RP": { "offset": 28, "note": "live return stack pointer (DEVELOPING.md §21, M28) — same relocation, for RSTK's DataStack instance" }
       },
       "groupSizeBytes": 64
     }

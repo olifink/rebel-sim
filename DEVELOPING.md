@@ -2389,3 +2389,194 @@ before.
   contract (`DEVELOPING.md` §11/§14's existing note) — this change
   grows the *header*, not the slot layout, same open question either
   way.
+
+## 21. `SP@`/`SP!`/`SP0`, `RP@`/`RP!`/`RP0` — the stack pointer becomes a real sysvar, not a private field — done, M28
+
+### Motivation
+
+Asked (a Forth-tutorial question): why no `SP0`/`SP@`? Checked, not
+assumed: `FORTH.SP0`/`RP0` are already reserved in `rebel-opcodes.json`
+(offsets 0/4 of the `FORTH` sysvar group) but never written —
+`"reserved (M1-M3 hardcode the DSTk/RSTK bank size instead)"`. The real
+state lives somewhere else entirely: `DataStack` (`stack.ts:16`) keeps
+its own `private sp: number`, mutated directly by `push`/`pop`/`peek`/
+`clear`, with no arena address at all.
+
+That's the same shape of problem M27 (§20) fixed for the bank-naming
+counter — an internal field standing in for what should be the one
+real place this state lives — except here the correct fix isn't a new
+arena location, it's routing through the mechanism that already
+exists for exactly this: `Sysvars`. `HERE`/`LATEST`/`BASE`/`STATE`
+already work this way — `repl.ts`/`primitives.ts` never cache a copy,
+they call `sysvars.get(...)`/`.set(...)` every time, and `Screen`/
+`Keyboard` both take a `Sysvars` reference in their constructor rather
+than mirroring sysvar-owned state locally. `DataStack` is the one
+piece of engine state that never got that treatment — this closes that
+gap, not just adds three new words.
+
+### Design
+
+**Two sysvar fields per stack, not one.** `SP0`/`RP0` (already
+reserved) hold the *base* — the constant address the stack's `sp`
+equals when empty, written once at construction and never mutated
+again. Two new fields, `SP`/`RP` (offsets 24/28 in the `FORTH` group —
+next free after `STATE` at 20), hold the *live* pointer — read and
+written on every single `push`/`pop`/`peek`/`clear`, replacing
+`stack.ts`'s private field outright rather than shadowing it.
+
+**`DataStack` takes a `Sysvars` reference and two field names, not a
+bank alone.** `Sysvars` already exists well before either stack is
+constructed (`repl.ts:159` vs. `196`-`197` — no ordering problem, the
+same fact that ruled out M27's rejected `attachSysvars()` detour
+applies here too, except this time there's no chicken-and-egg problem
+to begin with).
+
+```ts
+export class DataStack {
+  constructor(
+    private readonly arena: Arena,
+    private readonly bank: Bank,
+    private readonly sysvars: Sysvars,
+    private readonly baseField: 'SP0' | 'RP0',
+    private readonly liveField: 'SP' | 'RP',
+  ) {
+    const empty = bank.base + bank.size;
+    sysvars.setUnsigned('FORTH', baseField, empty);
+    sysvars.setUnsigned('FORTH', liveField, empty);
+  }
+
+  private get sp(): number {
+    return this.sysvars.getUnsigned('FORTH', this.liveField);
+  }
+  private set sp(value: number) {
+    this.sysvars.setUnsigned('FORTH', this.liveField, value);
+  }
+
+  // depth/push/pop/peek/clear: unchanged bodies, `this.sp` now a
+  // sysvar-backed accessor instead of a field — every call site reads
+  // as before, nothing about the bounds-checking logic changes.
+}
+```
+
+A private getter/setter pair named `sp` keeps every existing call site
+in `push`/`pop`/`peek`/`depth`/`clear` textually unchanged — the fix is
+entirely in where the four bytes actually live, not in the stack's own
+logic.
+
+**`repl.ts:196`-`197`** becomes:
+
+```ts
+this.stack = new DataStack(this.arena, dstkBank, this.sysvars, 'SP0', 'SP');
+this.rstack = new DataStack(this.arena, rstkBank, this.sysvars, 'RP0', 'RP');
+```
+
+### The words
+
+| Token | Word | Stack effect | Notes |
+|---|---|---|---|
+| 119 | `SP0` | `( -- a-addr )` | Pushes `FORTH.SP0` — the constant empty-stack address. |
+| 120 | `SP@` | `( -- a-addr )` | Pushes `FORTH.SP` — the live pointer, i.e. the address of the current top-of-stack cell (or `SP0` if empty), matching the standard Forth contract (the value *before* `SP@`'s own push). |
+| 121 | `SP!` | `( a-addr -- )` | Pops an address, writes it straight into `FORTH.SP` — the standard `SP0 SP!` stack-reset idiom, and the general mechanism `THROW`/`CATCH` would eventually build on. |
+| 122 | `RP0` | `( -- a-addr )` | Same as `SP0`, for the return stack. |
+| 123 | `RP@` | `( -- a-addr )` | Same as `SP@`, for the return stack. |
+| 124 | `RP!` | `( a-addr -- )` | Same as `SP!`, for the return stack. **Real, not theoretical, danger**: the return stack holds live return addresses for every word currently executing (`inner.ts`) — an `RP!` to a wrong address mid-execution corrupts the call chain exactly the way clobbering a native call stack would. Standard Forth semantics, not a bug to guard against here; same "authentic risk, no host-side validation" stance `MMAP` already takes (§11) for raw writes. |
+
+`SP@`/`SP!`/`RP@`/`RP!` all implemented generically over `ctx.stack`/
+`ctx.rstack` — `case 120` reads `s.getPointer()` (a new public method
+mirroring the private getter above, `push`/`pop` stay as they are),
+`case 123` reads `ctx.rstack.getPointer()`; symmetric for `case 121`/
+`124` with a new `setPointer(addr)`.
+
+### Implementation sketch
+
+- `stack.ts`: `DataStack` constructor gains `sysvars`/`baseField`/
+  `liveField` params; private `sp` field replaced by a private
+  getter/setter over `sysvars.getUnsigned`/`setUnsigned('FORTH', ...)`;
+  new public `getPointer()`/`setPointer(addr)` (thin wrappers over the
+  same getter/setter, the only way `primitives.ts` reaches the value —
+  keeps `sp` itself private, same encapsulation as today).
+- `rebel-opcodes.json`: `FORTH` group gains `SP`/`RP` fields (offsets
+  24/28); 6 new primitive entries, tokens 119-124.
+- `primitives.ts`: 6 new cases, each a couple of lines — `SP0`/`RP0`
+  push `sysvars.getUnsigned('FORTH', 'SP0'/'RP0')` directly (no need to
+  route through `DataStack` for the constant); `SP@`/`RP@`/`SP!`/`RP!`
+  call the new `getPointer()`/`setPointer()`.
+- `repl.ts:196`-`197`: the two `DataStack` constructions gain the new
+  arguments, as above.
+- `stack.test.ts`'s `newStack()` helper (constructs a bare `DataStack`
+  for unit tests) needs a `Sysvars` instance too — a small, local
+  `SYSV` bank + `new Sysvars(...)`, matching how other unit-test files
+  already build a minimal `Sysvars` when they need one in isolation
+  from a full `Machine`.
+
+### A real hot-path cost, worth naming rather than hand-waving
+
+Every `push`/`pop`/`peek` now does one `DataView` read/write through
+`Sysvars.getUnsigned`/`setUnsigned` where it used to be a plain JS
+field access — the same order of magnitude as the cell read/write
+`push`/`pop` already do against the stack's own bank (arena access is
+already the dominant cost in this loop, not JS field access), so no
+expected observable slowdown, but not verified with a benchmark before
+this lands — worth a sanity check against `inner.ts`'s existing test
+suite timing, not a formal perf test, if the full suite's wall time
+visibly moves after implementing.
+
+### Scope cuts, explicit
+
+- No `THROW`/`CATCH` — `SP!`/`RP!` are the mechanism a future exception
+  system would use, not the system itself. Flagged as a natural next
+  candidate, not scoped now.
+- No bounds-checking on `SP!`/`RP!` beyond what already exists — a
+  address written via `SP!` that lands outside `DSTK`'s bank isn't
+  caught until the next `push`/`pop`/`peek` bounds-checks against it
+  and throws. Same "authentic risk" stance as `RP!`'s note above.
+- `SP0`/`RP0` stay read-only in practice (nothing stops `SP0 !`
+  overwriting the constant via raw memory access, same as `HERE`/
+  `LATEST` today) — no dedicated immutability enforcement, consistent
+  with how every other "variable-shaped" sysvar in this codebase
+  already behaves.
+
+### Verification — done
+
+- `stack.test.ts`: existing suite untouched in behavior — the four
+  original tests (LIFO push/pop, depth/toArray, underflow, overflow)
+  pass unmodified against the new `Sysvars`-backed accessor, plus its
+  `makeStack()` helper now builds a real `SYSV` bank + `Sysvars`
+  instance. New `describe` block: `SP0`/`SP` both equal `bank.base +
+  bank.size` at construction; `getPointer()` moves by exactly one cell
+  per push/pop and matches the address the top cell actually lives at
+  (read back via a raw `arena.readCell`); `SP0` never moves while `SP`
+  does; `setPointer()` given a saved `getPointer()` value restores
+  depth exactly (the reset idiom); two `DataStack` instances sharing
+  one `Sysvars` (distinct `SP0`/`SP` vs. `RP0`/`RP` field names) stay
+  fully independent.
+- New `describe` block appended to `low-level-batch.test.ts` (same home
+  as §15/§16, not a separate file): `SP0` equals `SP@` on a freshly-
+  emptied stack; `SP@` decreases by 4 per push; `SP@ ... SP!`
+  round-trips depth to zero; `SP0 SP!` empties the stack directly;
+  `RP@ RP0 -` inside a running colon word is negative (return stack
+  genuinely holds a live return address mid-call, not just at the top
+  level); `RP0`/`RP@` stay equal at the top level regardless of how
+  much the *data* stack grows (the two pointers are genuinely
+  independent, not aliased).
+- Full engine suite: 259 passed (248 + 11 new). App suite (10) and both
+  builds green. One `app.spec.ts` failure seen on the first run
+  (`stackAtPause` empty at a breakpoint pause) turned out to be
+  pre-existing flakiness, not a regression — confirmed by running the
+  suite unchanged (`git stash`) and getting the same intermittent
+  failure pattern across repeated runs on both old and new code.
+- Live, via WebMCP: `SP0 .` → `9744` (= `DSTK`'s `base + size` from
+  `read_banks`, `5648 + 4096`); `SP@ .` on an empty stack also `9744`;
+  `1 2 3 SP@ . .S` → `9732` then `1 2 3` (confirms `SP@` reflects the
+  live depth mid-line, and doesn't disturb the stack it's inspecting);
+  `SP0 SP! .S` after that empties it (`.S` prints nothing); a defined
+  word `: DEPTH-INSIDE RP@ RP0 - . ;` prints `-4` when called — the
+  inner interpreter's own top-level return-address sentinel, real and
+  observable through `RP@`/`RP0`, not simulated. Zero console errors.
+  One genuine gotcha reproduced live, same shape as M24's `HEX 255 .`
+  one: `SP0 SP@ = .` typed as a single line prints `0` (FALSE), not
+  `-1` — `SP@` executes *after* `SP0`'s own push has already moved the
+  live pointer down by one cell, so the two aren't comparing the same
+  moment in time. Not a bug — `SP@`'s whole point is reading the
+  pointer live, and a line with two stack-pointer words in sequence
+  will always see it move between them, same as any other stack word.
