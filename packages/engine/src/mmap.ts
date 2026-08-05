@@ -1,21 +1,24 @@
 /**
- * MMAP — arena-resident bank table (DEVELOPING.md §11, M19). Always
- * bank 0, absolute base 0, ahead of every other bank — harmless, since
- * addresses are always per-arena offsets (FORTH-ARCHITECTURE.md) and
- * nothing in this codebase hardcodes a bank's absolute base.
+ * MMAP — arena-resident bank table (DEVELOPING.md §11/§14, M19/M22).
+ * Always bank 0, absolute base 0, ahead of every other bank — harmless,
+ * since addresses are always per-arena offsets (FORTH-ARCHITECTURE.md)
+ * and nothing in this codebase hardcodes a bank's absolute base.
  *
- * This is a **mirror**, not yet the source of truth: `BankTable`'s own
- * host-side `banks` array stays the real read path for
- * `findBank()`/`getAllBanks()` (unchanged) — every bank it creates,
- * including `MMAP` itself, additionally gets written here so a memory
- * snapshot or (eventually) Forth source can read the same layout
- * directly, without asking the host. Making `MMAP` the actual source of
- * truth, and letting Forth create banks by writing it directly, is real
- * follow-on work, not done here (`DEVELOPING.md` §11's own scope cuts).
+ * The real source of truth (M22) — `BankTable`'s own reads
+ * (`getAllBanks()`/`findBank()`/`findBankByName()`) and allocations
+ * (`createBank()`) both go through this module now, not a private TS
+ * array/counter. No cursor state is cached anywhere: which slot is
+ * free and what memory address is free are both derived by scanning
+ * all `MMAP_MAX_SLOTS` fixed slots and checking each one's own
+ * `ACTIVE` flag, every time — nothing to keep in sync, nothing that
+ * can drift. `ACTIVE` is pure per-slot occupancy (a slot with it set
+ * is a real, in-use bank; unset means available) — not a
+ * flush-safety detail; async-flush-safety is explicitly out of scope
+ * for this design (`DEVELOPING.md` §14).
  *
  * Slot byte layout is proposed, not finalized cross-target — see
- * `DEVELOPING.md` §11 and `rebel-rom/CHANGES.md` for the open question
- * around matching this to a real `CBank` C++ layout later.
+ * `DEVELOPING.md` §11/§14 and `rebel-rom/CHANGES.md` for the open
+ * question around matching this to a real `CBank` C++ layout later.
  */
 
 import { Arena } from './arena.js';
@@ -33,15 +36,12 @@ const TAG_SIZE = 4;
 const NAME_SIZE = 8;
 
 // magic('M','M') + version + reserved, mirroring Sysvars.initHeader()'s
-// established sanity-header pattern, plus two cells: next-free offset
-// and slot count in use — the arena-resident equivalent of BankTable's
-// own private nextFree/banks.length.
+// established sanity-header pattern. No cursor cells (M22) — occupancy
+// lives entirely in each slot's own ACTIVE flag.
 const HEADER_MAGIC_0 = 'M'.charCodeAt(0);
 const HEADER_MAGIC_1 = 'M'.charCodeAt(0);
 const HEADER_VERSION = 1;
-const HEADER_SIZE = 4 + 4 + 4; // magic+version+reserved(4), nextFree(4), slotCount(4)
-const NEXT_FREE_OFFSET = 4;
-const SLOT_COUNT_OFFSET = 8;
+const HEADER_SIZE = 4;
 
 // tag(4) + name(8) + base(4-cell) + size(4-cell) + flags(4-cell).
 const SLOT_SIZE = TAG_SIZE + NAME_SIZE + 4 + 4 + 4;
@@ -53,6 +53,21 @@ const SLOT_FLAGS_OFFSET = SLOT_SIZE_OFFSET + 4;
  * class (like CHAR's bank, MMAP's size is a computed constant, not a
  * requested one). */
 export const MMAP_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
+
+/** Matches rebel-rom's real TBankFlags (src/membank.h) bit-for-bit for
+ * the first four; ACTIVE (DEVELOPING.md §11/§14, M19/M22) is a
+ * Rebel-Sim-first addition, next free bit after DIRTY, and the one
+ * `MemoryMap` itself now depends on natively (occupancy). Owned here
+ * rather than in banks.ts specifically so `mmap.ts` can check ACTIVE
+ * without importing back from `banks.ts` — banks.ts re-exports these
+ * for its own existing public surface. RESIDENT/EXTERNAL/SWAPPABLE/
+ * DIRTY all stay exactly as reserved/inert as they are on both sides —
+ * this doesn't wire any of them up. */
+export const BankFlagResident = 1 << 0;
+export const BankFlagExternal = 1 << 1;
+export const BankFlagSwappable = 1 << 2; // reserved, inert
+export const BankFlagDirty = 1 << 3; // reserved, inert — DEVELOPING.md §11
+export const BankFlagActive = 1 << 4; // DEVELOPING.md §11/§14, M19/M22
 
 export interface MMapSlot {
   readonly tag: string;
@@ -74,24 +89,6 @@ export class MemoryMap {
     this.arena.writeByte(b + 1, HEADER_MAGIC_1);
     this.arena.writeByte(b + 2, HEADER_VERSION);
     this.arena.writeByte(b + 3, 0);
-    this.arena.writeCellUnsigned(b + NEXT_FREE_OFFSET, 0);
-    this.arena.writeCellUnsigned(b + SLOT_COUNT_OFFSET, 0);
-  }
-
-  getNextFree(): number {
-    return this.arena.readCellUnsigned(this.base + NEXT_FREE_OFFSET);
-  }
-
-  private setNextFree(value: number): void {
-    this.arena.writeCellUnsigned(this.base + NEXT_FREE_OFFSET, value);
-  }
-
-  getSlotCount(): number {
-    return this.arena.readCellUnsigned(this.base + SLOT_COUNT_OFFSET);
-  }
-
-  private setSlotCount(value: number): void {
-    this.arena.writeCellUnsigned(this.base + SLOT_COUNT_OFFSET, value);
   }
 
   private slotOffset(index: number): number {
@@ -114,27 +111,8 @@ export class MemoryMap {
     return out;
   }
 
-  /** Appends one bank's descriptor to the next free slot. Doesn't
-   * perform allocation itself — `base`/`size` are handed in by
-   * `BankTable`, which already decided them; this just mirrors that
-   * decision into arena bytes. */
-  addBank(tag: string, name: string, base: number, size: number, flags: number): void {
-    const count = this.getSlotCount();
-    if (count >= MMAP_MAX_SLOTS) {
-      throw new RangeError(`MMAP is full (${MMAP_MAX_SLOTS} slots)`);
-    }
-    const offset = this.slotOffset(count);
-    this.writeFixedString(offset, tag, TAG_SIZE);
-    this.writeFixedString(offset + TAG_SIZE, name, NAME_SIZE);
-    this.arena.writeCellUnsigned(offset + SLOT_BASE_OFFSET, base);
-    this.arena.writeCellUnsigned(offset + SLOT_SIZE_OFFSET, size);
-    this.arena.writeCellUnsigned(offset + SLOT_FLAGS_OFFSET, flags);
-    this.setSlotCount(count + 1);
-    this.setNextFree(base + size);
-  }
-
   getSlot(index: number): MMapSlot {
-    if (index < 0 || index >= this.getSlotCount()) {
+    if (index < 0 || index >= MMAP_MAX_SLOTS) {
       throw new RangeError(`MMAP slot ${index} out of range`);
     }
     const offset = this.slotOffset(index);
@@ -147,31 +125,72 @@ export class MemoryMap {
     };
   }
 
-  /** Every slot in use, in creation order — mirrors
-   * `BankTable.getAllBanks()`'s own "for UI/debugging/verification"
-   * scope, not a hot path. */
+  /** Every slot currently active, in slot order (which matches
+   * creation order today, since allocation always picks the lowest
+   * available slot and nothing ever deactivates a real bank yet) —
+   * mirrors `BankTable.getAllBanks()`'s own "for UI/debugging/
+   * verification" scope, not a hot path. */
   getAllSlots(): MMapSlot[] {
     const out: MMapSlot[] = [];
-    const count = this.getSlotCount();
-    for (let i = 0; i < count; i++) {
-      out.push(this.getSlot(i));
+    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
+      const slot = this.getSlot(i);
+      if (slot.flags & BankFlagActive) {
+        out.push(slot);
+      }
     }
     return out;
   }
 
-  /** DEVELOPING.md §12: BANK@'s real lookup path — the first slot's
-   * base address whose tag matches, `undefined` if none. Slots are
-   * always in creation order, so this matches
-   * `BankTable.findBank(tag)`'s own "first bank of this type"
-   * semantics exactly, reading arena bytes instead of the host array. */
+  /** DEVELOPING.md §12: BANK@'s real lookup path — the first active
+   * slot's base address whose tag matches, `undefined` if none.
+   * Matches `BankTable.findBank(tag)`'s own "first bank of this type"
+   * semantics, reading arena bytes instead of a host array. */
   findBankAddr(tag: string): number | undefined {
-    const count = this.getSlotCount();
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
       const slot = this.getSlot(i);
-      if (slot.tag === tag) {
+      if ((slot.flags & BankFlagActive) && slot.tag === tag) {
         return slot.base;
       }
     }
     return undefined;
+  }
+
+  /** DEVELOPING.md §14, M22: the real allocator — no cached cursor of
+   * any kind. Finds the first inactive slot and the real free memory
+   * address (`max(base + size)` over every currently-active slot) in
+   * one pass, writes the descriptor into that slot, then activates it
+   * last ("prepare it, then switch it on") — the slot is already
+   * inactive (that's why it was chosen), so occupancy only ever
+   * becomes true once the descriptor is fully written.
+   *
+   * Returns the actual stored descriptor (`ACTIVE` always forced on,
+   * regardless of what `flags` requested) rather than just the new
+   * `base` — a caller building its own return value from the raw
+   * `flags` parameter instead would silently disagree with what this
+   * method actually persisted whenever `flags` omitted `ACTIVE`. */
+  allocate(tag: string, name: string, size: number, flags: number): MMapSlot {
+    let freeSlot = -1;
+    let base = 0;
+    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
+      const slot = this.getSlot(i);
+      if (slot.flags & BankFlagActive) {
+        base = Math.max(base, slot.base + slot.size);
+      } else if (freeSlot === -1) {
+        freeSlot = i;
+      }
+    }
+    if (freeSlot === -1) {
+      throw new RangeError(`MMAP is full (${MMAP_MAX_SLOTS} slots)`);
+    }
+
+    const activeFlags = flags | BankFlagActive;
+    const offset = this.slotOffset(freeSlot);
+    this.writeFixedString(offset, tag, TAG_SIZE);
+    this.writeFixedString(offset + TAG_SIZE, name, NAME_SIZE);
+    this.arena.writeCellUnsigned(offset + SLOT_BASE_OFFSET, base);
+    this.arena.writeCellUnsigned(offset + SLOT_SIZE_OFFSET, size);
+    this.arena.writeCellUnsigned(offset + SLOT_FLAGS_OFFSET, activeFlags);
+
+    return this.getSlot(freeSlot);
   }
 }

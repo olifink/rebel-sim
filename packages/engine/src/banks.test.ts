@@ -28,16 +28,19 @@ describe('BankTable', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const bank = banks.createBank('DATA', 64, 'TESTDATA');
     expect(bank.name).toBe('TESTDATA');
-    expect(banks.findBankByName('TESTDATA')).toBe(bank);
+    // .toEqual, not .toBe: DEVELOPING.md §14, M22 — findBankByName()
+    // now decodes a fresh object from MMAP's arena bytes each call, no
+    // longer a cached reference, so object identity isn't preserved.
+    expect(banks.findBankByName('TESTDATA')).toEqual(bank);
   });
 
   it('allows multiple banks sharing a tag, distinguished only by name', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const a = banks.createBank('DATA', 64, 'ASSET1');
     const b = banks.createBank('DATA', 64, 'ASSET2');
-    expect(banks.findBank('DATA', 'ASSET1')).toBe(a);
-    expect(banks.findBank('DATA', 'ASSET2')).toBe(b);
-    expect(banks.findBank('DATA')).toBe(a); // "a bank of this type" — first match
+    expect(banks.findBank('DATA', 'ASSET1')).toEqual(a);
+    expect(banks.findBank('DATA', 'ASSET2')).toEqual(b);
+    expect(banks.findBank('DATA')).toEqual(a); // "a bank of this type" — first match
   });
 
   it('rejects a duplicate name even across different tags', () => {

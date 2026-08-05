@@ -14,23 +14,34 @@
  * that doesn't care about a stable name (every bank M1-M4 created) omits
  * it and gets an auto-generated 8-digit zero-padded serial, exactly like
  * `CBankTable::GenerateSerialName`.
+ *
+ * DEVELOPING.md §14, M22: reads (`getAllBanks()`/`findBank()`/
+ * `findBankByName()`) and allocation (`createBank()`) both go through
+ * `MemoryMap` (`mmap.ts`) now, not a private array/counter — no cached
+ * state to drift out of sync with what Forth-side `CREATE-BANK` (M21)
+ * does directly. No out-of-space validation either, matching
+ * `CREATE-BANK`'s own precedent — relies on `DataView`'s bounds
+ * checking at first real access, not a check here.
  */
 
 import { Arena } from './arena.js';
-import { MemoryMap, MMAP_SIZE, MMAP_TAG } from './mmap.js';
+import {
+  MemoryMap,
+  MMAP_SIZE,
+  MMAP_TAG,
+  BankFlagResident,
+  BankFlagExternal,
+  BankFlagSwappable,
+  BankFlagDirty,
+  BankFlagActive,
+} from './mmap.js';
+
+// Re-exported for this module's own existing public surface
+// (index.ts/primitives.ts import these from banks.ts today) — owned by
+// mmap.ts now, DEVELOPING.md §14, M22.
+export { BankFlagResident, BankFlagExternal, BankFlagSwappable, BankFlagDirty, BankFlagActive };
 
 export const BANK_NAME_LEN = 8;
-
-/** Matches rebel-rom's real TBankFlags (src/membank.h) bit-for-bit for
- * the first four; ACTIVE (DEVELOPING.md §11, M19) is a Rebel-Sim-first
- * addition, next free bit after DIRTY. RESIDENT/EXTERNAL/SWAPPABLE/
- * DIRTY all stay exactly as reserved/inert as they are on both sides —
- * this doesn't wire any of them up. */
-export const BankFlagResident = 1 << 0;
-export const BankFlagExternal = 1 << 1;
-export const BankFlagSwappable = 1 << 2; // reserved, inert
-export const BankFlagDirty = 1 << 3; // reserved, inert — DEVELOPING.md §11
-export const BankFlagActive = 1 << 4; // DEVELOPING.md §11, M19
 
 const DEFAULT_FLAGS = BankFlagResident | BankFlagActive;
 
@@ -64,35 +75,21 @@ export interface Bank {
 }
 
 export class BankTable {
-  private readonly banks: Bank[] = [];
-  private nextFree = 0;
   private nextSerial = 0;
 
-  /** DEVELOPING.md §11, M19: the arena-resident mirror of this table.
-   * Public so tests/tooling can verify it directly — not yet the real
-   * source of truth for findBank()/getAllBanks(), see mmap.ts's header
-   * comment. */
+  /** DEVELOPING.md §11/§14, M19/M22: the real source of truth for this
+   * table now — reads and allocation both go through it. Public so
+   * tests/tooling can inspect it directly. */
   readonly mmap: MemoryMap;
 
-  constructor(private readonly arena: Arena) {
-    // MMAP is always bank 0 — reserve its fixed space before any
-    // createBank() call, then register + mirror itself into its own
-    // slot 0. A too-small arena fails here with DataView's own
-    // RangeError (relied on deliberately, not duplicated — same
-    // "DataView already enforces this for free" precedent used
-    // elsewhere in this codebase) rather than a custom check.
+  constructor(arena: Arena) {
+    // MMAP is always bank 0 — reserve its fixed space via the same
+    // allocate() path every other bank uses (it naturally finds the
+    // first inactive slot — slot 0, on a fresh arena — and computes
+    // base 0, since no slot is active yet to push it forward).
     this.mmap = new MemoryMap(arena, 0);
     this.mmap.initHeader();
-    const mmapBank: Bank = {
-      tag: MMAP_TAG,
-      name: MMAP_TAG,
-      base: 0,
-      size: MMAP_SIZE,
-      flags: DEFAULT_FLAGS,
-    };
-    this.banks.push(mmapBank);
-    this.nextFree = MMAP_SIZE;
-    this.mmap.addBank(mmapBank.tag, mmapBank.name, mmapBank.base, mmapBank.size, mmapBank.flags);
+    this.mmap.allocate(MMAP_TAG, MMAP_TAG, MMAP_SIZE, DEFAULT_FLAGS);
   }
 
   private generateSerialName(): string {
@@ -104,32 +101,27 @@ export class BankTable {
     if (this.findBankByName(bankName)) {
       throw new Error(`bank name ${bankName} already exists`);
     }
-    if (this.nextFree + size > this.arena.sizeBytes) {
-      throw new RangeError(
-        `arena out of space: cannot create bank ${tag}/${bankName} of size ${size}`,
-      );
-    }
-    const bank: Bank = { tag, name: bankName, base: this.nextFree, size, flags };
-    this.banks.push(bank);
-    this.nextFree += size;
-    this.mmap.addBank(bank.tag, bank.name, bank.base, bank.size, bank.flags);
-    return bank;
+    // The returned descriptor, not a locally-built one — MMapSlot and
+    // Bank are structurally identical, and allocate() always forces
+    // ACTIVE on internally, so this stays consistent with what's
+    // actually stored even when a caller's `flags` omitted it.
+    return this.mmap.allocate(tag, bankName, size, flags);
   }
 
   /** "A bank of this type" (tags repeat) when called with one argument;
    * "the bank with this tag and name" when called with both. */
   findBank(tag: string, name?: string): Bank | undefined {
     if (name !== undefined) {
-      return this.banks.find((b) => b.tag === tag && b.name === name);
+      return this.mmap.getAllSlots().find((b) => b.tag === tag && b.name === name);
     }
-    return this.banks.find((b) => b.tag === tag);
+    return this.mmap.getAllSlots().find((b) => b.tag === tag);
   }
 
   /** Names are unique — the real "the one bank" lookup once more than
    * one bank shares a tag (docs/STORAGE.md needs this to map a loaded
    * file back to its bank). */
   findBankByName(name: string): Bank | undefined {
-    return this.banks.find((b) => b.name === name);
+    return this.mmap.getAllSlots().find((b) => b.name === name);
   }
 
   requireBank(tag: string, name?: string): Bank {
@@ -140,9 +132,9 @@ export class BankTable {
     return bank;
   }
 
-  /** Every bank in creation order — for UI/debugging use only (e.g. an
-   * inspector panel), same spirit as DataStack.toArray(). */
+  /** Every active bank, in creation order — for UI/debugging use only
+   * (e.g. an inspector panel), same spirit as DataStack.toArray(). */
   getAllBanks(): readonly Bank[] {
-    return this.banks;
+    return this.mmap.getAllSlots();
   }
 }

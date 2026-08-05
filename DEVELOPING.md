@@ -1470,3 +1470,213 @@ warn on an oversized tag any more than it validates anything else.
 - No Forth-level word to *delete* or *resize* a bank — creation only,
   matching the "arena grows monotonically, nothing is ever freed"
   model this codebase already has everywhere else.
+
+## 14. `BankTable` reads — and allocates — through `MMAP`, no cached state anywhere — done, M22
+
+### Motivation, and a real bug found while checking it
+
+The originally-requested piece: `getAllBanks()`/`findBank()`/
+`findBankByName()` (`banks.ts`) still read `BankTable`'s own private
+`banks: Bank[]` array, so a bank `CREATE-BANK` (M21) creates — real,
+addressable, correctly findable via `BANK@` — stays invisible to
+`storage.ts`, the app's `read_banks` WebMCP tool, and the inspector
+panel. §13 named this plainly as an accepted consequence, not a gap.
+
+**Checked, not assumed, while scoping this: it's worse than a
+visibility gap.** `BankTable.createBank()` computes a new bank's `base`
+from its own private `nextFree` field, which `CREATE-BANK` never
+touches — `CREATE-BANK` advances `MMAP`'s *own* next-free cell
+directly, independently. Reproduced live: `64 CREATE-BANK FTAG`
+creates a bank at base `84924`; a subsequent
+`banks.createBank('DATA', 64, 'HOSTBANK')` places its bank at the
+*same* base, `84924` — a real overlap, not a display omission.
+
+### Revised design, per direct correction: `ACTIVE` is occupancy, not a cache to reconcile — so don't cache anything at all
+
+An intermediate version of this section proposed consolidating to one
+`nextFree` cursor cell in `MMAP`'s header. **Corrected directly:**
+`ACTIVE` isn't a flush-safety detail — it's *the* per-slot occupancy
+bit, full stop: `ACTIVE=1` means "this slot, as configured, is a real
+bank in use"; `ACTIVE=0` means "not in use," available to be handed
+out again. Async-flush-safety (this section's own earlier framing for
+why `ACTIVE` existed at all, M19) is explicitly **not a concern right
+now** — nothing implements flush logic yet, and this design doesn't
+hedge against it.
+
+Taken to its actual conclusion, that means **no cursor cell is needed
+at all**, not even one: both "which slot is free" and "what memory
+address is free" are fully derivable by scanning the 64 fixed slots
+and checking each one's own `ACTIVE` bit — so nothing needs to be
+cached, and nothing cached can ever drift from what the slots
+themselves say. This removes the bug above by removing the entire
+class it belongs to, not by finding a smarter way to keep two cursors
+in sync.
+
+- **`MMAP`'s header shrinks to just magic + version** (4 bytes) — the
+  `nextFree`/`slotCount` cells this section (and M19) previously had
+  are deleted, not repurposed. `MMAP_SIZE` becomes `4 + 64×24 = 1540`
+  bytes (down from 1548) — every other bank's base shifts down by 8
+  bytes as a direct, harmless consequence, same as any other `MMAP`
+  size change (`FORTH-ARCHITECTURE.md`'s per-arena-offset rule).
+- **Allocation** (`MemoryMap` gains one method, `allocate(tag, name,
+  size, flags)`, replacing `addBank()`): scans all 64 slots for the
+  first with `ACTIVE` off (an available slot — always finds a
+  never-used one today, since nothing ever deactivates a real bank
+  yet); separately scans all 64 slots for `max(base + size)` over
+  every currently-`ACTIVE` one, giving the new bank's `base` fresh,
+  never cached; writes the descriptor into the chosen slot with
+  `ACTIVE` off, **then flips `ACTIVE` on last** — "prepare it, then
+  switch it on," exactly as directed. Returns the new `base`.
+- **Enumeration** (`getAllSlots()`, `findBankAddr()`): walk all 64
+  fixed slots, filtered to `ACTIVE` — not a `slotCount`-bounded range,
+  since that concept no longer exists.
+- The `BankFlag*` constants (`banks.ts`) move to `mmap.ts` — `mmap.ts`
+  now needs to check `ACTIVE` natively as part of its own occupancy
+  model, not just carry an opaque caller-supplied bit. `banks.ts`
+  re-exports them from `mmap.ts` for `index.ts`/`primitives.ts`'s
+  existing public surface, so nothing importing `BankFlagActive` etc.
+  from `banks.ts` today needs to change. (This also avoids repeating
+  the exact circular-import bug M19 already hit once — `mmap.ts`
+  importing back from `banks.ts` — by not creating the dependency in
+  that direction at all this time.)
+- `BankTable.createBank()` calls `this.mmap.allocate(tag, bankName,
+  size, flags)` directly for `base` — `this.nextFree`/`this.banks`
+  (the private array) are both removed.
+- `getAllBanks()`/`findBank()`/`findBankByName()` all read
+  `this.mmap.getAllSlots()` — no transform needed, `MMapSlot` and
+  `Bank` are already structurally identical (M19).
+- `this.nextSerial` (the auto-serial-name counter) stays exactly as it
+  is, private/host-side — `CREATE-BANK` never generates an
+  auto-serial name (name always equals tag, M21's own scope cut), so
+  it has no exposure to the class of bug this section fixes.
+- A useful side effect, not a separate feature: `createBank()`'s
+  existing name-uniqueness pre-check (`findBankByName()`) now also
+  catches a collision against a *Forth-created* bank's name.
+- **`BankTable.createBank()` drops its `arena.sizeBytes` out-of-space
+  check.** Once host- and Forth-side creation share the exact same
+  underlying `allocate()`, keeping host-only validation would be a new
+  asymmetry, not a removed one — `CREATE-BANK` (M21) already set the
+  "no out-of-space validation, `DataView`'s own bounds-checking fires
+  at first real access" precedent; this unifies both creators on it
+  rather than special-casing the host path.
+
+### Real behavioral changes, named explicitly
+
+- **Object identity is no longer stable.** `getAllBanks()`/`findBank()`/
+  `findBankByName()` currently return the *same* object reference
+  across repeated calls (a cached private array). Once backed by
+  `MMAP`, each call decodes fresh objects from arena bytes. Breaks
+  three existing `.toBe()` reference-identity assertions in
+  `banks.test.ts` — real test-suite changes to `.toEqual()`.
+- **`MemoryMap`'s public API changes, not just grows**: `getNextFree()`
+  and `getSlotCount()` are deleted, not deprecated — seven existing
+  assertions across `mmap.test.ts` reference them directly and need
+  rewriting against the new `allocate()`-based shape, not just
+  extending with new cases.
+- **Fixes the overlap bug** above as a direct, load-bearing
+  consequence.
+- **`storage.ts`/`read_banks`/the inspector panel start seeing
+  Forth-created banks** — closes §13's documented gap. Whether a
+  Forth-created bank should be `saveAsset()`-able once visible to
+  `storage.ts` is a real, separate question this section doesn't
+  answer.
+- **Host-side bank creation loses its explicit "arena out of space"
+  error** — deferred to first real access instead, like Forth-side
+  creation already was (M21). A behavior change for `storage.ts`'s
+  `openProject()` specifically (a corrupt/oversized project asset file
+  no longer fails at load time).
+- Performance remains a non-issue: even scanning all 64 slots twice
+  per allocation (once for a free slot, once for the base) is a few
+  hundred cheap `DataView` reads — not a hot-path concern, and
+  `getAllBanks()`/allocation are already documented as
+  host-orchestrated, occasional operations, never interpreter-loop
+  code.
+
+### Implementation sketch
+
+- `mmap.ts`: `BankFlag*` constants move in from `banks.ts`. `initHeader()`
+  shrinks to magic+version only. `getNextFree()`/`getSlotCount()`
+  removed. New `allocate(tag, name, size, flags): number` (find free
+  slot, compute base, write, activate last) replaces `addBank()`.
+  `getAllSlots()`/`findBankAddr()` change from `slotCount`-bounded to
+  `MMAP_MAX_SLOTS`-bounded-and-`ACTIVE`-filtered iteration. `MMAP_SIZE`
+  recomputed for the smaller header.
+- `banks.ts`: re-exports `BankFlag*` from `mmap.ts` (no call-site churn
+  elsewhere). `createBank()`/`getAllBanks()`/`findBank()`/
+  `findBankByName()` all delegate to `mmap`. `this.banks`/`this.nextFree`
+  fields removed; `this.nextSerial` untouched. Bootstrap (`MMAP`
+  registering itself as bank 0) becomes a call into `mmap`'s own
+  self-registration, still base-0-special-cased since there's nothing
+  to scan yet at that point.
+- `primitives.ts`: `CREATE-BANK`'s case (100) simplifies to one call,
+  `ctx.banks.mmap.allocate(tag, tag, size, flags)` — no more separate
+  `getNextFree()` + `addBank()` steps.
+- No `PrimitiveContext`/`repl.ts` change — `BANK@`/`CREATE-BANK`
+  (M20/M21) already go through `ctx.banks.mmap`, just call different
+  methods on it now.
+
+### A second real bug, found while implementing, not just the one found while scoping
+
+`MemoryMap.allocate()` unconditionally forces `ACTIVE` into what it
+*writes*, but an early version of `BankTable.createBank()` built its
+returned `Bank` object from the raw `flags` parameter the caller
+passed in, not from what `allocate()` actually persisted. For any
+caller supplying `flags` without `ACTIVE` already set — exactly what
+the existing "respects a caller-supplied flags value" test does,
+passing `BankFlagExternal` alone — `bank.flags` (2) and
+`mmap.getSlot(i).flags` (18, `EXTERNAL | ACTIVE`) silently disagreed.
+Caught immediately by that pre-existing test, not discovered later.
+Fixed by having `allocate()` return the actual stored `MMapSlot`
+(`MMapSlot` and `Bank` being structurally identical makes this a
+direct return, no transform) instead of just a `base: number`, so
+`createBank()` (and `CREATE-BANK`) build their result from what's
+really in `MMAP`, never from an assumption about it.
+
+### Verification
+
+- Regression check, the actual bug reproduced while scoping this:
+  `CREATE-BANK` then `createBank()` confirmed to **not** overlap
+  anymore (`node -e` against the built `dist/`, not just the test
+  suite) — the exact repro that motivated this section, re-run and
+  confirmed fixed.
+- `banks.test.ts`'s three `.toBe()` assertions updated to `.toEqual()`.
+- `mmap.test.ts`'s seven `getNextFree()`/`getSlotCount()` references
+  rewritten against `allocate()`'s new shape — e.g. asserting each
+  successive `createBank()`/`CREATE-BANK` call's `base` starts exactly
+  where the previous one's `base+size` ended, derived from real bank
+  objects, not a cursor cell.
+- `mmap.test.ts`'s M21 test "is invisible to
+  `BankTable.getAllBanks()`/`findBank()`" **inverted** — now asserts a
+  Forth-created bank *does* appear in both, with the exact expected
+  descriptor.
+- New tests: `createBank()`'s uniqueness check throws on a name
+  collision against a Forth-created bank; the "caller-supplied flags"
+  test now asserts `ACTIVE` is present in both the returned `Bank` and
+  the mirrored slot (this is the test that caught the second bug
+  above).
+- Live, via WebMCP: fresh `Machine`'s `read_banks` showed `MMAP` at
+  `1540` bytes (down from `1548`, matching the smaller header) with
+  every other bank's base shifted down by exactly 8 bytes;
+  `4096 CREATE-BANK DAT1 .` printed `84916`; a follow-up `read_banks`
+  and inspector-panel screenshot both showed `DAT1 DAT1 84916 4096`
+  right alongside every host-created bank — the visibility gap from
+  §13 is genuinely closed, not just asserted in a test. Zero console
+  errors.
+- Full engine (219 tests) + app (10 tests) suites and `npm run build`
+  green.
+
+### Scope cuts, explicit
+
+- No async-flush-safety design — explicitly out of scope for this
+  pass, per direct instruction; `ACTIVE` is purely occupancy here.
+  Revisit the flush-vs-reclaim interaction only once flush logic is
+  actually being built, not now.
+- No change to `nextSerial`/auto-serial naming — unaffected.
+- Whether `storage.ts` should be able to `saveAsset()` a Forth-created
+  bank — real, separate, open question, not decided here.
+- No merging of the `MMapSlot`/`Bank` types even though they're
+  structurally identical today — kept as separate, independently
+  named types.
+- No Forth-level word to explicitly deactivate/"free" a bank — this
+  section makes the *allocator* reuse-aware, but nothing yet sets
+  `ACTIVE` to 0 on a real bank; that's still separate, unbuilt work.

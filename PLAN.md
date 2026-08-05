@@ -237,15 +237,37 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     by its first 4 characters — not a new inconsistency, the first
     time anything could actually create a tag violating the
     already-existing 4-character convention. Detailed below.
-23. Later/open: multi-arena isolation (deliberately unenforced — full
+23. **M22 — `BankTable` reads/allocates through `MMAP`, no cached
+    state anywhere** — **done**: `getAllBanks()`/`findBank()`/
+    `findBankByName()` read `MMAP` instead of the private `banks`
+    array, closing M21's documented visibility gap — a `CREATE-BANK`
+    bank now shows up in `read_banks`/the inspector panel too,
+    confirmed live. **The real overlap bug found while scoping this is
+    fixed**: `ACTIVE` is occupancy per slot, full stop (flush-safety
+    is explicitly out of scope), so there's no cursor cell at all —
+    both the next free slot and the next free memory address are
+    derived by scanning all 64 fixed slots for their own `ACTIVE` bit,
+    every allocation. `MMAP`'s header shrunk to just magic+version
+    (`MMAP_SIZE` 1540, down from 1548 — confirmed live, every other
+    bank's base shifted by exactly 8 bytes); `getNextFree()`/
+    `getSlotCount()` deleted outright. `BankFlag*` constants moved from
+    `banks.ts` to `mmap.ts` to avoid repeating M19's own
+    circular-import bug in the other direction. **A second real bug
+    found while implementing** (not scoping): `allocate()` forces
+    `ACTIVE` into what it writes, but an early version built the
+    returned `Bank` from the caller's raw `flags` instead of what got
+    persisted — caught immediately by the pre-existing "caller-supplied
+    flags" test, fixed by having `allocate()` return the actual stored
+    descriptor. Detailed below.
+24. Later/open: multi-arena isolation (deliberately unenforced — full
     mutual access across arenas is the intended v1 model, not a gap,
     `DEVELOPING.md` §10), `THROW`/`CATCH` (tabled, M17), a named
     sysvar lookup (`SYSV@`, considered and explicitly declined —
-    `BANK@` + a hardcoded offset covers the real need), making
-    `BankTable.getAllBanks()`/`read_banks`/the inspector panel `MMAP`-
-    aware (would close M21's own documented visibility gap, not
-    scoped), Web Worker migration — see `FORTH-ARCHITECTURE.md` §9 and
-    `PORTING-WEB.md` §9 for the full open-decisions list.
+    `BANK@` + a hardcoded offset covers the real need), whether
+    `storage.ts` should be able to `saveAsset()` a Forth-created bank
+    (a new question item 23 itself raises, not decided), Web Worker
+    migration — see `FORTH-ARCHITECTURE.md` §9 and `PORTING-WEB.md` §9
+    for the full open-decisions list.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -2406,3 +2428,74 @@ gap live. Zero console errors.
 **Tests:** 218 engine tests total (212 before this milestone, 6 new in
 `mmap.test.ts`), confirmed via a full test run. 10 app tests and the
 full build unaffected — no Angular/UI changes.
+
+## M22 — `BankTable` reads/allocates through `MMAP`, no cached state anywhere — done
+
+Scoped in `DEVELOPING.md` §14 after a real design pivot mid-conversation:
+first scoped as "consolidate two drifting `nextFree` cursors into one,"
+then corrected directly — `ACTIVE` is per-slot occupancy, not a
+flush-safety detail (that concern stayed explicitly out of scope) —
+and taken to its actual conclusion: no cursor cell at all, everything
+derived by scanning `MMAP`'s 64 fixed slots.
+
+**What shipped:** `mmap.ts` gained one new method, `allocate(tag, name,
+size, flags): MMapSlot`, replacing `addBank()`/`getNextFree()`/
+`getSlotCount()` outright (deleted, not deprecated). It scans all 64
+slots in one pass — the first with `ACTIVE` off becomes the target
+slot, `max(base + size)` over every currently-`ACTIVE` slot becomes the
+new `base` — writes the full descriptor, then sets `ACTIVE` last
+("prepare it, then switch it on"). `MMAP`'s header shrank from 12 bytes
+(magic+version+reserved+nextFree+slotCount) to 4 (magic+version+
+reserved only) — `MMAP_SIZE` is now 1540, confirmed live (every other
+bank's base shifted down by exactly 8 bytes). The `BankFlag*` constants
+moved from `banks.ts` into `mmap.ts` (re-exported from `banks.ts` for
+the existing public surface), since `mmap.ts` now needs `ACTIVE`
+natively as part of its own occupancy model — deliberately avoiding
+recreating M19's own circular-import bug in the opposite direction.
+`BankTable.createBank()`/`getAllBanks()`/`findBank()`/`findBankByName()`
+all delegate to `mmap` now; the private `banks` array, `nextFree`
+counter, and the `arena.sizeBytes` out-of-space check are all gone —
+the last one deliberately, unifying host-side creation with
+`CREATE-BANK`'s existing "`DataView` catches it at first real access"
+precedent rather than keeping host-only validation as a new asymmetry.
+`nextSerial` (auto-serial naming) is untouched — `CREATE-BANK` never
+generates one, so it was never exposed to this bug class.
+
+**The overlap bug from M21 is fixed, confirmed by re-running the exact
+repro that found it**: `64 CREATE-BANK FTAG` then
+`banks.createBank('DATA', 64, 'HOSTBANK')` now land at different,
+non-overlapping addresses (`84916`/`84980`), and `getAllBanks()` shows
+both.
+
+**A second real bug, found while implementing, not scoping:**
+`allocate()` unconditionally forces `ACTIVE` into what it *writes*, but
+an early version of `createBank()` built its returned `Bank` from the
+raw `flags` parameter the caller passed, not from what actually got
+persisted. Any caller supplying `flags` without `ACTIVE` already set —
+exactly the pre-existing "respects a caller-supplied flags value" test,
+passing `BankFlagExternal` alone — silently disagreed:
+`bank.flags` (2) vs. the real stored `18` (`EXTERNAL | ACTIVE`). Caught
+immediately by that existing test, not discovered later. Fixed by
+having `allocate()` return the actual stored `MMapSlot` (structurally
+identical to `Bank`, so no transform needed) instead of just a `base:
+number`.
+
+**Verified via the engine test suite**: `banks.test.ts`'s three
+`.toBe()` reference-identity assertions updated to `.toEqual()` (object
+identity is no longer stable — every read now decodes fresh from arena
+bytes); `mmap.test.ts`'s seven `getNextFree()`/`getSlotCount()`
+references rewritten against `allocate()`'s shape; the M21 test "is
+invisible to `getAllBanks()`/`findBank()`" inverted to assert the
+opposite; new tests for the uniqueness check catching a Forth-created
+bank's name and for `ACTIVE` being present in both the returned `Bank`
+and the mirrored slot (the test that caught the second bug above).
+**Live-verified in the browser** via WebMCP: a fresh `Machine`'s
+`read_banks` showed `MMAP` at `1540` bytes with every other bank's base
+shifted down by 8; `4096 CREATE-BANK DAT1 .` printed `84916`; a
+follow-up `read_banks` and inspector-panel screenshot both showed
+`DAT1 DAT1 84916 4096` right alongside every host-created bank. Zero
+console errors.
+
+**Tests:** 219 engine tests total (218 before this milestone, 1 net
+new — several rewritten, not just added). 10 app tests and the full
+build unaffected — no Angular/UI changes.

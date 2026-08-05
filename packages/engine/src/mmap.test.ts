@@ -4,7 +4,7 @@ import { BankTable, BankFlagResident, BankFlagActive, BankFlagExternal } from '.
 import { MMAP_MAX_SLOTS, MMAP_SIZE, MMAP_TAG } from './mmap.js';
 import { Machine } from './repl.js';
 
-describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of truth', () => {
+describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, no cached state', () => {
   it('is created automatically as bank 0, absolute base 0', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const mmapBank = banks.findBank(MMAP_TAG)!;
@@ -15,7 +15,7 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
 
   it("registers itself as its own slot 0 — describes itself, no implicit exception", () => {
     const banks = new BankTable(new Arena(1 << 16));
-    expect(banks.mmap.getSlotCount()).toBe(1);
+    expect(banks.mmap.getAllSlots()).toHaveLength(1);
     const slot0 = banks.mmap.getSlot(0);
     expect(slot0).toEqual({
       tag: MMAP_TAG,
@@ -26,15 +26,16 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
     });
   });
 
-  it('header next-free tracks the real allocation cursor as banks are created', () => {
+  it('allocates sequential banks with no gaps and no overlaps, derived fresh each time — no cursor cell involved', () => {
     const banks = new BankTable(new Arena(1 << 16));
-    expect(banks.mmap.getNextFree()).toBe(MMAP_SIZE);
-
     const a = banks.createBank('DSTK', 64);
-    expect(banks.mmap.getNextFree()).toBe(a.base + a.size);
+    expect(a.base).toBe(MMAP_SIZE); // right after MMAP itself
 
     const b = banks.createBank('RSTK', 128);
-    expect(banks.mmap.getNextFree()).toBe(b.base + b.size);
+    expect(b.base).toBe(a.base + a.size); // right after a, no gap
+
+    const c = banks.createBank('DATA', 32);
+    expect(c.base).toBe(b.base + b.size); // right after b, no gap
   });
 
   it('mirrors every created bank into a slot, in creation order, matching getAllBanks() exactly', () => {
@@ -57,11 +58,12 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
     }
   });
 
-  it('respects a caller-supplied flags value, both host-side and mirrored', () => {
+  it('respects a caller-supplied flags value (ACTIVE always forced on regardless), both host-side and mirrored', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const bank = banks.createBank('SCRN', 64, 'EXTBANK', BankFlagExternal);
-    expect(bank.flags).toBe(BankFlagExternal);
-    expect(banks.mmap.getSlot(1).flags).toBe(BankFlagExternal);
+    const expectedFlags = BankFlagExternal | BankFlagActive;
+    expect(bank.flags).toBe(expectedFlags);
+    expect(banks.mmap.getSlot(1).flags).toBe(expectedFlags);
   });
 
   it('throws once all 64 slots are used, same as the real slot-full case', () => {
@@ -70,7 +72,7 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
     for (let i = 0; i < MMAP_MAX_SLOTS - 1; i++) {
       banks.createBank('DATA', 64);
     }
-    expect(banks.mmap.getSlotCount()).toBe(MMAP_MAX_SLOTS);
+    expect(banks.mmap.getAllSlots()).toHaveLength(MMAP_MAX_SLOTS);
     expect(() => banks.createBank('DATA', 64)).toThrow(/MMAP is full/);
   });
 
@@ -90,10 +92,11 @@ describe('MMAP (DEVELOPING.md §11, M19) — mirror only, not yet the source of 
   it('a slot is readable directly via raw @ from Forth source, matching BANK@ for the same bank', () => {
     const m = new Machine();
     const dict = m.banks.findBank('DICT')!;
-    // MMAP's own layout: header(12) + slotIndex*24, then tag(4)+name(8)
-    // lead into base at +12, size at +16, flags at +20 within a slot.
+    // MMAP's own layout (M22): header(4) + slotIndex*24, then
+    // tag(4)+name(8) lead into base at +12, size at +16, flags at +20
+    // within a slot.
     const dictSlotIndex = m.banks.getAllBanks().findIndex((b) => b.tag === 'DICT');
-    const slotAddr = 12 + dictSlotIndex * 24;
+    const slotAddr = 4 + dictSlotIndex * 24;
 
     m.interpret(`${slotAddr} 12 + @`); // base
     expect(m.stack.pop()).toBe(dict.base);
@@ -131,7 +134,7 @@ describe('MemoryMap.findBankAddr (DEVELOPING.md §12, M20) — BANK@\'s real loo
   });
 });
 
-describe('CREATE-BANK (DEVELOPING.md §13, M21) — Forth-side bank creation, no host round-trip', () => {
+describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank creation, no host round-trip, no cached state', () => {
   // Tags are conventionally exactly 4 characters throughout this
   // codebase (SYSV, DICT, DATA, ...) — the tag field is a fixed 4-byte
   // slot, so a longer tag silently truncates on write. Every tag below
@@ -147,34 +150,53 @@ describe('CREATE-BANK (DEVELOPING.md §13, M21) — Forth-side bank creation, no
     expect(m.stack.pop()).toBe(createdAddr);
   });
 
-  it("places the new bank right at MMAP's next-free offset, and advances it by exactly its size", () => {
+  it('places the new bank right after the current highest-extent active slot, derived fresh, not from a cached cursor', () => {
     const m = new Machine();
-    const before = m.banks.mmap.getNextFree();
+    const before = m.banks.getAllBanks();
+    const expectedBase = Math.max(...before.map((b) => b.base + b.size));
+
     m.interpret('256 CREATE-BANK SCR1');
     const addr = m.stack.pop();
+    expect(addr).toBe(expectedBase);
 
-    expect(addr).toBe(before);
-    expect(m.banks.mmap.getNextFree()).toBe(before + 256);
+    // A second creation lands right after the first, no gap.
+    m.interpret('64 CREATE-BANK SCR2');
+    const addr2 = m.stack.pop();
+    expect(addr2).toBe(addr + 256);
   });
 
   it('the created bank is real, usable memory — @ and ! round-trip at its address', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK SCR2');
+    m.interpret('64 CREATE-BANK SCR3');
     const addr = m.stack.pop();
 
     m.interpret(`42 ${addr} ! ${addr} @`);
     expect(m.stack.pop()).toBe(42);
   });
 
-  it('is invisible to BankTable.getAllBanks()/findBank() — the documented gap, not a silent regression', () => {
+  it('is now visible to BankTable.getAllBanks()/findBank() too — M22 closes the M21 visibility gap', () => {
     const m = new Machine();
     const before = m.banks.getAllBanks().length;
     m.interpret('128 CREATE-BANK GAP1');
+    const addr = m.stack.pop();
 
-    expect(m.banks.getAllBanks().length).toBe(before); // unchanged
-    expect(m.banks.findBank('GAP1')).toBeUndefined();
-    // ...yet BANK@ (M20, reads MMAP directly) sees it fine.
-    expect(() => m.interpret('BANK@ GAP1')).not.toThrow();
+    expect(m.banks.getAllBanks().length).toBe(before + 1);
+    expect(m.banks.findBank('GAP1')).toEqual({
+      tag: 'GAP1',
+      name: 'GAP1',
+      base: addr,
+      size: 128,
+      flags: BankFlagResident | BankFlagActive,
+    });
+    // BANK@ (M20, reads MMAP directly) agrees, as it already did before M22.
+    m.interpret('BANK@ GAP1');
+    expect(m.stack.pop()).toBe(addr);
+  });
+
+  it("createBank()'s name-uniqueness check now also catches a Forth-created bank's name (M22)", () => {
+    const m = new Machine();
+    m.interpret('64 CREATE-BANK DUPE');
+    expect(() => m.banks.createBank('DATA', 64, 'DUPE')).toThrow(/already exists/);
   });
 
   it('names the bank after its (truncated) tag — no auto-serial, matching DEVELOPING.md §13', () => {
@@ -190,7 +212,7 @@ describe('CREATE-BANK (DEVELOPING.md §13, M21) — Forth-side bank creation, no
     expect(slot.name).toBe('LONGNAMETAG'.slice(0, 8)); // BANK_NAME_LEN
   });
 
-  it('throws once MMAP itself is full, same as any other addBank() caller', () => {
+  it('throws once MMAP itself is full, same as any other allocate() caller', () => {
     const m = new Machine();
     // Machine already created 9 banks (MMAP + 8); fill the rest.
     const remaining = MMAP_MAX_SLOTS - m.banks.getAllBanks().length;

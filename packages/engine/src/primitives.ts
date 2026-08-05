@@ -684,12 +684,11 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13, M21
+    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13/§14, M21/M22
       const size = s.pop();
       const tag = ctx.nextInputToken().toUpperCase();
-      const base = ctx.banks.mmap.getNextFree();
-      ctx.banks.mmap.addBank(tag, tag, base, size, BankFlagResident | BankFlagActive);
-      s.push(base);
+      const slot = ctx.banks.mmap.allocate(tag, tag, size, BankFlagResident | BankFlagActive);
+      s.push(slot.base);
       break;
     }
 
