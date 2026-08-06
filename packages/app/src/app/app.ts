@@ -11,7 +11,7 @@ import {
   declareExperimentalWebMcpTool,
 } from '@angular/core';
 import { Machine, runStorageSelfTest, listDictionaryEntries, RemoteChannel } from '@rebel-sim/engine';
-import type { Bank, DictionaryEntry } from '@rebel-sim/engine';
+import type { Bank, DictionaryEntry, StepStatus } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
@@ -99,7 +99,11 @@ export class App implements AfterViewInit, OnDestroy {
   // still bounding worst-case per-frame work if that ever changes.
   private static readonly STEP_BUDGET = 2000;
 
-  // Guards against overlapping requestAnimationFrame chains.
+  // True while a requestAnimationFrame chain is actively running. The
+  // chain self-terminates (tick() below) once a frame finds nothing left
+  // to do, so this also doubles as "is the chain currently stopped" —
+  // wake() is the only thing allowed to restart it, from every call site
+  // that can give step() something to do again.
   private pumping = false;
 
   constructor(
@@ -253,6 +257,7 @@ export class App implements AfterViewInit, OnDestroy {
     }
     e.preventDefault();
     this.machine.keyboard.pushRawEvent(usageCode, pressed);
+    this.wake();
   }
 
   // M9 (WebMCP): registers this page's tools via Angular's own
@@ -292,6 +297,7 @@ export class App implements AfterViewInit, OnDestroy {
           },
           execute: ({ text }) => {
             remoteChannel.push(text);
+            this.wake();
             return `queued ${text.length} char(s)`;
           },
         },
@@ -389,6 +395,7 @@ export class App implements AfterViewInit, OnDestroy {
           },
           execute: ({ word }) => {
             machine.setBreakpoint(word);
+            this.wake();
             return `breakpoint set on ${word.toUpperCase()}`;
           },
         },
@@ -408,6 +415,7 @@ export class App implements AfterViewInit, OnDestroy {
           },
           execute: ({ word }) => {
             machine.clearBreakpoint(word);
+            this.wake();
             return `breakpoint cleared on ${word.toUpperCase()}`;
           },
         },
@@ -469,6 +477,7 @@ export class App implements AfterViewInit, OnDestroy {
   // it just guarantees change detection actually runs for this write.
   protected resumeFromBreakpoint(): void {
     this.zone.run(() => this.pausedWord.set(undefined));
+    this.wake();
   }
 
   // DEBUGGING.md (M10) UI: clicking a breakable dictionary word arms/
@@ -487,6 +496,7 @@ export class App implements AfterViewInit, OnDestroy {
     } else {
       this.machine.setBreakpoint(word.name);
     }
+    this.wake();
   }
 
   protected clearBreakpointByName(name: string): void {
@@ -534,6 +544,27 @@ export class App implements AfterViewInit, OnDestroy {
   private lastBankCount = 0;
   private lastBreakpointWords: ReadonlySet<string> = new Set();
 
+  // Restarts the requestAnimationFrame chain if tick() previously let it
+  // die from having nothing to do. Idempotent — safe to call from any
+  // event that *might* give step() something to do again, whether or not
+  // the chain is actually stopped right now, and safe to call from
+  // *inside* the Angular zone (toggleBreakpoint/resumeFromBreakpoint are
+  // template click handlers, which run there) — runOutsideAngular here
+  // is what keeps the whole reawakened chain off-zone, since zone.js
+  // callbacks otherwise run in whatever zone scheduled them, and every
+  // later tick() reschedules itself from inside its own prior call.
+  private wake(): void {
+    if (this.pumping) {
+      return;
+    }
+    this.pumping = true;
+    this.zone.runOutsideAngular(() => requestAnimationFrame(this.tick));
+  }
+
+  private startPump(): void {
+    this.wake();
+  }
+
   // Must be called from outside the Angular zone (ngAfterViewInit's call
   // site already is) — requestAnimationFrame callbacks scheduled there
   // stay outside it too, which is the point: no change detection runs on
@@ -544,85 +575,106 @@ export class App implements AfterViewInit, OnDestroy {
   // (PORTING-WEB.md §6) — the decoupled render cadence that section
   // originally called for, finally wired up as a side effect of fixing
   // the uneven-pixel-width bug (canvas-presenter.ts).
-  private startPump(): void {
-    if (this.pumping) {
+  //
+  // The chain is *not* unconditional: a frame that finds step() blocked
+  // (or skipped — paused at a breakpoint, or a storage op in flight) and
+  // none of the polled UI signals changed lets the chain die instead of
+  // scheduling another frame, rather than redrawing/diffing at 60Hz
+  // forever while the REPL just sits at an idle prompt (the measured
+  // source of persistent idle-tab CPU use). Every place that can make
+  // step() have something to do again calls wake() to restart it: a
+  // keystroke (handleKeyEvent), a WebMCP `type`/breakpoint call, the
+  // Continue button/debug_continue (resumeFromBreakpoint), and a
+  // resolved storage op (below).
+  private readonly tick = (): void => {
+    let status: StepStatus | undefined;
+    try {
+      if (this.pausedWord() === undefined && !this.storageInFlight()) {
+        status = this.machine.step(App.STEP_BUDGET);
+        if (status === 'breakpoint') {
+          const word = this.machine.pausedAtWord();
+          this.zone.run(() => this.pausedWord.set(word));
+        } else if (status === 'storage') {
+          // runPendingStorage() never rejects (repl.ts: a real failure
+          // is captured into pendingStorageError and re-raised through
+          // the *generator's* own error path on the next step() call
+          // instead, which is what replLoop's `? <message>` handling
+          // actually catches) — no .catch() needed here.
+          this.zone.run(() => this.storageInFlight.set(true));
+          void this.machine.runPendingStorage().then(() => {
+            this.zone.run(() => this.storageInFlight.set(false));
+            this.wake();
+          });
+        }
+      }
+    } catch (e) {
+      // The on-screen REPL loop (replLoop) catches and prints ordinary
+      // Forth errors itself and keeps running — reaching here means
+      // something escaped that, a real engine bug rather than a user
+      // mistake. Nothing left to drive the page with; surface it loudly.
+      this.pumping = false;
+      console.error('Rebel-Sim REPL loop crashed', e);
       return;
     }
-    this.pumping = true;
-
-    const tick = (): void => {
-      try {
-        if (this.pausedWord() === undefined && !this.storageInFlight()) {
-          const status = this.machine.step(App.STEP_BUDGET);
-          if (status === 'breakpoint') {
-            const word = this.machine.pausedAtWord();
-            this.zone.run(() => this.pausedWord.set(word));
-          } else if (status === 'storage') {
-            // runPendingStorage() never rejects (repl.ts: a real failure
-            // is captured into pendingStorageError and re-raised through
-            // the *generator's* own error path on the next step() call
-            // instead, which is what replLoop's `? <message>` handling
-            // actually catches) — no .catch() needed here.
-            this.zone.run(() => this.storageInFlight.set(true));
-            void this.machine
-              .runPendingStorage()
-              .then(() => this.zone.run(() => this.storageInFlight.set(false)));
-          }
-        }
-      } catch (e) {
-        // The on-screen REPL loop (replLoop) catches and prints ordinary
-        // Forth errors itself and keeps running — reaching here means
-        // something escaped that, a real engine bug rather than a user
-        // mistake. Nothing left to drive the page with; surface it loudly.
-        this.pumping = false;
-        console.error('Rebel-Sim REPL loop crashed', e);
-        return;
-      }
-      if (this.presentCtx) {
-        const canvas = this.screenRef.nativeElement;
-        this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
-      }
-      const current = this.machine.stack.toArray();
-      if (!arraysEqual(current, this.lastStackSnapshot)) {
-        this.lastStackSnapshot = current;
-        this.zone.run(() => this.stack.set(current));
-      }
-      const currentRStack = this.machine.rstack.toArray();
-      if (!arraysEqual(currentRStack, this.lastRStackSnapshot)) {
-        this.lastRStackSnapshot = currentRStack;
-        this.zone.run(() => this.returnStack.set(currentRStack));
-      }
-      // New definitions only ever append to LATEST — comparing the
-      // address is a cheap enough guard to avoid re-walking the whole
-      // dictionary chain (listDictionaryEntries) on every frame.
-      const latestAddr = this.machine.sysvars.getLatest();
-      if (latestAddr !== this.lastLatestAddr) {
-        this.lastLatestAddr = latestAddr;
-        const entries = listDictionaryEntries(this.machine);
-        this.zone.run(() => this.dictionaryWords.set(entries));
-      }
-      // Banks are effectively boot-fixed today (M8's vocabulary has no
-      // way to create one at runtime), but diff by count anyway rather
-      // than assuming that stays true, matching the other two guards.
-      const bankCount = this.machine.banks.getAllBanks().length;
-      if (bankCount !== this.lastBankCount) {
-        this.lastBankCount = bankCount;
-        const banks = this.machine.banks.getAllBanks();
-        this.zone.run(() => this.bankTable.set(banks));
-      }
-      // DEBUGGING.md (M10) UI: one diff-and-set path for breakpointWords
-      // regardless of whether a breakpoint was armed from this UI
-      // (toggleBreakpoint) or a WebMCP debug_set_breakpoint call — same
-      // reasoning as the dictionary/bank guards above.
-      const currentBreakpoints = new Set(this.machine.listBreakpoints());
-      if (!setsEqual(currentBreakpoints, this.lastBreakpointWords)) {
-        this.lastBreakpointWords = currentBreakpoints;
-        this.zone.run(() => this.breakpointWords.set(currentBreakpoints));
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }
+    if (this.presentCtx) {
+      const canvas = this.screenRef.nativeElement;
+      this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
+    }
+    let changed = false;
+    const current = this.machine.stack.toArray();
+    if (!arraysEqual(current, this.lastStackSnapshot)) {
+      this.lastStackSnapshot = current;
+      this.zone.run(() => this.stack.set(current));
+      changed = true;
+    }
+    const currentRStack = this.machine.rstack.toArray();
+    if (!arraysEqual(currentRStack, this.lastRStackSnapshot)) {
+      this.lastRStackSnapshot = currentRStack;
+      this.zone.run(() => this.returnStack.set(currentRStack));
+      changed = true;
+    }
+    // New definitions only ever append to LATEST — comparing the
+    // address is a cheap enough guard to avoid re-walking the whole
+    // dictionary chain (listDictionaryEntries) on every frame.
+    const latestAddr = this.machine.sysvars.getLatest();
+    if (latestAddr !== this.lastLatestAddr) {
+      this.lastLatestAddr = latestAddr;
+      const entries = listDictionaryEntries(this.machine);
+      this.zone.run(() => this.dictionaryWords.set(entries));
+      changed = true;
+    }
+    // Banks are effectively boot-fixed today (M8's vocabulary has no
+    // way to create one at runtime), but diff by count anyway rather
+    // than assuming that stays true, matching the other two guards.
+    const bankCount = this.machine.banks.getAllBanks().length;
+    if (bankCount !== this.lastBankCount) {
+      this.lastBankCount = bankCount;
+      const banks = this.machine.banks.getAllBanks();
+      this.zone.run(() => this.bankTable.set(banks));
+      changed = true;
+    }
+    // DEBUGGING.md (M10) UI: one diff-and-set path for breakpointWords
+    // regardless of whether a breakpoint was armed from this UI
+    // (toggleBreakpoint) or a WebMCP debug_set_breakpoint call — same
+    // reasoning as the dictionary/bank guards above.
+    const currentBreakpoints = new Set(this.machine.listBreakpoints());
+    if (!setsEqual(currentBreakpoints, this.lastBreakpointWords)) {
+      this.lastBreakpointWords = currentBreakpoints;
+      this.zone.run(() => this.breakpointWords.set(currentBreakpoints));
+      changed = true;
+    }
+    // 'more-to-run' means step() hit its budget mid-line and genuinely
+    // needs another frame to keep making progress; every other status
+    // (including having been skipped entirely while paused/storage-in-
+    // flight) means step() itself has nothing pending until some other
+    // event calls wake() — so only keep scheduling frames if something
+    // was actually pending or actually changed.
+    if (status !== 'more-to-run' && !changed) {
+      this.pumping = false;
+      return;
+    }
+    requestAnimationFrame(this.tick);
+  };
 }
 
 function arraysEqual(a: number[], b: number[]): boolean {
