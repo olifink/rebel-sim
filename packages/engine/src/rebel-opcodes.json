@@ -215,8 +215,11 @@
     },
     "STORAGE": {
       "baseOffset": 320,
-      "note": "matches src/sysvars.h's SYSVARS_STORAGE_OFFSET (0x140). Reserved, populated when M5 lands.",
-      "fields": {},
+      "note": "matches src/sysvars.h's SYSVARS_STORAGE_OFFSET (0x140). MOUNTED(0)/LAST-ERROR(4)/DEVICE-SEEN(8) reserved by spec/01-HAL.md §6.6 but not yet implemented — PROJECT-NAME-0/1 appended after them, not renumbering.",
+      "fields": {
+        "PROJECT-NAME-0": { "offset": 12, "note": "chars 0-3 of the current project's 8-char name, NUL-padded ASCII packed 4-per-cell (same convention as bank tag/name fields, mmap.ts) — not Rebel-ROM's on-disk space-padded FAT-8.3 convention, a different layer. All-zero = unnamed project." },
+        "PROJECT-NAME-1": { "offset": 16, "note": "chars 4-7 of the current project's name — see PROJECT-NAME-0." }
+      },
       "groupSizeBytes": 64
     },
     "FORTH": {

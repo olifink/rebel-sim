@@ -2580,3 +2580,125 @@ visibly moves after implementing.
   moment in time. Not a bug — `SP@`'s whole point is reading the
   pointer live, and a line with two stack-pointer words in sequence
   will always see it move between them, same as any other stack word.
+
+## 22. `PROJECT`/`SAVE`/`RESTORE` — naming, saving, and restoring a whole session — done, M29
+
+### Motivation
+
+Asked directly: name the current project, save every bank to storage,
+restore a previously-saved project — the actual "save my work"/"load
+my work" mechanic the simulator never had. `runStorageSelfTest()`
+proved the storage pipe works end-to-end, but nothing let a real
+session round-trip.
+
+Grounding this in `spec/01-HAL.md` §6 and `spec/02-MEMORY-MODEL.md`
+(as asked) surfaced three real, pre-existing gaps, fixed as part of
+this milestone rather than separately: `storage.ts`'s
+`TAG_TO_EXTENSION` covered only 5 of the spec's 13 tags (`SYSV`/
+`DSTK`/`RSTK`/`CHAR`/`KMAP`/`MMAP`/`TIB`/`PAD` were all missing, so a
+whole-session save could never actually persist a whole session);
+`openProject` had no `MMAP`-first two-phase restore (`§6.3.1`), so it
+could never reproduce a project's exact original bank layout; and
+there was nowhere to record which project is open, and no documented
+convention for one anywhere in this suite or `rebel-rom`.
+
+### Design decisions
+
+- **`RESTORE`, not `LOAD`.** `CORE-VOCABULARY.md` §11 already reserves
+  `LOAD` for a distinct future feature (screen-source interpretation —
+  reading a `SCRS` bank's contents as Forth source). Using it here
+  would squat on that name.
+- **Project name lives in two new `STORAGE`-group sysvar fields,**
+  `PROJECT-NAME-0`/`PROJECT-NAME-1` (offsets 12/16, appended after the
+  three the spec already reserves there) — 8 ASCII bytes, NUL-padded,
+  packed 4-per-cell, the same in-arena convention `mmap.ts` already
+  uses for a bank's own `tag`/`name` fields (not Rebel-ROM's on-disk,
+  space-padded FAT-8.3 convention — a different layer). All-zero =
+  unnamed project, the fresh-boot default. Documented in
+  `spec/03-SYSVARS.md` §10, not just implemented — the spec is the
+  source of truth this whole suite is built against.
+- **`PROJECT`/`SAVE`/`RESTORE` are special outer-loop syntax in
+  `interpretExecuting`** (`repl.ts`), exactly like `;`/`IMMEDIATE`
+  already are — never dictionary entries, so never usable inside a
+  colon-definition, never reachable via `EXECUTE` or `'`. Since
+  `interpretExecuting` only ever runs outside compiling mode by
+  construction, this alone satisfies `spec/01-HAL.md` §6.2's "storage
+  I/O must never happen synchronously inside a running Forth word,"
+  with no extra guard code needed.
+- **Async storage gets one new `StepSignal`, `'storage'`** — the same
+  suspend/resume shape M7's blocking `KEY` already established.
+  `SAVE`/`RESTORE` queue a `{ op, project }` request and yield
+  `'storage'`; `step()` returns `'storage'` immediately (never
+  busy-spins, same reasoning as `'blocked'`/`'breakpoint'`); the host
+  calls the new `Machine.runPendingStorage()`, awaits the real
+  `Storage` call, then resumes stepping.
+- **A storage failure surfaces through the generator's own error
+  path, not a disconnected promise rejection.** `runPendingStorage()`
+  never rejects — it catches internally and stores the error in
+  `pendingStorageError`; `SAVE`/`RESTORE`'s case re-checks that right
+  after resuming past `yield 'storage'` and throws it *there*, so it
+  reaches `replLoop()`'s existing `? <message>`-and-continue handling
+  (or `step()`'s propagate-and-clear contract for a programmatic
+  caller) — the same path any other line error already takes, not a
+  new one.
+- **Full `§6.3.1` fidelity, no new bump-allocator-bypass primitive
+  needed.** `MMAP` is arena-resident and `MemoryMap` caches nothing
+  (`mmap.ts`'s own design), so phase 1 is just: if an `MMAP.MAP` asset
+  is present, overwrite the live `MMAP` bank's raw bytes with it —
+  every subsequent `findBankByName()`/`getAllSlots()` call immediately
+  reflects the restored table, reactivating any extra (e.g.
+  `CREATE-BANK`'d) banks at their exact original bases for free. Phase
+  2 then matches every other asset file to a slot via
+  `findBankByName()` and writes its payload directly at that bank's
+  now-fixed location, falling back to today's fresh-`createBank()`
+  behavior only when no match exists (no `MMAP.MAP` at all, or an
+  older/partial save) — unchanged from before this milestone.
+- **`Screen.redrawAll()`** — a `RESTORE` overwrites `CHAR` bytes
+  directly, bypassing the normal per-character HAL write-through every
+  other write goes through, so nothing else would repaint the visible
+  canvas. Walks every cell and re-blits from `CHAR` content, the same
+  "CHAR content is always enough to redraw correctly" precedent
+  `redrawCursorAt` already established for one cell — this is also the
+  mechanism `spec/02-MEMORY-MODEL.md` §6.2 names for a future
+  arena-attach ("repointing the shared screen surface ... and
+  redrawing from it"), built now because `RESTORE` is the first real
+  caller.
+- **`WARM`/`COLD` deliberately out of scope.** `Machine`'s fields
+  (`arena`, `banks`, `stack`, ...) are `readonly`, built once in the
+  constructor — a true in-place cold reset needs its own focused pass,
+  not a side effect of this one. Nothing here blocks that follow-up.
+
+### What shipped
+
+`rebel-opcodes.json`'s `STORAGE` sysvar group gained `PROJECT-NAME-0`/
+`PROJECT-NAME-1`; `Sysvars` gained `getProjectName()`/`setProjectName()`
+(pack/unpack once, not at every call site). `inner.ts`'s `StepSignal`
+and `repl.ts`'s `StepStatus` both gained `'storage'`; `Machine` gained
+a `pendingStorage`/`pendingStorageError` pair and `runPendingStorage()`.
+`interpretExecuting` gained the three-word grammar. `storage.ts`'s
+`TAG_TO_EXTENSION` now covers all 13 spec tags; `openProject` now
+implements the full two-phase restore. `screen.ts` gained `redrawAll()`.
+`packages/app/src/app/app.ts`'s `tick()` gained a `storageInFlight`
+signal gating `step()` the same way `pausedWord` already does, and a
+branch that awaits `runPendingStorage()` on a `'storage'` status.
+
+### Tests
+
+`sysvars.test.ts` (new): `getProjectName`/`setProjectName` round-trip,
+truncation past 8 characters, NUL-padding on a shorter overwrite,
+per-cell addressability. `storage.test.ts`: the tag-with-no-extension
+test switched from `SYSV` (now mapped) to `CART` (still unmapped,
+`spec/02-MEMORY-MODEL.md` §4.6, no consumer yet); two new tests —
+a full `Machine`-to-`Machine` round trip confirming every standard
+bank plus a `CREATE-BANK`'d extra bank lands at its exact original
+base, and confirming the no-`MMAP.MAP` fallback path is unchanged.
+`screen.test.ts`: `redrawAll()` re-blits every cell from `CHAR`
+content without mutating it. `project.test.ts` (new): the full
+`PROJECT`/`SAVE`/`RESTORE` grammar end to end — `step()` pausing on
+`'storage'` and resuming `'idle'`, a fresh `Machine` recovering a
+previously-defined word and restored screen content via `RESTORE`,
+`SAVE` with no project name set throwing without leaving the REPL
+stuck, a storage failure surfacing through `step()` like any other
+line error, and `PROJECT`/`SAVE` both being rejected (as "unrecognized
+word," the same as any non-dictionary syntax) inside a colon-definition.
+Full engine suite: 275 passed (259 before this milestone, 16 new).

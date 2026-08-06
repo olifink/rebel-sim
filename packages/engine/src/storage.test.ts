@@ -145,7 +145,11 @@ describe('Storage', () => {
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, memoryHal());
-    const bank = banks.createBank('SYSV', 64);
+    // CART (spec/02-MEMORY-MODEL.md §4.6) is a real bank tag, but not
+    // one spec/01-HAL.md §6.3's tag<->extension table maps yet — unlike
+    // SYSV/DSTK/RSTK/CHAR/KMAP/MMAP/TIB/PAD, which this module's
+    // TAG_TO_EXTENSION now covers (M29).
+    const bank = banks.createBank('CART', 64);
     await expect(storage.saveAsset('P', bank)).rejects.toThrow(/no known asset file extension/);
   });
 
@@ -165,6 +169,73 @@ describe('Storage', () => {
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, memoryHal());
     expect(await storage.loadCart('NOPE')).toBeUndefined();
+  });
+});
+
+describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, M29)', () => {
+  it('restores the 8 standard banks plus an extra CREATE-BANKd bank at their exact original bases', async () => {
+    const hal = memoryHal();
+
+    const m1 = new Machine({ storageHal: hal });
+    m1.interpret(': FOO 42 ;');
+    m1.interpret('64 CREATE-BANK DATA');
+    const extraAddr = m1.stack.pop();
+    m1.arena.writeByte(extraAddr, 77);
+    const extraBank = m1.banks.getAllBanks().find((b) => b.tag === 'DATA');
+    expect(extraBank).toBeDefined();
+
+    // Mirrors what Machine.runPendingStorage()'s 'save' branch does —
+    // every active bank, in MMAP slot order, MMAP included.
+    for (const bank of m1.banks.getAllBanks()) {
+      await m1.storage.saveAsset('EXACTPRJ', bank);
+    }
+
+    const m2 = new Machine({ storageHal: hal });
+    const restored = await m2.storage.openProject('EXACTPRJ');
+
+    // Every standard bank's base is unchanged (deterministic given the
+    // same boot constants — restoring MMAP's bytes reproduces values
+    // m2 already had), and the extra bank now exists at m1's exact
+    // recorded base, not a freshly bump-allocated one.
+    const m2Extra = m2.banks.findBankByName(extraBank!.name);
+    expect(m2Extra).toBeDefined();
+    expect(m2Extra!.base).toBe(extraBank!.base);
+    expect(m2Extra!.tag).toBe('DATA');
+    expect(m2.arena.readByte(m2Extra!.base)).toBe(77);
+
+    for (const tag of ['SYSV', 'DSTK', 'RSTK', 'DICT', 'CHAR', 'KMAP', 'TIB', 'PAD', 'MMAP']) {
+      const original = m1.banks.findBank(tag);
+      const reloaded = m2.banks.findBank(tag);
+      expect(reloaded!.base).toBe(original!.base);
+      expect(reloaded!.size).toBe(original!.size);
+    }
+
+    // The dictionary content itself round-tripped — FOO is callable on
+    // the fresh machine without ever being defined there directly.
+    m2.interpret('FOO');
+    expect(m2.stack.pop()).toBe(42);
+
+    expect(restored.length).toBeGreaterThan(0);
+  });
+
+  it('falls back to fresh bump-allocated banks when no MMAP.MAP asset is present (today\'s baseline, unchanged)', async () => {
+    const hal = memoryHal();
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, hal);
+    const bank = banks.createBank('DATA', 64, 'PLAINBNK'); // BANK_NAME_LEN = 8
+    await storage.saveAsset('NOMAP', bank); // MMAP itself never saved
+
+    const readArena = new Arena(1 << 16);
+    const readBanks = new BankTable(readArena);
+    const readStorage = new Storage(readArena, readBanks, hal);
+    const loaded = await readStorage.openProject('NOMAP');
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].name).toBe('PLAINBNK');
+    // Bump-allocated fresh (not reusing bank.base — readBanks has no
+    // MMAP asset to restore an exact base from).
+    expect(loaded[0].size).toBe(4096);
   });
 });
 

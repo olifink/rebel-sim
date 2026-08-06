@@ -104,4 +104,36 @@ export class Sysvars {
   setLatest(value: number): void {
     this.setUnsigned('FORTH', 'LATEST', value);
   }
+
+  /** The current project's 8-char name (`spec/03-SYSVARS.md` §10),
+   * NUL-padded ASCII packed 4-per-cell across `PROJECT-NAME-0/1` — the
+   * same in-arena convention `mmap.ts` uses for bank `tag`/`name`, not
+   * Rebel-ROM's on-disk space-padded FAT-8.3 convention (a different
+   * layer). Empty string = unnamed project (all-zero cells, the fresh-
+   * boot default). */
+  getProjectName(): string {
+    const c0 = this.getUnsigned('STORAGE', 'PROJECT-NAME-0');
+    const c1 = this.getUnsigned('STORAGE', 'PROJECT-NAME-1');
+    let out = '';
+    for (const cell of [c0, c1]) {
+      for (let i = 0; i < 4; i++) {
+        const code = (cell >>> (i * 8)) & 0xff;
+        if (code === 0) return out;
+        out += String.fromCharCode(code);
+      }
+    }
+    return out;
+  }
+
+  setProjectName(name: string): void {
+    const truncated = name.slice(0, 8);
+    const cells = [0, 0];
+    for (let i = 0; i < truncated.length; i++) {
+      const cellIndex = i < 4 ? 0 : 1;
+      const byteIndex = i % 4;
+      cells[cellIndex] |= truncated.charCodeAt(i) << (byteIndex * 8);
+    }
+    this.setUnsigned('STORAGE', 'PROJECT-NAME-0', cells[0] >>> 0);
+    this.setUnsigned('STORAGE', 'PROJECT-NAME-1', cells[1] >>> 0);
+  }
 }

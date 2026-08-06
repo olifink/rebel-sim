@@ -216,6 +216,29 @@ export class Screen {
     this.setCursor(0, 0);
   }
 
+  /** Repaints every cell of the visible framebuffer purely from CHAR
+   * bank content — `redrawCursorAt`'s own "CHAR content is always
+   * enough to redraw correctly" precedent (`CScreenModule::Redraw()`),
+   * extended to the whole grid instead of one cell. Needed whenever
+   * something has overwritten CHAR bytes directly, bypassing the
+   * normal per-character HAL write-through every other write in this
+   * class goes through — today, only `RESTORE`'s project-load (M29,
+   * `repl.ts`), but this is also the mechanism `02-MEMORY-MODEL.md`
+   * §6.2 names for a future arena-attach ("repointing the shared
+   * screen surface at that arena's own CHAR bank and redrawing from
+   * it"). Never touches CHAR itself, same as `redrawCursorAt`. */
+  redrawAll(): void {
+    const cursorVisible = this.isCursorVisible();
+    const cursorCol = this.getCursorCol();
+    const cursorRow = this.getCursorRow();
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        const inverted = cursorVisible && col === cursorCol && row === cursorRow;
+        this.redrawCursorAt(col, row, inverted);
+      }
+    }
+  }
+
   /** Reads one row as a plain string — a diagnostics/test convenience,
    * not something Rebel-ROM exposes (no string type at this layer). */
   readRowText(row: number): string {

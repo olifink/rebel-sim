@@ -53,6 +53,14 @@ export class App implements AfterViewInit, OnDestroy {
   // their call sites for why neither needs to special-case being
   // in/outside the Angular zone.
   protected readonly pausedWord = signal<string | undefined>(undefined);
+  // M29 (project mechanics, repl.ts): `true` while a SAVE/RESTORE's
+  // queued storage operation is being awaited — gates tick()'s step()
+  // calls the same way pausedWord does, since step() won't advance
+  // past the 'storage' pause point until runPendingStorage() clears it
+  // (spec/01-HAL.md §6.2: storage I/O never happens synchronously
+  // inside the interpreter's own dispatch, so something outside it has
+  // to actually await the real async call).
+  protected readonly storageInFlight = signal(false);
   // Currently-armed breakpoint names — polled/diffed in tick() exactly
   // like dictionaryWords/bankTable below, so it stays correct whether a
   // breakpoint was armed from this UI (toggleBreakpoint) or from a
@@ -544,11 +552,21 @@ export class App implements AfterViewInit, OnDestroy {
 
     const tick = (): void => {
       try {
-        if (this.pausedWord() === undefined) {
+        if (this.pausedWord() === undefined && !this.storageInFlight()) {
           const status = this.machine.step(App.STEP_BUDGET);
           if (status === 'breakpoint') {
             const word = this.machine.pausedAtWord();
             this.zone.run(() => this.pausedWord.set(word));
+          } else if (status === 'storage') {
+            // runPendingStorage() never rejects (repl.ts: a real failure
+            // is captured into pendingStorageError and re-raised through
+            // the *generator's* own error path on the next step() call
+            // instead, which is what replLoop's `? <message>` handling
+            // actually catches) — no .catch() needed here.
+            this.zone.run(() => this.storageInFlight.set(true));
+            void this.machine
+              .runPendingStorage()
+              .then(() => this.zone.run(() => this.storageInFlight.set(false)));
           }
         }
       } catch (e) {

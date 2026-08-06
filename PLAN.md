@@ -2629,3 +2629,40 @@ console errors.
 **Tests:** 219 engine tests total (218 before this milestone, 1 net
 new — several rewritten, not just added). 10 app tests and the full
 build unaffected — no Angular/UI changes.
+
+## M29 — `PROJECT`/`SAVE`/`RESTORE`: naming, saving, and restoring a whole session — done
+
+Note: this log jumps from M22 straight to M29 — M23-M28 shipped and are
+fully documented in `DEVELOPING.md` §§15-21, just never copied back
+into this file's own per-milestone write-ups. Not backfilled here
+(out of scope for this milestone); flagged so a future reader isn't
+confused by the gap, same "found and closed" discipline `DEVELOPING.md`
+§19 already models for a different kind of drift.
+
+Full design/motivation/decisions/verification: `DEVELOPING.md` §22.
+Short version: `PROJECT name` sets the current project (a new 2-cell,
+8-char `STORAGE`-group sysvar, `spec/03-SYSVARS.md` §10); `SAVE`
+writes every active bank — `MMAP` included — to `/PROJECTS/<name>/`;
+`RESTORE name` implements `spec/01-HAL.md` §6.3.1's real `MMAP`-first
+two-phase restore, reproducing a project's exact original bank layout
+(bases, extra `CREATE-BANK`'d banks and all) with no new bump-allocator-
+bypass primitive needed — `MMAP` is arena-resident and caches nothing,
+so overwriting its raw bytes is enough. `storage.ts`'s tag↔extension
+table also grew from 5 to the spec's full 13 entries (`SYSV`/`DSTK`/
+`RSTK`/`CHAR`/`KMAP`/`MMAP`/`TIB`/`PAD` were all missing before this —
+a real, pre-existing gap, not introduced here). Async storage I/O gets
+one new `StepSignal`/`StepStatus`, `'storage'` — same suspend/resume
+shape M7's blocking `KEY` established, host-driven via the new
+`Machine.runPendingStorage()`. `RESTORE` also required a new
+`Screen.redrawAll()`, since it overwrites `CHAR` bytes directly,
+bypassing the normal per-character HAL write-through nothing else
+would otherwise repaint from. `WARM`/`COLD` deliberately deferred —
+`Machine`'s fields are `readonly`, a real cold-reset needs its own
+focused pass.
+
+**Tests:** 275 engine tests total (259 before this milestone, 16 new:
+a new `sysvars.test.ts`, a new `project.test.ts`, two more in
+`storage.test.ts`, one more in `screen.test.ts`). App build unaffected
+(`app.ts`'s `tick()` gained a `storageInFlight`-gated branch for the
+new `'storage'` status, same shape as its existing `'breakpoint'`
+handling — no test suite changes needed there).

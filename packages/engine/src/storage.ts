@@ -38,6 +38,7 @@
 
 import { Arena } from './arena.js';
 import { Bank, BankTable, roundToSizeClass } from './banks.js';
+import { MMAP_TAG } from './mmap.js';
 
 const PROJECTS_ROOT = '/PROJECTS';
 const CARTS_ROOT = '/CARTS';
@@ -46,13 +47,28 @@ const ASSET_MAGIC_0 = 'R'.charCodeAt(0);
 const ASSET_MAGIC_1 = 'A'.charCodeAt(0);
 const ASSET_HEADER_SIZE = 6; // magic(2) + tag(4)
 
-// docs/STORAGE.md §8's real tag<->extension table.
+// spec/01-HAL.md §6.3's full tag<->extension table — every bank tag
+// spec/02-MEMORY-MODEL.md §4.6 defines gets an entry, not just the
+// "ordinary content asset" ones (SCRN/FONT/SPRT/DICT/DATA): CHAR/KMAP/
+// SYSV/DSTK/RSTK are live session state, and MMAP/TIB/PAD are included
+// for uniformity of the mechanism (§6.3's own reasoning) even though
+// their content isn't normally meaningful to reload on its own — MMAP
+// specifically is what makes the two-phase restore below possible at
+// all (§6.3.1).
 const TAG_TO_EXTENSION: Readonly<Record<string, string>> = {
   SCRN: 'SCR',
   FONT: 'FNT',
   SPRT: 'SPR',
   DICT: 'DCT',
   DATA: 'DAT',
+  CHAR: 'CHR',
+  KMAP: 'KMP',
+  SYSV: 'SYS',
+  DSTK: 'DST',
+  RSTK: 'RST',
+  MMAP: 'MAP',
+  TIB: 'TIB',
+  PAD: 'PAD',
 };
 const EXTENSION_TO_TAG: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(TAG_TO_EXTENSION).map(([tag, ext]) => [ext, tag]),
@@ -99,18 +115,61 @@ export class Storage {
     return `${CARTS_ROOT}/${cartName}.CRT`;
   }
 
-  /** Scans /PROJECTS/<name>/ and loads every recognized asset file into
-   * a freshly created bank named after its own basename
-   * (docs/STORAGE.md §6). Files with an unrecognized extension, or a
-   * payload too large for any size class, are skipped rather than
-   * aborting the whole open (matches `LoadAssetFile`). Returns the
-   * banks it created, in directory-listing order. */
+  /** Scans /PROJECTS/<name>/ and loads every recognized asset file.
+   * Two-phase whenever an MMAP.MAP asset is present (spec/01-HAL.md
+   * §6.3.1 — MMAP is the arena's own bank table, so restoring it
+   * *first* reconstructs the exact original layout, bases and all,
+   * rather than a plausible-looking one re-derived from whichever
+   * files happen to be present):
+   *
+   *   1. Layout restore: overwrite the live MMAP bank's raw bytes with
+   *      the asset's payload. `MemoryMap` (mmap.ts) caches nothing —
+   *      every subsequent lookup immediately reflects the restored
+   *      table, so no separate bump-allocator-bypass primitive is
+   *      needed. This also reactivates any extra (e.g. CREATE-BANK'd)
+   *      banks the original project had at their exact recorded bases,
+   *      content still pending until phase 2.
+   *   2. Content restore: every other recognized file is matched by
+   *      (tag, basename) against the just-restored table
+   *      (`findBankByName`) and written directly into that bank's
+   *      already-fixed location (zero-padded if short; skipped, not
+   *      fatal, if too large for the recorded slot). A file with no
+   *      match — no MMAP.MAP was present at all, or this file isn't
+   *      covered by the one that was (an older or partial save) —
+   *      falls back to creating a fresh bank, bump-allocated, sized
+   *      from the payload: today's baseline behavior, unchanged.
+   *
+   * Files with an unrecognized extension, or a payload too large for
+   * any size class in the fresh-create fallback, are skipped rather
+   * than aborting the whole open (matches `LoadAssetFile`). Returns
+   * every bank it created or restored, MMAP first when restored. */
   async openProject(projectName: string): Promise<Bank[]> {
     const dir = this.projectDir(projectName);
     const files = await this.hal.listFiles(dir);
     const loaded: Bank[] = [];
 
+    const mmapExt = TAG_TO_EXTENSION[MMAP_TAG];
+    const mmapFile = files.find((f) => f.toUpperCase() === `${MMAP_TAG}.${mmapExt}`);
+    const mmapBank = mmapFile ? this.banks.findBank(MMAP_TAG, MMAP_TAG) : undefined;
+    let mmapRestored = false;
+
+    if (mmapFile && mmapBank) {
+      const bytes = await this.hal.readFile(`${dir}/${mmapFile}`);
+      if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
+        const payload = bytes.subarray(ASSET_HEADER_SIZE);
+        if (payload.length <= mmapBank.size) {
+          for (let i = 0; i < mmapBank.size; i++) {
+            this.arena.writeByte(mmapBank.base + i, i < payload.length ? payload[i] : 0);
+          }
+          mmapRestored = true;
+          loaded.push(mmapBank);
+        }
+      }
+    }
+
     for (const file of files) {
+      if (file === mmapFile) continue; // MMAP itself: handled above, phase 1
+
       const dot = file.lastIndexOf('.');
       if (dot < 0) continue;
       const tag = EXTENSION_TO_TAG[file.slice(dot + 1).toUpperCase()];
@@ -118,12 +177,25 @@ export class Storage {
 
       const bytes = await this.hal.readFile(`${dir}/${file}`);
       if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue; // short/missing read aborts this file
-
       const payload = bytes.subarray(ASSET_HEADER_SIZE);
+      const basename = file.slice(0, dot).toUpperCase();
+
+      if (mmapRestored) {
+        const bank = this.banks.findBankByName(basename);
+        if (bank) {
+          if (payload.length > bank.size) continue; // too large for the recorded slot — skip, not fatal
+          for (let i = 0; i < bank.size; i++) {
+            this.arena.writeByte(bank.base + i, i < payload.length ? payload[i] : 0);
+          }
+          loaded.push(bank);
+          continue;
+        }
+        // No matching slot in the restored table (older/partial save) —
+        // fall through to the fresh-create fallback below.
+      }
+
       const size = roundToSizeClass(payload.length);
       if (size === undefined) continue; // larger than any size class — skip, don't crash
-
-      const basename = file.slice(0, dot).toUpperCase();
       const bank = this.banks.createBank(tag, size, basename);
       for (let i = 0; i < payload.length; i++) {
         this.arena.writeByte(bank.base + i, payload[i]);

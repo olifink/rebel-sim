@@ -26,6 +26,23 @@ describe('Screen', () => {
     expect(() => m.interpret('9999 9999 65 CHAR!')).not.toThrow();
   });
 
+  it('redrawAll() repaints every cell purely from CHAR bank content, without writing CHAR itself (M29)', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    // A byte straight into CHAR, bypassing writeChar()'s own HAL
+    // write-through — the same shape a project RESTORE leaves behind.
+    const charBase = m.banks.findBank('CHAR')!.base;
+    m.arena.writeByte(charBase, 72); // 'H' at (0,0)
+    hal.blitGlyph.mockClear();
+
+    m.screen.redrawAll();
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 72, 0x00ff00, 0x000000);
+    expect(hal.blitGlyph).toHaveBeenCalledTimes(m.screen.cols * m.screen.rows);
+    // Never mutates CHAR — a pure repaint.
+    expect(m.screen.readChar(0, 0)).toBe(72);
+  });
+
   it('EMIT wraps to the next row at the end of a row, and to row 0 at the bottom — no scrolling', () => {
     const m = new Machine();
     const { cols, rows } = m.screen;

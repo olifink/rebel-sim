@@ -245,6 +245,8 @@ Base `0x140`, 64 bytes reserved. Field meanings: `01-HAL.md` §6.6.
 | 0 | `MOUNTED` | OPTIONAL |
 | 4 | `LAST-ERROR` | OPTIONAL |
 | 8 | `DEVICE-SEEN` | OPTIONAL |
+| 12 | `PROJECT-NAME-0` | OPTIONAL |
+| 16 | `PROJECT-NAME-1` | OPTIONAL |
 
 Per `01-HAL.md` §6.6, these three are plain diagnostic scalars a
 subsystem sets, not values using the HAL boolean convention
@@ -252,6 +254,20 @@ subsystem sets, not values using the HAL boolean convention
 them in Forth control flow, so a target is free to treat `MOUNTED`/
 `DEVICE-SEEN` as ordinary `0`/`1` C-style values rather than `TRUE`/
 `FALSE`.
+
+`PROJECT-NAME-0`/`PROJECT-NAME-1` together hold the currently open
+project's name (`01-HAL.md` §6.1's `/PROJECTS/<name>/` directory
+convention) — 8 ASCII bytes, NUL-padded, packed 4-per-cell, char 0 in
+`PROJECT-NAME-0`'s low byte through char 7 in `PROJECT-NAME-1`'s high
+byte (the same in-arena packing `02-MEMORY-MODEL.md` §4.2 already uses
+for a bank descriptor's own `tag`/`name` fields — distinct from
+Rebel-ROM's on-disk, space-padded FAT-8.3 convention, which is that
+storage layer's own formatting concern, not this table's in-memory
+representation). All-zero (both cells `0`) means no project is
+currently open — the fresh-boot default. A target with no project
+save/load mechanism at all **MUST** omit both fields entirely, per
+§2's presence-signals-capability rule, rather than wiring in two
+always-zero cells.
 
 ## 11. `FORTH`
 

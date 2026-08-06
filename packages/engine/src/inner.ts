@@ -92,7 +92,7 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked' | 'breakpoint';
+export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'storage';
 
 export class Inner {
   /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
