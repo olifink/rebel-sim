@@ -152,7 +152,8 @@
     { "id": 121, "name": "SP!", "note": "( a-addr -- ) DEVELOPING.md §21, M28: pops an address, writes it into FORTH.SP — the standard SP0 SP! stack-reset idiom. No bounds validation — an address outside DSTK isn't caught until the next push/pop/peek." },
     { "id": 122, "name": "RP0", "note": "( -- a-addr ) DEVELOPING.md §21, M28: same as SP0, for the return stack (FORTH.RP0)." },
     { "id": 123, "name": "RP@", "note": "( -- a-addr ) DEVELOPING.md §21, M28: same as SP@, for the return stack (FORTH.RP)." },
-    { "id": 124, "name": "RP!", "note": "( a-addr -- ) DEVELOPING.md §21, M28: same as SP!, for the return stack. Real risk, not hypothetical: the return stack holds live return addresses for every word currently executing — a wrong RP! mid-execution corrupts the call chain, same 'authentic risk, no host-side validation' stance as MMAP's raw writes." }
+    { "id": 124, "name": "RP!", "note": "( a-addr -- ) DEVELOPING.md §21, M28: same as SP!, for the return stack. Real risk, not hypothetical: the return stack holds live return addresses for every word currently executing — a wrong RP! mid-execution corrupts the call chain, same 'authentic risk, no host-side validation' stance as MMAP's raw writes." },
+    { "id": 125, "name": "HERE-ADDR", "note": "DEVELOPING.md §8.6, FORGET: ( -- addr ) pushes the raw arena address of the HERE sysvar cell itself (not its current value — HERE already does that), so ordinary @/! can read and write it directly, the same pattern LATEST-ADDR (95) established for VOCABULARY/USE. Unblocks FORGET as pure Forth source: reclaiming a forgotten word's DICT space needs to roll HERE back to that word's own address, not just relink LATEST past it." }
   ],
 
   "bankTags": {

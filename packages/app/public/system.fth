@@ -133,6 +133,46 @@
   DROP R> DROP
 ;
 
+( FORGET name -- removes a word and everything defined after it, )
+( reclaiming its DICT space. DEVELOPING.md section 8.6: the piece )
+( VOCABULARY/USE's own exploration left as a dropped/open item -- )
+( HERE/LATEST were read-only from Forth, the same gap LATEST-ADDR )
+( fixed for LATEST specifically; HERE-ADDR, primitive 125, fixes )
+( the other half FORGET actually needs. Reuses the exact reverse )
+( chain-walk HIDE already does -- find the entry whose own >CFA )
+( matches the target xt -- only the found-branch differs: instead )
+( of setting FLAG_HIDDEN, LATEST is rolled back to the found )
+( entry's own link, the word defined right before it, and HERE is )
+( rolled back to the found entry's own address, exactly what )
+( dictionary.ts's abortDefinition already does for a half-built )
+( definition on a compile error, just reachable here for any named )
+( word instead of only the current LATEST. Defined here, before )
+( the HIDE >CFA block below, so it can still call >CFA by name -- )
+( same sequencing constraint SEE itself has. )
+( Known, deliberately unaddressed limitation, matching the open )
+( question already on record: forgetting a word another )
+( vocabulary's own branch point depends on leaves that )
+( vocabulary's chain corrupted -- not designed, since neither )
+( feature needs it yet in practice. )
+: FORGET
+  '
+  >R
+  LATEST
+  BEGIN
+    DUP
+  WHILE
+    DUP >CFA R@ =
+    IF
+      DUP @ LATEST-ADDR !
+      HERE-ADDR !
+      R> DROP
+      EXIT
+    THEN
+    @
+  REPEAT
+  DROP R> DROP
+;
+
 ( A VOCABULARY-based split was considered instead of HIDE and )
 ( rejected: branching chains only let a *later* vocabulary see an )
 ( *earlier* one, never the reverse, and visibility/WORDS-listing )

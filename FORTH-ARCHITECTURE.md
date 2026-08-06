@@ -647,7 +647,11 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     the latter was considered and rejected specifically because it
     would need `dictionary.ts`'s `findWord` to search a list of
     chains, a real engine change the simpler, requested model avoids
-    entirely.
+    entirely. **Update, M32:** `FORGET` itself, left dropped/open
+    above, was later picked back up on its own merits — `HERE-ADDR
+    ( -- addr )` fixed the other read-only half of this same gap
+    (`HERE`, not `LATEST`), unblocking `FORGET` the same way. See
+    `DEVELOPING.md` §8.6.
 
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 

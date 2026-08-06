@@ -833,6 +833,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       ctx.rstack.setPointer(s.pop());
       break;
 
+    case 125: // HERE-ADDR ( -- addr ) — DEVELOPING.md §8.6, same pattern LATEST-ADDR
+      // (case 95) established: the raw arena address of the HERE sysvar
+      // cell itself, not its current value, so ordinary @/! can read and
+      // write it directly. The gap FORGET (system.fth) needed: HERE was
+      // read-only from Forth, same departure from Forth tradition LATEST
+      // had before M13, left unfixed since nothing needed to write HERE
+      // until now.
+      s.push(ctx.sysvars.fieldOffset('FORTH', 'HERE'));
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

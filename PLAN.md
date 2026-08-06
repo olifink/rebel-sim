@@ -398,6 +398,26 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     pointer *after* `SP0`'s own push already moved it — not a bug, just
     two stack-pointer words in sequence genuinely seeing different
     moments. See `DEVELOPING.md` §21.
+32. **M32 — `FORGET`** — **done**: picked back up the exploration
+    dropped early on (`DEVELOPING.md` §8.6's open question), asked
+    about directly after noticing it was documented but never shipped.
+    Same root blocker `LATEST-ADDR` (M13) fixed for `LATEST`: `HERE`
+    was still read-only from Forth. One new primitive, `HERE-ADDR`
+    (token 125, `( -- addr )`), exposing `FORTH.HERE`'s own cell
+    address the same way — unblocks `FORGET` as pure Forth source in
+    `system.fth`, reusing `HIDE`'s own reverse chain-walk (find the
+    entry whose `>CFA` matches a target xt) with a different found-
+    branch: `LATEST` rolls back to the forgotten entry's own link,
+    `HERE` rolls back to the entry's own address — exactly what
+    `dictionary.ts`'s `abortDefinition` already does for a half-built
+    definition on a compile error, just reachable for any named word,
+    not only the current `LATEST`. Defined right after `HIDE`, before
+    the `HIDE >CFA` block, so it can still call `>CFA` by name. Known,
+    deliberately unaddressed limitation carried over from the original
+    open question: forgetting a word another vocabulary's own branch
+    point depends on leaves that vocabulary's chain corrupted — not
+    designed, since neither feature needs it together yet in practice.
+    Detailed below.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -2724,3 +2744,79 @@ afterward, `WORK` round-tripping as one asset file.
 **Tests:** 276 engine tests, no net change — a topology change, not
 new behavior. Two pre-existing tests updated for the new tag list/
 capacity.
+
+## M32 — `FORGET` — done
+
+Full design/motivation: `DEVELOPING.md` §8.6. `FORGET` was originally
+part of a larger Canon Cat `tForth`-inspired exploration that got
+dropped wholesale early on (its actual scope belonged at an editor-UI
+layer, not this interpreter) — but `FORGET` itself was never a bad
+idea on its own merits, just left as an open, unaddressed question
+once `VOCABULARY`/`USE` (M13) hit and fixed half of the same blocker
+for a different reason.
+
+**The blocker:** `HERE`, like `LATEST` before M13, was read-only from
+Forth — `primitives.ts` case 59 only ever pushed
+`ctx.sysvars.getHere()`, no address exposure a `!` could target.
+Reclaiming a forgotten word's `DICT` space needs to roll `HERE` back
+to that word's own address, not just relink `LATEST` past it — `HERE`
+is the piece M13 explicitly deferred ("`HERE-ADDR` would be
+`FORGET`'s own concern if that gets picked back up").
+
+**The fix, same pattern as `LATEST-ADDR`:** one new primitive,
+`HERE-ADDR ( -- addr )` (token 125), reusing
+`Sysvars.fieldOffset('FORTH', 'HERE')` — the exact offset math
+`getHere()`/`setHere()` already compute internally, now reachable from
+Forth. `FORGET` itself is pure Forth source in `system.fth`, needing
+zero further engine changes:
+
+```forth
+: FORGET
+  '
+  >R
+  LATEST
+  BEGIN
+    DUP
+  WHILE
+    DUP >CFA R@ =
+    IF
+      DUP @ LATEST-ADDR !
+      HERE-ADDR !
+      R> DROP
+      EXIT
+    THEN
+    @
+  REPEAT
+  DROP R> DROP
+;
+```
+
+Reuses `HIDE`'s exact reverse chain-walk (`'` resolves the target name
+to an xt, then walk `LATEST`'s link chain comparing each entry's
+`>CFA` against it) — only the found branch differs: instead of OR-ing
+in `FLAG_HIDDEN`, the found entry's own link cell (`addr @`, the word
+defined right before it) becomes the new `LATEST`, and the entry's own
+address becomes the new `HERE`. This is exactly what `dictionary.ts`'s
+`abortDefinition` already does for a definition left half-built by a
+compile error — `FORGET` is the same rollback, just reachable for any
+named word instead of only ever the current `LATEST`. Defined
+immediately after `HIDE` in `system.fth`, before the `HIDE >CFA`/
+`HIDE XT-NAME`/... block runs, for the same reason `SEE` has to be —
+it still needs to call `>CFA` by name while compiling its own body.
+
+**Known, deliberately unaddressed limitation**, carried forward
+unchanged from the original open question: forgetting a word that
+some *other* vocabulary's own branch point depends on being there
+leaves that vocabulary's chain corrupted. Not designed — `VOCABULARY`/
+`USE` and `FORGET` don't have a concrete joint use case yet, so this
+stays an open question rather than a guessed-at fix.
+
+**Tests:** 283 engine tests (276 + 7: two `HERE-ADDR` tests mirroring
+`LATEST-ADDR`'s own in `dictionary.test.ts`, five in a new
+`forget.test.ts` — removal, `HERE` rollback, definitions before the
+forgotten word surviving, definitions after it also going away, and
+the unknown-name error case leaving the dictionary untouched). Live-
+verified end to end against the actual shipped `system.fth` (not just
+the inlined test copy): `FORGET` removes the target and everything
+after it, words defined earlier are unaffected, and `VOCABULARY`/
+`USE`/`HIDE`/`WORDS`/`SEE` all still function normally afterward.

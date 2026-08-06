@@ -722,12 +722,15 @@ case — project/cart isolation — just not this one.
   (`VOCABULARY FORTH` `' FORTH 8 + CURRENT-VOCAB !`) right after
   `VOCABULARY`/`USE` are defined — no engine-level help needed,
   confirmed live.
-- **`FORGET` interaction:** if `FORGET` (part of the dropped Canon Cat
-  exploration, possibly revisited later on its own merits) removes a
-  word that some *other* vocabulary's branch point depends on being
-  there, what happens to that vocabulary's own chain integrity? Not
-  designed — worth a real pass once both features are seriously on
-  the table together, not assumed compatible by default.
+- **`FORGET` interaction:** `FORGET` shipped, M32 — one new primitive,
+  `HERE-ADDR` (token 125), the same `LATEST-ADDR` pattern applied to
+  `HERE`, unblocking `FORGET` as pure Forth reusing `HIDE`'s reverse
+  chain-walk. The vocabulary-interaction question itself is still
+  **open, unaddressed by design**: if `FORGET` removes a word that
+  some *other* vocabulary's branch point depends on being there, that
+  vocabulary's own chain integrity breaks. Not designed — worth a real
+  pass once both features are seriously on the table together, not
+  assumed compatible by default.
 - **Nested/temporary `USE`:** classic Forth sometimes wants "use this
   vocabulary for one definition, then restore the previous one" — not
   scoped here; the base `USE` as designed and shipped is a plain,

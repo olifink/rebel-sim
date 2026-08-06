@@ -177,3 +177,27 @@ describe('LATEST-ADDR (DEVELOPING.md §8, VOCABULARY/USE)', () => {
     expect(m.screen.readRowText(0).trimEnd()).toBe(String(beforeLatest));
   });
 });
+
+describe('HERE-ADDR (DEVELOPING.md §8.6, FORGET)', () => {
+  it('HERE-ADDR @ reads the same value HERE itself pushes', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    m.interpret('HERE-ADDR @ HERE =');
+    expect(m.stack.toArray()).toEqual([-1]);
+  });
+
+  it('writing through HERE-ADDR actually changes what HERE reports', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    const beforeHere = m.sysvars.getHere();
+    m.interpret(': FIVE 5 ;');
+    const afterHere = m.sysvars.getHere();
+    expect(afterHere).not.toBe(beforeHere);
+
+    m.interpret(`${beforeHere} HERE-ADDR !`);
+    expect(m.sysvars.getHere()).toBe(beforeHere);
+    // Confirmed from the Forth side too, not just the TS accessor.
+    m.interpret('HERE .');
+    expect(m.screen.readRowText(0).trimEnd()).toBe(String(beforeHere));
+  });
+});
