@@ -24,8 +24,16 @@
   /* width/height are set inline by canvas-presenter.ts, computed from
      devicePixelRatio so the framebuffer -> screen upscale is always a
      clean integer multiple in real device pixels (no fixed px here —
-     a stale value would just be misleading). */
+     a stale value would just be misleading). aspect-ratio matches the
+     320x240 framebuffer (4:3) so that if max-width:100% ever has to
+     shrink the canvas (narrow viewport/window, or a devicePixelRatio
+     whose nearest clean integer scale lands above the ~640px target —
+     both real on non-integer-DPR displays), height shrinks along with
+     it instead of staying pinned to its inline px value — otherwise
+     the canvas visibly squashes horizontally instead of scaling down
+     uniformly. */
   max-width: 100%;
+  aspect-ratio: 4 / 3;
   image-rendering: pixelated;
   border: 1px solid #0f0;
   background: #000;
