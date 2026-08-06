@@ -61,8 +61,8 @@ const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
-const TIB_BANK_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a); not a formal size class, just a fixed small scratch region
-const PAD_BANK_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning
+const TIB_BANK_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a); the *logical* content size createBank() rounds up to XS (spec/02-MEMORY-MODEL.md §4.3), not the bank's actual footprint
+const PAD_BANK_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning; also rounds up to XS
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change

@@ -2666,3 +2666,36 @@ a new `sysvars.test.ts`, a new `project.test.ts`, two more in
 (`app.ts`'s `tick()` gained a `storageInFlight`-gated branch for the
 new `'storage'` status, same shape as its existing `'breakpoint'`
 handling — no test suite changes needed there).
+
+## M30 — Bank allocation actually conforms to spec/02-MEMORY-MODEL.md §4.3/§4.4 — done
+
+Full design/motivation/verification: `DEVELOPING.md` §23. Short
+version: two real, longstanding gaps against the memory-model spec,
+found by checking rather than assuming. `BankTable.createBank()` never
+rounded a requested size up to a real size class (XS/S/M/L/XL/XXL) —
+`CHAR`/`TIB`/`PAD` all carved non-class-sized banks — and the
+Forth-level `CREATE-BANK` primitive bypassed `BankTable.createBank()`
+entirely, calling `mmap.allocate()` directly with an unrounded raw
+size. Separately, `MemoryMap.allocate()`'s bump allocator never
+4 KiB-aligned a new bank's base at all — confirmed live: `SYSV` sat at
+`0x610` (right after `MMAP`'s own non-class-sized 1552 bytes), not the
+spec-mandated `0x1000`. Both fixed at their one real choke point:
+`createBank()` now rounds via the already-existing `roundToSizeClass()`
+before ever carving; `CREATE-BANK`'s primitive now routes through
+`createBank()` instead of duplicating (and bypassing) its own
+name-generation logic; `MemoryMap.allocate()` now 4 KiB-aligns the
+computed base unconditionally, including for `MMAP`'s own
+self-registration (harmless — offset 0 is already aligned).
+
+**Live-verified** via WebMCP `read_banks`: a fresh `Machine`'s boot
+layout now matches `spec/02-MEMORY-MODEL.md` §5.4's worked example
+exactly, bank for bank, base for base. `PROJECT`/`SAVE`/`RESTORE`
+(M29) re-verified afterward, unaffected.
+
+**Tests:** 276 engine tests total, all pre-existing — a correctness
+fix, not new behavior. Five broke on the new (correct) sizes/bases and
+were updated: three in `mmap.test.ts` (hardcoded offsets), one in
+`stack.test.ts` (an artificially-tiny overflow-test bank, now built as
+a raw `Bank` object rather than through `createBank()`, which would
+round it away), one in `strings.test.ts` (a "too long for PAD" probe
+string that no longer exceeds `PAD`'s new real 4096-byte capacity).

@@ -29,7 +29,9 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   it('allocates sequential banks with no gaps and no overlaps, derived fresh each time — no cursor cell involved', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const a = banks.createBank('DSTK', 64);
-    expect(a.base).toBe(MMAP_SIZE); // right after MMAP itself
+    // 4 KiB-aligned, not raw MMAP_SIZE (spec/02-MEMORY-MODEL.md §4.4) —
+    // MMAP's own 1552 bytes round up to the first 4 KiB boundary.
+    expect(a.base).toBe((MMAP_SIZE + 4095) & ~4095);
 
     const b = banks.createBank('RSTK', 128);
     expect(b.base).toBe(a.base + a.size); // right after a, no gap
@@ -181,10 +183,12 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     const addr = m.stack.pop();
     expect(addr).toBe(expectedBase);
 
-    // A second creation lands right after the first, no gap.
+    // A second creation lands right after the first, no gap — right
+    // after SCR1's *rounded* size class (XS, 4096), not its raw
+    // requested 256 bytes (spec/02-MEMORY-MODEL.md §4.3).
     m.interpret('64 CREATE-BANK SCR2');
     const addr2 = m.stack.pop();
-    expect(addr2).toBe(addr + 256);
+    expect(addr2).toBe(addr + 4096);
   });
 
   it('the created bank is real, usable memory — @ and ! round-trip at its address', () => {
@@ -207,7 +211,7 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     expect(bank).toMatchObject({
       tag: 'GAP1',
       base: addr,
-      size: 128,
+      size: 4096, // rounded up from the requested 128 (spec/02-MEMORY-MODEL.md §4.3, XS class)
       flags: BankFlagResident | BankFlagActive,
     });
     // M27, DEVELOPING.md §20: named after an auto-generated serial now,

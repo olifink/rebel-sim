@@ -20,7 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
-import { BankTable, BankFlagResident, BankFlagActive, BANK_NAME_LEN } from './banks.js';
+import { BankTable } from './banks.js';
 import { alignCell, CELL_SIZE } from './arena.js';
 import {
   compileCell,
@@ -684,16 +684,19 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13/§14/§20, M21/M22/M27
+    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13/§14/§20, M21/M22/M27, M30
       const size = s.pop();
       const tag = ctx.nextInputToken().toUpperCase();
-      // M27: an auto-generated serial, not the tag — drawn from MMAP's
-      // own NEXT-BANK header cell, the same counter BankTable's
-      // host-side createBank() fallback uses, so this can never
-      // collide with a host-created bank's name.
-      const name = String(ctx.banks.mmap.nextBankSerial()).padStart(BANK_NAME_LEN, '0');
-      const slot = ctx.banks.mmap.allocate(tag, name, size, BankFlagResident | BankFlagActive);
-      s.push(slot.base);
+      // M30 (spec/02-MEMORY-MODEL.md §4.3): routes through BankTable's
+      // own createBank() now, not a direct mmap.allocate() bypass — the
+      // spec names this call out explicitly as a source of bank-size
+      // requests that MUST round up to a size class before carving,
+      // same as any host-side creation. Auto-naming (no name given)
+      // draws from the same MMAP-header counter host-side creation
+      // uses, so this still can't collide with a host-created bank's
+      // name.
+      const bank = ctx.banks.createBank(tag, size);
+      s.push(bank.base);
       break;
     }
 

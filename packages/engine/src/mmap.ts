@@ -192,6 +192,18 @@ export class MemoryMap {
    * inactive (that's why it was chosen), so occupancy only ever
    * becomes true once the descriptor is fully written.
    *
+   * The computed free-cursor position is then rounded up to the next
+   * 4 KiB boundary (spec/02-MEMORY-MODEL.md §4.4) before anything gets
+   * placed there — every size class is itself already a multiple of
+   * 4 KiB, so in practice only the very first placement after `MMAP`'s
+   * own non-class-sized 1552 bytes ever needs real rounding; every
+   * placement after that already lands pre-aligned. Applied
+   * unconditionally, including for `MMAP`'s own self-registration
+   * (`BankTable`'s constructor) — harmless there since offset 0 is
+   * already aligned, and it's what keeps this the one place base
+   * alignment is enforced rather than something each caller must
+   * remember.
+   *
    * Returns the actual stored descriptor (`ACTIVE` always forced on,
    * regardless of what `flags` requested) rather than just the new
    * `base` — a caller building its own return value from the raw
@@ -211,12 +223,13 @@ export class MemoryMap {
     if (freeSlot === -1) {
       throw new RangeError(`MMAP is full (${MMAP_MAX_SLOTS} slots)`);
     }
+    const alignedBase = (base + 4095) & ~4095;
 
     const activeFlags = flags | BankFlagActive;
     const offset = this.slotOffset(freeSlot);
     this.writeFixedString(offset, tag, TAG_SIZE);
     this.writeFixedString(offset + TAG_SIZE, name, NAME_SIZE);
-    this.arena.writeCellUnsigned(offset + SLOT_BASE_OFFSET, base);
+    this.arena.writeCellUnsigned(offset + SLOT_BASE_OFFSET, alignedBase);
     this.arena.writeCellUnsigned(offset + SLOT_SIZE_OFFSET, size);
     this.arena.writeCellUnsigned(offset + SLOT_FLAGS_OFFSET, activeFlags);
 

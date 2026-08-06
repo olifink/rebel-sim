@@ -2702,3 +2702,85 @@ stuck, a storage failure surfacing through `step()` like any other
 line error, and `PROJECT`/`SAVE` both being rejected (as "unrecognized
 word," the same as any non-dictionary syntax) inside a colon-definition.
 Full engine suite: 275 passed (259 before this milestone, 16 new).
+
+## 23. Bank allocation actually conforms to `spec/02-MEMORY-MODEL.md` §4.3/§4.4 — done, M30
+
+### Motivation
+
+Asked directly: banks weren't actually landing on the size classes or
+4 KiB-aligned bases the spec requires. Checked, not assumed: two real,
+separate gaps, both live since long before the spec suite itself
+existed.
+
+**No size-class rounding anywhere.** `BankTable.createBank(tag, size)`
+carved exactly the raw `size` a caller handed it — `CHAR` (1200 bytes,
+`charCols * charRows`), `TIB`/`PAD` (128 bytes each) all violated §4.3
+outright ("every carved bank MUST occupy exactly one of six fixed size
+classes... there is no path to an arbitrary exact byte size"). The
+Forth-level `CREATE-BANK` primitive was worse: it bypassed
+`BankTable.createBank()` entirely, calling `mmap.allocate()` directly
+with the raw stack value — so even a project that only ever used
+`createBank()`'s own (correctly-sized) constants could still carve an
+arbitrary-sized bank from Forth source.
+
+**No 4 KiB base alignment at all.** §4.4's bump allocator is explicit:
+`aligned_base = (candidate_base + 4095) & ~4095`, applied *every* time,
+before placing anything. `MemoryMap.allocate()` (`mmap.ts`) never did
+this — it placed each new bank directly at the raw free-cursor
+position. Live-confirmed before this fix: `SYSV` sat at `0x610` (1552 —
+right after `MMAP`'s own non-class-sized 1552 bytes), not the
+spec-mandated `0x1000` (4096).
+
+### Fix
+
+- **`BankTable.createBank()`** now rounds `size` via the already-
+  existing `roundToSizeClass()` (previously only used by `storage.ts`'s
+  asset-loading path) before ever calling `mmap.allocate()`, throwing
+  if the request exceeds XXL. This is the one choke point every carved
+  bank goes through — `MMAP`'s own self-registration is the sole
+  exception (§5.3), and it's created via `mmap.allocate()` directly in
+  `BankTable`'s constructor, never through this method.
+- **`CREATE-BANK`'s primitive case** (`primitives.ts`) now calls
+  `ctx.banks.createBank(tag, size)` instead of duplicating serial-name
+  generation and calling `mmap.allocate()` directly — both fixes the
+  rounding gap (§4.3 names Forth-level dynamic creation explicitly:
+  "this rule applies uniformly to every source of a bank-size
+  request") and deletes now-redundant code (the manual serial-name
+  logic was already exactly what `createBank()`'s own no-name path
+  does).
+- **`MemoryMap.allocate()`** now computes `alignedBase = (base + 4095)
+  & ~4095` and places the new bank there, unconditionally — including
+  for `MMAP`'s own self-registration (harmless: offset 0 is already
+  aligned), which is what keeps this the *one* place alignment is
+  enforced rather than something every caller has to remember
+  separately.
+
+### Verified
+
+Live, via WebMCP `read_banks`: a fresh `Machine`'s boot layout now
+matches `spec/02-MEMORY-MODEL.md` §5.4's worked example exactly —
+`MMAP` 0/1552, `SYSV` 4096/4096, `DSTK` 8192/4096, `RSTK` 12288/4096,
+`DICT` 16384/65536, `CHAR` 81920/4096, `KMAP` 86016/4096, `TIB`
+90112/4096, `PAD` 94208/4096. `300 CREATE-BANK FOOB .` printed `98304`
+(right after `PAD`, already aligned) with the created bank showing
+`4096` bytes, not the raw `300` requested. `PROJECT`/`SAVE`/`RESTORE`
+(§22) re-verified end to end afterward — unaffected by the layout
+change, as expected (both sides of a save/restore round-trip derive
+their layout from the same deterministic boot sequence).
+
+Five existing tests broke on the new (correct) sizes/bases and were
+fixed to match: `mmap.test.ts`'s three hardcoded-offset assertions
+(now computed from the real rounded/aligned values, or updated to the
+new expected numbers with a comment explaining why); `stack.test.ts`'s
+overflow test, which relied on an artificially tiny 8-byte `DSTK` bank
+to trigger overflow after 2 pushes — now builds the `Bank` shape
+directly rather than through `createBank()` (which would round it to
+4096 and swallow the test), since `DataStack`'s own overflow check is
+what's under test, not the allocator's size-class policy;
+`strings.test.ts`'s "too long for PAD" test, whose 199-character probe
+string no longer exceeds `PAD`'s new real capacity (4096, up from
+128) — lengthened accordingly.
+
+**Tests:** 276 engine tests total (all pre-existing, 5 rewritten to
+match the new spec-conformant sizes/bases — no net-new tests, this was
+a correctness fix, not new behavior).

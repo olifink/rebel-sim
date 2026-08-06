@@ -98,7 +98,22 @@ export class BankTable {
     return String(this.mmap.nextBankSerial()).padStart(BANK_NAME_LEN, '0');
   }
 
+  /** `size` is a *requested* byte count, not the bank's actual size —
+   * every carved bank MUST occupy exactly one of the six fixed size
+   * classes (spec/02-MEMORY-MODEL.md §4.3), so this rounds `size` up to
+   * the smallest class that fits before carving anything, uniformly
+   * for every caller (host-side creation here, and the Forth-level
+   * `CREATE-BANK` primitive, which routes through this same method —
+   * §4.3 names both explicitly: "this rule applies uniformly to every
+   * source of a bank-size request"). `MMAP` itself is the one caller
+   * that legitimately needs an exact, non-class size (§5.3) — it's
+   * never created through this method, only via `mmap.allocate()`
+   * directly (`BankTable`'s own constructor). */
   createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {
+    const roundedSize = roundToSizeClass(size);
+    if (roundedSize === undefined) {
+      throw new Error(`requested bank size ${size} exceeds the largest size class (XXL, ${BankSizeXXL} bytes)`);
+    }
     const bankName = (name ?? this.generateSerialName()).slice(0, BANK_NAME_LEN);
     if (this.findBankByName(bankName)) {
       throw new Error(`bank name ${bankName} already exists`);
@@ -107,7 +122,7 @@ export class BankTable {
     // Bank are structurally identical, and allocate() always forces
     // ACTIVE on internally, so this stays consistent with what's
     // actually stored even when a caller's `flags` omitted it.
-    return this.mmap.allocate(tag, bankName, size, flags);
+    return this.mmap.allocate(tag, bankName, roundedSize, flags);
   }
 
   /** "A bank of this type" (tags repeat) when called with one argument;

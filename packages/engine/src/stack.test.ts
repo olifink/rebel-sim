@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
-import { BankTable } from './banks.js';
+import { Bank, BankTable } from './banks.js';
 import { DataStack, StackOverflowError, StackUnderflowError } from './stack.js';
 import { Sysvars } from './sysvars.js';
 
@@ -42,7 +42,24 @@ describe('DataStack', () => {
   });
 
   it('throws on overflow', () => {
-    const s = makeStack(8); // room for 2 cells
+    // A deliberately tiny bank — room for exactly 2 cells — built
+    // directly rather than via BankTable.createBank(), which now
+    // rounds every request up to a real size class
+    // (spec/02-MEMORY-MODEL.md §4.3) and would swallow the tiny size
+    // this test needs to exercise DataStack's own overflow check in
+    // isolation, independent of the allocator's rounding policy.
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const sysvBank = banks.createBank('SYSV', 4096);
+    const sysvars = new Sysvars(arena, sysvBank);
+    const tinyBank: Bank = {
+      tag: 'DSTK',
+      name: 'DSTK',
+      base: sysvBank.base + sysvBank.size,
+      size: 8,
+      flags: 0,
+    };
+    const s = new DataStack(arena, tinyBank, sysvars, 'SP0', 'SP');
     s.push(1);
     s.push(2);
     expect(() => s.push(3)).toThrow(StackOverflowError);

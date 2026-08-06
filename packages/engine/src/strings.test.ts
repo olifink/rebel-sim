@@ -64,7 +64,9 @@ describe('Strings (M8, CORE-VOCABULARY.md §8)', () => {
 
   it('interpreted S" throws if the text is too long for PAD, rather than corrupting adjacent arena memory', () => {
     const m = new Machine();
-    const tooLong = 'x '.repeat(100).trim(); // words joined by consumeQuotedText exceed padSize (128)
+    // padSize is now 4096 (PAD_BANK_SIZE rounds up to the XS size
+    // class, spec/02-MEMORY-MODEL.md §4.3) — comfortably over that.
+    const tooLong = 'x '.repeat(2200).trim();
     expect(() => m.interpret(`S" ${tooLong}"`)).toThrow(/too long for PAD/);
   });
 
