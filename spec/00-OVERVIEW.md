@@ -42,11 +42,11 @@ target's own porting notes, not here.
 | # | Document | Status | Covers |
 |---|---|---|---|
 | 01 | [`01-HAL.md`](01-HAL.md) | **v1.0** | The hardware abstraction boundary: screen, keyboard/input, the input-channel abstraction, storage, timing, error reporting. What every target must supply, and what's portable and must never be reimplemented per target. |
-| 02 | `02-MEMORY-MODEL.md` | planned | Cell size and endianness, arenas, the bank table, addressing rules. |
+| 02 | [`02-MEMORY-MODEL.md`](02-MEMORY-MODEL.md) | **v1.0** | The cell, the flat per-arena address space, the bank system and its size classes/alignment rule, the arena-resident bank table (`MMAP`), multi-arena isolation. |
 | 03 | `03-SYSVARS.md` | planned | Sysvar group/field layout, encoding, the capability-flag convention this suite's HAL document already assumes exists. |
 | 04 | `04-FORTH-CORE.md` | planned | Dictionary header, token-threaded dispatch, the outer/inner interpreter, the primitive word set, the error/exception model. |
 
-Only `01-HAL.md` is written so far. The other three are named here so
+Only `01-HAL.md` and `02-MEMORY-MODEL.md` are written so far. The other two are named here so
 cross-references from the HAL document resolve to a real (if not yet
 written) target, and so the HAL document's own scope boundaries — what
 it deliberately does *not* cover because it belongs to one of these —

@@ -792,11 +792,14 @@ somewhere, not before:
   them to Forth source is unresolved on every target that might
   eventually support it. Likely a capability-gated mechanism (§2.5)
   when it lands, not assumed universal.
-- **Generic memory-bank introspection** (a hypothetical `BANK@` walking
-  a target's bank table from Forth source). Access to a bank's contents
-  is already unrestricted once you have its base address
-  (`02-MEMORY-MODEL.md`); *discovering* what banks exist and where is
-  the open piece, tracked but not resolved here.
+- **Forth-level bank introspection/creation** (`BANK@`, `CREATE-BANK`).
+  These exist as ordinary Forth primitives — looking up a bank's base
+  address by tag, and carving a new one at runtime — and need no new
+  HAL surface at all: both operate purely on the arena-resident bank
+  table (`02-MEMORY-MODEL.md`), never crossing this boundary. Full
+  primitive semantics are `04-FORTH-CORE.md`'s job, not this
+  document's; noted here only so their absence from every list above
+  isn't mistaken for an oversight.
 - **`FONT`/`SPRITE` sysvar groups and any HAL surface for them.** No
   target has a Forth-addressable font or sprite bank yet.
 - **Per-channel-type configuration** (§5). A future non-keyboard channel
