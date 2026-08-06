@@ -16,19 +16,22 @@ const KEY_EQUAL = 0x2e; // shifted -> '+'
 const ENTER = 0x28;
 
 describe('Machine.startRepl (M7a)', () => {
-  it('draws a prompt, blocks on ACCEPT, and throws if a session is already active', () => {
+  it('draws no prompt glyph, blocks on ACCEPT, and throws if a session is already active', () => {
     const m = new Machine();
     m.startRepl();
     expect(m.step(10)).toBe('blocked');
-    expect(m.screen.readRowText(0).trimEnd()).toBe('>');
+    // Real Forth never prints a `> ` prompt either — `ok`/an error is the
+    // only "ready" signal, printed once a line actually runs (below).
+    // Nothing has run yet, so the row is still blank.
+    expect(m.screen.readRowText(0).trimEnd()).toBe('');
     expect(() => m.startRepl()).toThrow(/still running or blocked/);
     expect(() => m.beginLine('1 2 +')).toThrow(/still running or blocked/);
   });
 
-  it('accepts a typed line, interprets it, and prompts again on the next row', () => {
+  it('accepts a typed line, interprets it, and prints ok before blocking on the next ACCEPT', () => {
     const m = new Machine();
     m.startRepl();
-    m.step(10); // draw the first prompt, block on ACCEPT
+    m.step(10); // block on the first ACCEPT
 
     press(m, KEY_2);
     press(m, SPACE);
@@ -43,8 +46,8 @@ describe('Machine.startRepl (M7a)', () => {
     expect(status).toBe('blocked'); // loop finished this line and is prompting again
 
     expect(m.stack.toArray()).toEqual([5]);
-    expect(m.screen.readRowText(0).trimEnd()).toBe('> 2 3 +');
-    expect(m.screen.readRowText(1).trimEnd()).toBe('>');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('2 3 + ok');
+    expect(m.screen.readRowText(1).trimEnd()).toBe('');
   });
 
   it('prints a Forth error to the screen and keeps the REPL loop alive', () => {

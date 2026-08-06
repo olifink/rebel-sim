@@ -30,7 +30,7 @@ describe('replLoop stack recovery on uncaught errors (DEVELOPING.md §9, M17)', 
     const remote = new RemoteChannel();
     const m = new Machine({ channel: remote });
     m.startRepl();
-    m.step(10); // draw the prompt, block on ACCEPT
+    m.step(10); // block on the first ACCEPT
 
     remote.push('1 2 3 UNRECOGNIZED-WORD\n');
     const status = m.step(500);

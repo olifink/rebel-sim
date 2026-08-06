@@ -656,7 +656,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const name = ctx.nextInputToken();
       const found = findWord(ctx, name);
       if (!found) {
-        throw new Error(`? unrecognized word: ${name}`);
+        throw new Error(`unrecognized word: ${name}`);
       }
       s.push(found.cfa);
       break;
@@ -678,7 +678,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const tag = ctx.nextInputToken().toUpperCase();
       const addr = ctx.banks.mmap.findBankAddr(tag);
       if (addr === undefined) {
-        throw new Error(`? unknown bank: ${tag}`);
+        throw new Error(`unknown bank: ${tag}`);
       }
       s.push(addr);
       break;

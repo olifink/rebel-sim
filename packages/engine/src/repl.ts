@@ -375,7 +375,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         // plus 8 standard banks, so an existing project can never
         // legitimately restore to nothing.
         if (restored.length === 0) {
-          throw new Error(`? project '${request.project}' not found`);
+          throw new Error(`project '${request.project}' not found`);
         }
         this.screen.redrawAll();
       }
@@ -414,10 +414,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   setBreakpoint(name: string): void {
     const found = findWord(this, name);
     if (!found) {
-      throw new Error(`? unrecognized word: ${name}`);
+      throw new Error(`unrecognized word: ${name}`);
     }
     if (!found.breakable) {
-      throw new Error(`? ${found.name} has no compiled body to break on (not a colon-definition or DOES>'d word)`);
+      throw new Error(`${found.name} has no compiled body to break on (not a colon-definition or DOES>'d word)`);
     }
     this.breakpoints.add(found.cfa);
   }
@@ -428,7 +428,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   clearBreakpoint(name: string): void {
     const found = findWord(this, name);
     if (!found) {
-      throw new Error(`? unrecognized word: ${name}`);
+      throw new Error(`unrecognized word: ${name}`);
     }
     this.breakpoints.delete(found.cfa);
   }
@@ -470,15 +470,18 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.step(Number.MAX_SAFE_INTEGER);
   }
 
-  /** Starts the self-contained on-screen REPL (M7a): draw a prompt,
-   * `ACCEPT` a line onto the screen, interpret it, repeat forever — the
-   * visible on-screen interaction a real Forth machine has, not a
-   * separate DOM scrollback pane. Uses the same `session`/`step()`
-   * machinery as `beginLine()`; the two are mutually exclusive (only one
-   * session at a time, CHANNELS-DESIGN.md §4) — don't call `beginLine()`/
-   * `interpret()` externally once this is running. Errors print directly
-   * to the screen (`? <message>`) and the loop continues; they never
-   * escape this call the way they would from `step()` after `beginLine()`. */
+  /** Starts the self-contained on-screen REPL (M7a): `ACCEPT` a line onto
+   * the screen, interpret it, print `ok`/`? <message>`, repeat forever —
+   * the visible on-screen interaction a real Forth machine has, not a
+   * separate DOM scrollback pane. No `> ` prompt glyph is drawn — a real
+   * Forth doesn't print one either, `ok`/an error is the only "ready"
+   * signal (DEVELOPING.md's REPL-formatting entry). Uses the same
+   * `session`/`step()` machinery as `beginLine()`; the two are mutually
+   * exclusive (only one session at a time, CHANNELS-DESIGN.md §4) — don't
+   * call `beginLine()`/`interpret()` externally once this is running.
+   * Errors print directly to the screen (`? <message>`) and the loop
+   * continues; they never escape this call the way they would from
+   * `step()` after `beginLine()`. */
   startRepl(): void {
     if (this.session) {
       throw new Error('a previous line is still running or blocked — call step() to continue it');
@@ -496,27 +499,27 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
   private *replLoop(): Generator<StepSignal, void, void> {
     while (true) {
-      this.emitString('> ');
-      yield 'progress';
-
       this.stack.push(this.tibBase);
       this.stack.push(this.tibSize);
       yield* this.inner.executeXT(this.acceptCfa);
       const len = this.stack.pop();
 
-      this.screen.emit(10);
-      yield 'progress';
-
       let line = '';
       for (let i = 0; i < len; i++) {
         line += String.fromCharCode(this.arena.readByte(this.tibBase + i));
       }
-      if (line.trim().length === 0) {
-        continue;
-      }
+
+      // No CR here: real Forth doesn't print one for <enter> either — a
+      // real terminal's own local echo supplies that CR, not the Forth
+      // system. This screen has no such terminal underneath it, so a
+      // single space stands in as the separator between the typed line
+      // and the status text that follows, instead of faking a newline.
+      this.screen.emit(32);
+      yield 'progress';
 
       try {
         yield* this.tokenizeAndRun(line);
+        this.emitString('ok');
       } catch (err) {
         if (this.sysvars.getState() === -1) {
           abortDefinition(this);
@@ -534,17 +537,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         const message = err instanceof Error ? err.message : String(err);
         this.emitString(`? ${message}`);
       }
-      // End this line's cycle on a fresh row before the next prompt —
-      // but only if something was actually printed mid-row (`.`'s
-      // trailing space, an error message): a line whose interpretation
-      // produced no output at all (the common case — most words are
-      // silent) is already sitting at column 0 from the CR right after
-      // ACCEPT above, and forcing another one would leave a spurious
-      // blank row before every quiet line.
-      if (this.screen.getCursorCol() !== 0) {
-        this.screen.emit(10);
-        yield 'progress';
-      }
+      // The trailing CR belongs to the status text (`ok`/`? ...`), not
+      // to the next prompt — matches real Forth's `ok\n`, printed once
+      // ready, rather than a leading CR pushed out ahead of the prompt.
+      this.screen.emit(10);
+      yield 'progress';
     }
   }
 
@@ -608,7 +605,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     if (upper === 'SAVE') {
       const project = this.sysvars.getProjectName();
       if (!project) {
-        throw new Error('? no project name set - use PROJECT name first');
+        throw new Error('no project name set - use PROJECT name first');
       }
       this.pendingStorage = { op: 'save', project };
       yield 'storage';
@@ -633,7 +630,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
     const n = parseNumber(token, this.getBase());
     if (n === undefined) {
-      throw new Error(`? unrecognized word: ${token}`);
+      throw new Error(`unrecognized word: ${token}`);
     }
     this.stack.push(n);
     yield 'progress';
@@ -660,7 +657,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
     const n = parseNumber(token, this.getBase());
     if (n === undefined) {
-      throw new Error(`? unrecognized word: ${token}`);
+      throw new Error(`unrecognized word: ${token}`);
     }
     compileCell(this, findWord(this, 'LIT')!.cfa);
     compileCell(this, n);

@@ -524,10 +524,10 @@ export class App implements AfterViewInit, OnDestroy {
   // Compared against each tick's stack snapshot so the Angular zone is
   // only entered when the stack-bar debug readout actually needs to
   // change — NOT gated on step()'s status. A whole line can finish *and*
-  // the REPL loop can re-block waiting on the next prompt's ACCEPT
-  // within the same step() call (interpret, loop back, draw "> ", block
-  // on the empty queue — all before this call returns), so the tick
-  // where the stack actually changed can still report 'blocked'.
+  // the REPL loop can re-block waiting on the next line's ACCEPT within
+  // the same step() call (interpret, print ok/error, loop back, block on
+  // the empty queue — all before this call returns), so the tick where
+  // the stack actually changed can still report 'blocked'.
   private lastStackSnapshot: number[] = [];
   private lastRStackSnapshot: number[] = [];
   private lastLatestAddr = -1;

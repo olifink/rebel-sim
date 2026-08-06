@@ -190,9 +190,10 @@ describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
 
     m.startRepl();
 
-    // At startRepl() time the cursor is still at (0,0) — the '> '
-    // prompt hasn't been emitted yet (that happens on the first
-    // step()). One inverted redraw, no content write.
+    // At startRepl() time the cursor is still at (0,0) — nothing has
+    // been typed or run yet (no prompt glyph is ever drawn; `ok`/an
+    // error is the only "ready" signal, printed once a line runs).
+    // One inverted redraw, no content write.
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 32, 0x000000, 0x00ff00);
   });
 

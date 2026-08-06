@@ -28,7 +28,7 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
 
   it('throws on an unknown tag, same convention as \' on an unrecognized word', () => {
     const m = new Machine();
-    expect(() => m.interpret('BANK@ NOPE')).toThrow('? unknown bank: NOPE');
+    expect(() => m.interpret('BANK@ NOPE')).toThrow('unknown bank: NOPE');
   });
 
   it('resolves the first-created bank when a tag repeats, matching findBank(tag) semantics', () => {
