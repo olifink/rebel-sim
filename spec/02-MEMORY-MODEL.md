@@ -260,8 +260,7 @@ to it — it is not exhaustive by design (§7).
 | `RSTK` | Return stack, grows down | Per-arena |
 | `DSTK` | Data stack, grows down | Per-arena |
 | `CHAR` | Character-code grid, write-through into the display surface (`01-HAL.md` §3) | Per-arena |
-| `TIB` | Terminal Input Buffer — resident scratch a line-input word reads a line into | Per-arena |
-| `PAD` | Scratch text region for transient string handling | Per-arena |
+| `WORK` | Terminal Input Buffer and scratch-text-handling region (`PAD`), at fixed sub-offsets within one bank — both are small, transient, per-line scratch text, so they share one size class instead of each independently rounding up to its own (§4.3) | Per-arena |
 | `SPRT` | Sprite/tile data | Per-arena |
 | `CART` | Cart-loaded code landing area | Per-arena |
 | `DATA` | General-purpose scratch | Per-arena |
@@ -407,7 +406,7 @@ does.
 ### 5.4 Worked example
 
 The bank sequence below (`MMAP` implicitly first, then `SYSV`, `DSTK`,
-`RSTK`, `DICT`, `CHAR`, `KMAP`, `TIB`, `PAD`, all XS-class except `DICT`
+`RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`, all XS-class except `DICT`
 at M-class) is exactly the kind of arena an implementation this suite
 governs produces, computed per §4.3/§4.4/§5.3 with `MAX_SLOTS = 64`
 (`MMAP` size = `16 + 64×24 = 1552` bytes):
@@ -421,8 +420,7 @@ governs produces, computed per §4.3/§4.4/§5.3 with `MAX_SLOTS = 64`
 | `DICT` | `0x04000` (16384) | 65536 | M |
 | `CHAR` | `0x14000` (81920) | 4096 | XS |
 | `KMAP` | `0x15000` (86016) | 4096 | XS |
-| `TIB` | `0x16000` (90112) | 4096 | XS |
-| `PAD` | `0x17000` (94208) | 4096 | XS |
+| `WORK` | `0x16000` (90112) | 4096 | XS |
 
 Note every base after `SYSV` lands pre-aligned with no further rounding
 needed — the direct consequence of every size class already being a

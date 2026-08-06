@@ -2699,3 +2699,28 @@ were updated: three in `mmap.test.ts` (hardcoded offsets), one in
 a raw `Bank` object rather than through `createBank()`, which would
 round it away), one in `strings.test.ts` (a "too long for PAD" probe
 string that no longer exceeds `PAD`'s new real 4096-byte capacity).
+
+## M31 — `TIB` and `PAD` merged into one `WORK` bank — done
+
+Full design/motivation/verification: `DEVELOPING.md` §24. Short
+version: a follow-on from M30 — with size-class rounding now enforced,
+`TIB` and `PAD` (128 logical bytes each) were independently paying for
+a full XS class apiece. Both are the same kind of thing (small,
+transient, per-line scratch text), so they now share one `WORK` bank
+at fixed sub-offsets (`TIB` at offset 0, `PAD` at offset 128) — one
+size class instead of two. Logical capacities (128 bytes each)
+unchanged deliberately — a pure allocation-topology change, not a
+behavior change. `BANK@ TIB`/`BANK@ PAD` no longer resolve (only
+`BANK@ WORK` does) — a real, expected consequence, but `PAD ( -- addr
+)` (the actual way Forth code reaches it) is unaffected. Spec updated
+to match: `02-MEMORY-MODEL.md` §4.6/§5.4 and `01-HAL.md` §6.3 all
+replace the separate `TIB`/`PAD` tags with `WORK`.
+
+**Live-verified** via WebMCP: a fresh `Machine` shows 8 banks instead
+of 9; `S" ..." TYPE` and ordinary line input both work through the
+shared bank; `PROJECT`/`SAVE`/`RESTORE` re-verified end to end
+afterward, `WORK` round-tripping as one asset file.
+
+**Tests:** 276 engine tests, no net change — a topology change, not
+new behavior. Two pre-existing tests updated for the new tag list/
+capacity.

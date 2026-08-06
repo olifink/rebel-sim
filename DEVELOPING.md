@@ -2784,3 +2784,75 @@ string no longer exceeds `PAD`'s new real capacity (4096, up from
 **Tests:** 276 engine tests total (all pre-existing, 5 rewritten to
 match the new spec-conformant sizes/bases — no net-new tests, this was
 a correctness fix, not new behavior).
+
+## 24. `TIB` and `PAD` merged into one `WORK` bank — done, M31
+
+### Motivation
+
+Follow-on from §23: with every bank now correctly rounding up to a
+real size class, `TIB` and `PAD` — each just 128 bytes of logical
+content — were independently paying for a full XS class (4096 bytes)
+apiece. Both are the same *kind* of thing (small, transient, per-line
+scratch text) and neither is ever live at the same time as something
+that would need them kept separate, so there's no real reason for two
+banks instead of one.
+
+### Design
+
+One `WORK` bank (tag and name both `WORK`, matching `MMAP`'s own
+self-naming convention), sized as the sum of `TIB_SIZE` (128) and
+`PAD_SIZE` (128) — `createBank()` rounds the *combined* 256-byte
+request up to XS, same as it would for either alone, so this now costs
+one size class instead of two. `TIB` occupies the first 128 bytes
+(offset 0), `PAD` the next 128 (offset 128) — fixed sub-offsets within
+the one bank, computed once at construction (`Machine`'s constructor),
+not separately re-derived per access.
+
+**Logical capacities are unchanged, deliberately.** `tibSize`/`padSize`
+stay `128` each (the sub-region's own logical size), not the bank's
+real rounded footprint (4096) — this is purely an allocation-topology
+change, not a capacity change. A line longer than 128 characters, or
+an `S"` string longer than 128 bytes, behaves exactly as it did before
+the merge. (Live-verified while checking this: typing a long `S"`
+string interactively hits `TIB`'s own 128-character *line* cap before
+ever reaching `PAD`'s 128-byte *content* cap, since the whole line —
+`S" ...text..."` — has to fit in `TIB` first. Pre-existing behavior,
+unrelated to this merge; `strings.test.ts`'s "too long for PAD" test
+exercises `PAD`'s own boundary directly via `Machine.interpret()`,
+which writes straight into a JS string rather than round-tripping
+through `TIB`/`ACCEPT`.)
+
+A real, expected consequence: `BANK@ TIB`/`BANK@ PAD` no longer
+resolve — there's no bank tagged `TIB` or `PAD` anymore, only `WORK`.
+Forth-level access to `PAD`'s address already has its own dedicated
+primitive (`PAD ( -- addr )`, M16), which is unaffected — it still
+returns the right address, just computed as an offset into `WORK` now.
+Nothing ever exposed a `TIB ( -- addr )` word (there was never a
+public way to reach it beyond the bank-table lookup ACCEPT itself
+consumes internally), so nothing loses a capability that mattered.
+
+`storage.ts`'s `TAG_TO_EXTENSION` drops `TIB`/`PAD`, gains `WORK` →
+`.WRK`. `spec/02-MEMORY-MODEL.md` §4.6's bank-tag table and §5.4's
+worked example, and `spec/01-HAL.md` §6.3's tag↔extension table and
+its `TIB`/`PAD` persistence-rationale prose, all updated to match —
+this changes the cross-target bank-tag contract, not just Rebel-Sim's
+own implementation, so the spec needed to move with the code, same
+discipline as every other spec-affecting change this session.
+
+### Verified
+
+Live, via WebMCP `read_banks`: a fresh `Machine` now shows 8 banks
+instead of 9 (`WORK` at `90112`/`4096`, replacing separate `TIB`/`PAD`
+entries) — matches the updated §5.4 worked example. `S" hello world"
+TYPE` (exercises `PAD`) and typing an ordinary line (exercises `TIB`)
+both worked correctly through the shared bank. `PROJECT`/`SAVE`/
+`RESTORE` re-verified end to end afterward — a defined word and the
+screen content both survived a save/restore round-trip with `WORK`
+persisted as a single `WORK.WRK` asset.
+
+**Tests:** 276 engine tests total, no net change in count — this was a
+topology change, not new behavior. `storage.test.ts`'s tag-list loop
+updated (`TIB`/`PAD` → `WORK`); `strings.test.ts`'s "too long for PAD"
+test reverted to its original ~199-character probe (briefly bumped to
+exceed 4096 in §23, now correctly exceeding the restored logical 128
+again).

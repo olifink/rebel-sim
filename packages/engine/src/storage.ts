@@ -50,11 +50,13 @@ const ASSET_HEADER_SIZE = 6; // magic(2) + tag(4)
 // spec/01-HAL.md §6.3's full tag<->extension table — every bank tag
 // spec/02-MEMORY-MODEL.md §4.6 defines gets an entry, not just the
 // "ordinary content asset" ones (SCRN/FONT/SPRT/DICT/DATA): CHAR/KMAP/
-// SYSV/DSTK/RSTK are live session state, and MMAP/TIB/PAD are included
+// SYSV/DSTK/RSTK are live session state, and MMAP/WORK are included
 // for uniformity of the mechanism (§6.3's own reasoning) even though
 // their content isn't normally meaningful to reload on its own — MMAP
 // specifically is what makes the two-phase restore below possible at
-// all (§6.3.1).
+// all (§6.3.1). WORK (M31) replaces the earlier separate TIB/PAD
+// tags — both were small, transient, per-line scratch text, now one
+// bank at fixed sub-offsets instead of two independently-rounded ones.
 const TAG_TO_EXTENSION: Readonly<Record<string, string>> = {
   SCRN: 'SCR',
   FONT: 'FNT',
@@ -67,8 +69,7 @@ const TAG_TO_EXTENSION: Readonly<Record<string, string>> = {
   DSTK: 'DST',
   RSTK: 'RST',
   MMAP: 'MAP',
-  TIB: 'TIB',
-  PAD: 'PAD',
+  WORK: 'WRK',
 };
 const EXTENSION_TO_TAG: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(TAG_TO_EXTENSION).map(([tag, ext]) => [ext, tag]),

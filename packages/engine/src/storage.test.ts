@@ -147,8 +147,8 @@ describe('Storage', () => {
     const storage = new Storage(arena, banks, memoryHal());
     // CART (spec/02-MEMORY-MODEL.md §4.6) is a real bank tag, but not
     // one spec/01-HAL.md §6.3's tag<->extension table maps yet — unlike
-    // SYSV/DSTK/RSTK/CHAR/KMAP/MMAP/TIB/PAD, which this module's
-    // TAG_TO_EXTENSION now covers (M29).
+    // SYSV/DSTK/RSTK/CHAR/KMAP/MMAP/WORK, which this module's
+    // TAG_TO_EXTENSION now covers (M29/M31).
     const bank = banks.createBank('CART', 64);
     await expect(storage.saveAsset('P', bank)).rejects.toThrow(/no known asset file extension/);
   });
@@ -203,7 +203,7 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
     expect(m2Extra!.tag).toBe('DATA');
     expect(m2.arena.readByte(m2Extra!.base)).toBe(77);
 
-    for (const tag of ['SYSV', 'DSTK', 'RSTK', 'DICT', 'CHAR', 'KMAP', 'TIB', 'PAD', 'MMAP']) {
+    for (const tag of ['SYSV', 'DSTK', 'RSTK', 'DICT', 'CHAR', 'KMAP', 'WORK', 'MMAP']) {
       const original = m1.banks.findBank(tag);
       const reloaded = m2.banks.findBank(tag);
       expect(reloaded!.base).toBe(original!.base);

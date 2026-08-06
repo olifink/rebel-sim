@@ -61,8 +61,14 @@ const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
-const TIB_BANK_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a); the *logical* content size createBank() rounds up to XS (spec/02-MEMORY-MODEL.md §4.3), not the bank's actual footprint
-const PAD_BANK_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning; also rounds up to XS
+const TIB_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a)
+const PAD_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning
+// M31: both are logical sub-region sizes within one WORK bank now, not
+// independent bank-size requests — createBank() rounds the *combined*
+// request up to a size class (spec/02-MEMORY-MODEL.md §4.3), same as
+// it would for either alone, so merging them costs one XS class
+// instead of two.
+const WORK_BANK_SIZE = TIB_SIZE + PAD_SIZE;
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
@@ -126,7 +132,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly storage: Storage;
   readonly channel: Channel;
   private readonly inner: Inner;
-  private readonly tibBank: Bank;
+  // M31 (spec/02-MEMORY-MODEL.md §4.6): TIB and PAD share one WORK
+  // bank, at fixed sub-offsets, rather than each independently
+  // rounding up to its own XS size class — both are small, transient,
+  // per-line scratch text, so co-locating them costs one class instead
+  // of two. tibBase/tibSize replace what used to be a standalone
+  // `tibBank: Bank` field; padBase/padSize are unchanged in shape,
+  // just computed as an offset within workBank now instead of a
+  // separate bank's own base.
+  private readonly tibBase: number;
+  private readonly tibSize: number;
   private readonly acceptCfa: number;
   readonly padBase: number;
   readonly padSize: number;
@@ -235,12 +250,15 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       writeHeader(this, p.name, flags, p.id);
     }
 
-    this.tibBank = this.banks.createBank('TIB', TIB_BANK_SIZE, 'TIB');
+    // M31: TIB and PAD as fixed sub-offsets within one WORK bank —
+    // see the field-declaration comment above for why.
+    const workBank = this.banks.createBank('WORK', WORK_BANK_SIZE, 'WORK');
+    this.tibBase = workBank.base;
+    this.tibSize = TIB_SIZE;
     this.acceptCfa = findWord(this, 'ACCEPT')!.cfa;
 
-    const padBank = this.banks.createBank('PAD', PAD_BANK_SIZE, 'PAD');
-    this.padBase = padBank.base;
-    this.padSize = padBank.size;
+    this.padBase = workBank.base + TIB_SIZE;
+    this.padSize = PAD_SIZE;
   }
 
   getBase(): number {
@@ -481,8 +499,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       this.emitString('> ');
       yield 'progress';
 
-      this.stack.push(this.tibBank.base);
-      this.stack.push(this.tibBank.size);
+      this.stack.push(this.tibBase);
+      this.stack.push(this.tibSize);
       yield* this.inner.executeXT(this.acceptCfa);
       const len = this.stack.pop();
 
@@ -491,7 +509,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
       let line = '';
       for (let i = 0; i < len; i++) {
-        line += String.fromCharCode(this.arena.readByte(this.tibBank.base + i));
+        line += String.fromCharCode(this.arena.readByte(this.tibBase + i));
       }
       if (line.trim().length === 0) {
         continue;

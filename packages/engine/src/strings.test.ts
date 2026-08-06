@@ -64,9 +64,11 @@ describe('Strings (M8, CORE-VOCABULARY.md §8)', () => {
 
   it('interpreted S" throws if the text is too long for PAD, rather than corrupting adjacent arena memory', () => {
     const m = new Machine();
-    // padSize is now 4096 (PAD_BANK_SIZE rounds up to the XS size
-    // class, spec/02-MEMORY-MODEL.md §4.3) — comfortably over that.
-    const tooLong = 'x '.repeat(2200).trim();
+    // padSize is PAD's own logical sub-region size (128, M31's
+    // TIB+PAD-share-one-WORK-bank merge) — the WORK bank's real
+    // rounded footprint (4096) is allocator overhead, not PAD's
+    // exposed capacity. Words joined by consumeQuotedText exceed it.
+    const tooLong = 'x '.repeat(100).trim();
     expect(() => m.interpret(`S" ${tooLong}"`)).toThrow(/too long for PAD/);
   });
 

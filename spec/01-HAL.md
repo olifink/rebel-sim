@@ -546,8 +546,7 @@ below is (or should become) a synchronous Forth primitive.
   | `DSTK` | `.DST` |
   | `RSTK` | `.RST` |
   | `MMAP` | `.MAP` |
-  | `TIB` | `.TIB` |
-  | `PAD` | `.PAD` |
+  | `WORK` | `.WRK` |
 
   Every bank tag a conformant target's memory model defines
   (`02-MEMORY-MODEL.md`) gets an entry here — this specification does
@@ -560,7 +559,7 @@ below is (or should become) a synchronous Forth primitive.
     claim (`FORTH-ARCHITECTURE.md` — pause a session, dump it, resume
     identically on another conformant target) an actual save/load path
     rather than a theoretical one.
-  - `MMAP`/`TIB`/`PAD` — see below. Included for uniformity of the
+  - `MMAP`/`WORK` — see below. Included for uniformity of the
     mechanism, not because their content is normally meaningful to
     reload.
 
@@ -576,20 +575,23 @@ below is (or should become) a synchronous Forth primitive.
   and raise it against this document rather than inventing a silent
   local convention no other target can read.
 
-  **On `TIB`/`PAD`:** both are transient, in-flight working state —
-  `TIB` is the resident line buffer `ACCEPT` reads a REPL line into;
-  `PAD` is unconditionally overwritten by the next use with no
-  reentrancy guarantee, so a reloaded copy is stale the moment
-  anything real runs. Persisting them anyway is deliberate: excluding
-  specific tags from an otherwise-generic "any bank can be saved as an
-  asset" mechanism would turn this into a per-tag persistence
-  allowlist the mechanism itself has to know about, for a safety
-  problem that doesn't actually exist — reloading stale scratch
-  content is harmless, since both banks' very next real use overwrites
-  whatever was restored before any Forth code could observe it. A
-  conformant implementation **MUST** treat `TIB`/`PAD` as ordinary
-  persistable banks, identical in handling to any other tag in this
-  table.
+  **On `WORK`:** transient, in-flight working state — the Terminal
+  Input Buffer sub-region is the resident line buffer `ACCEPT` reads a
+  REPL line into; the `PAD` sub-region is unconditionally overwritten
+  by the next use with no reentrancy guarantee, so a reloaded copy is
+  stale the moment anything real runs. Both share this one bank at
+  fixed sub-offsets, not two independent banks — each is small enough
+  that giving them separate size-class allocations would waste a whole
+  extra class on padding alone (`02-MEMORY-MODEL.md` §4.3/§4.6).
+  Persisting `WORK` anyway is deliberate: excluding it from an
+  otherwise-generic "any bank can be saved as an asset" mechanism would
+  turn this into a per-tag persistence allowlist the mechanism itself
+  has to know about, for a safety problem that doesn't actually exist —
+  reloading stale scratch content is harmless, since its very next real
+  use overwrites whatever was restored before any Forth code could
+  observe it. A conformant implementation **MUST** treat `WORK` as an
+  ordinary persistable bank, identical in handling to any other tag in
+  this table.
 
 ### 6.3.1 Restoring exact memory layout: `MMAP` must load first
 
