@@ -35,17 +35,27 @@ It does not specify:
   one or the other. Arithmetic words (`+`, `-`, `*`, `<`) treat it
   signed; address/offset arithmetic and unsigned comparison words treat
   it unsigned.
-- **Every multi-byte memory access MUST go through exactly one accessor
-  module** (`readCell(offset)` / `writeCell(offset, value)`, and their
-  unsigned variants) that hardcodes little-endian byte order in one
-  place. This exists because the common host-language default is
-  big-endian (e.g. `DataView.getInt32`/`setInt32` default to big-endian
-  unless told otherwise) — scattering little-endian-flag arguments
-  across call sites instead of centralizing them is exactly how this
-  silently breaks: everything still looks correct running on one
-  target, and is corrupt the moment a dumped arena is loaded on
-  another. No code outside this one module MUST ever call a
-  platform's native default-endian multi-byte accessor directly.
+- **The outcome, not the mechanism, is normative: every multi-byte read
+  or write of arena memory MUST observe little-endian byte order, with
+  no exceptions.** This is what makes the "dump an arena, load it on
+  another conformant target" portability claim hold — a cell written
+  little-endian on one target and read native-endian on another is
+  silent corruption, not a crash, and it looks correct on the target
+  that wrote it right up until the moment something else reads the dump.
+  *How* a given implementation guarantees this is entirely its own
+  concern, not this document's: on a target whose native word
+  representation is already little-endian (true of both RP2350 cores,
+  and of Arm in this configuration), the natural, direct memory access
+  the language/toolchain already provides typically *is* little-endian
+  and needs no wrapping at all. The failure mode this rule guards
+  against is specific to a host whose default multi-byte accessors are
+  *not* little-endian (e.g. a hosted/managed-language target, or a
+  genuinely big-endian host) — there, funneling every multi-byte access
+  through one small accessor module that hardcodes the byte order in a
+  single place is a RECOMMENDED pattern for avoiding a per-call-site
+  flag that's easy to omit at one of many scattered call sites, not a
+  requirement this specification imposes on every implementation
+  regardless of its host's native endianness.
 - Floating point is out of scope for this document and this cell. A
   target adding float support later MUST use a separate float stack
   (standard Forth practice), never pack it into the integer cell —
@@ -579,7 +589,7 @@ one becomes real and load-bearing somewhere, not before:
 
 | Requirement | Section |
 |---|---|
-| Cell is exactly 32-bit, little-endian, signed/unsigned by operation, through one accessor module | §2 |
+| Cell is exactly 32-bit, little-endian, signed/unsigned by operation | §2 |
 | Addresses are per-arena offsets; a raw host pointer never becomes a Forth cell value | §3 |
 | A single arena never addresses ≥ 2^32 bytes | §3, §6.3 |
 | Every carved bank occupies exactly one size class (XS–XXL); no arbitrary exact sizes, no exceptions beyond `MMAP` itself | §4.3, §5.3 |
