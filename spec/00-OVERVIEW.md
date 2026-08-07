@@ -44,13 +44,12 @@ target's own porting notes, not here.
 | 01 | [`01-HAL.md`](01-HAL.md) | **v1.0** | The hardware abstraction boundary: screen, keyboard/input, the input-channel abstraction, storage, timing, error reporting. What every target must supply, and what's portable and must never be reimplemented per target. |
 | 02 | [`02-MEMORY-MODEL.md`](02-MEMORY-MODEL.md) | **v1.0** | The cell, the flat per-arena address space, the bank system and its size classes/alignment rule, the arena-resident bank table (`MMAP`), multi-arena isolation. |
 | 03 | [`03-SYSVARS.md`](03-SYSVARS.md) | **v1.0** | The `SYSV` bank's header, its grouped layout, per-field byte offsets, naming convention, and the field-presence-signals-capability convention `01-HAL.md` already assumes exists. |
-| 04 | `04-FORTH-CORE.md` | planned | Dictionary header, token-threaded dispatch, the outer/inner interpreter, the primitive word set, the error/exception model. |
+| 04 | [`04-FORTH-CORE.md`](04-FORTH-CORE.md) | **v1.0** | Dictionary header, token-threaded dispatch, the outer interpreter, the full primitive catalog (KERNEL vs. BOOTSTRAP), the bootstrap Forth-source layer, the error/exception model. |
 
-Only `04-FORTH-CORE.md` remains unwritten. It's named here so
-cross-references from the HAL document resolve to a real (if not yet
-written) target, and so the HAL document's own scope boundaries — what
-it deliberately does *not* cover because it belongs to one of these —
-are legible.
+All four documents are written. This index is kept here so
+cross-references between them resolve to a real target, and so each
+document's own scope boundaries — what it deliberately does *not*
+cover because it belongs to one of the others — are legible.
 
 ## 4. Normative language
 

@@ -609,7 +609,7 @@ one becomes real and load-bearing somewhere, not before:
 | Cell is exactly 32-bit, little-endian, signed/unsigned by operation | §2 |
 | Addresses are per-arena offsets; a raw host pointer never becomes a Forth cell value | §3 |
 | A single arena never addresses ≥ 2^32 bytes | §3, §6.3 |
-| Every carved bank occupies exactly one size class (XS–XXL); no arbitrary exact sizes, no exceptions beyond `MMAP` itself | §4.3, §5.3 |
+| Every carved bank, including `MMAP` itself, occupies exactly one size class (XS–XXL); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
 | Bump allocator 4 KiB-aligns every carved bank's base, including absolute-address alignment if the arena's own allocation might not already be page-aligned | §4.4 |
 | External banks are registered, don't consume the free cursor, and don't need a size class | §4.5 |
 | Bank table (`MMAP`) is arena-resident, not a host-side-only structure | §5 |
