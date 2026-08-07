@@ -45,38 +45,6 @@
                     text field to visually distinguish focus from */
 }
 
-/* Overlay, not a flex sibling in .console's own flow (Ctrl+`/Ctrl+\
-   toggle, app.ts's monitorsVisible) — deliberately so hiding it never
-   shifts the canvas/pause-bar/storage-bar above it, and so it stays
-   viewport-anchored once the canvas itself is free to grow to fill
-   the space this used to reserve. */
-.stack-bar {
-  position: fixed;
-  bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 640px;
-  box-sizing: border-box;
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid #0f0;
-  padding: 4px 8px;
-  opacity: 0.8;
-  font-size: 14px;
-  z-index: 10;
-}
-
-.stack-label {
-  margin-right: 8px;
-}
-
-.storage-bar {
-  width: 100%;
-  max-width: 640px;
-  opacity: 0.8;
-  font-size: 14px;
-}
-
 /* DEBUGGING.md (M10) UI: red rather than green — deliberately distinct
    from the rest of the terminal's palette so a paused REPL is
    impossible to miss, matching a debugger's usual "stopped" color. */
@@ -109,15 +77,19 @@
   color: #000;
 }
 
-/* Overlay, not a flex sibling in .repl's own layout (Ctrl+`/Ctrl+\
+/* Overlays, not flex siblings in .repl's own layout (Ctrl+`/Ctrl+\
    toggle, app.ts's monitorsVisible) — a HUD floating over the console
    rather than a column that reserves horizontal space, so hiding it
    never shifts the canvas and the canvas is free to grow to fill the
-   space this used to reserve. */
-.inspector {
+   space they used to reserve. One panel per side, both full-height so
+   neither has to share vertical space with the other: .inspector
+   (breakpoints/dictionary/stacks) on the right, .storage-panel (banks/
+   storage status, plus a future storage-browser placeholder — recycled
+   from what used to be a bottom-of-viewport stack-bar) on the left. */
+.inspector,
+.storage-panel {
   position: fixed;
   top: 8px;
-  right: 8px;
   bottom: 8px;
   width: 300px;
   background: rgba(0, 0, 0, 0.85);
@@ -130,12 +102,19 @@
   z-index: 10;
 }
 
-/* Shared by .inspector/.stack-bar — toggled by app.ts's
-   monitorsVisible signal (Ctrl+`/Ctrl+\). display:none rather than
-   visibility:hidden: both are already out of normal document flow
-   (position: fixed), so there's nothing left to reflow either way —
-   display:none additionally drops them from hit-testing/tab order,
-   which visibility:hidden alone wouldn't. */
+.inspector {
+  right: 8px;
+}
+
+.storage-panel {
+  left: 8px;
+}
+
+/* Toggled by app.ts's monitorsVisible signal (Ctrl+`/Ctrl+\).
+   display:none rather than visibility:hidden: both panels are already
+   out of normal document flow (position: fixed), so there's nothing
+   left to reflow either way — display:none additionally drops them
+   from hit-testing/tab order, which visibility:hidden alone wouldn't. */
 .hidden {
   display: none;
 }

@@ -61,13 +61,14 @@ export class App implements AfterViewInit, OnDestroy {
   protected readonly breakpointWords = signal<ReadonlySet<string>>(new Set());
   protected readonly breakpointList = computed(() => Array.from(this.breakpointWords()).sort());
 
-  // Web-only UI, no engine/spec involvement: the inspector aside and
-  // stack-bar are a HUD overlay (app.css — position: fixed, not a flex
+  // Web-only UI, no engine/spec involvement: the inspector and storage
+  // panels are a HUD overlay (app.css — position: fixed, not a flex
   // sibling) rather than a layout column, so toggling this never shifts
   // the canvas — prep for eventually letting the canvas itself grow
-  // into the space this used to reserve. Ctrl+`/Ctrl+\ (handleKeyEvent)
-  // toggles it; defaults visible, matching today's look on first load.
-  protected readonly monitorsVisible = signal(true);
+  // into the space they used to reserve. Ctrl+`/Ctrl+\ (handleKeyEvent)
+  // toggles it; defaults hidden now — the canvas is the thing to see
+  // first, the HUD is opt-in.
+  protected readonly monitorsVisible = signal(false);
 
   // Constructed in ngAfterViewInit — the engine's Screen.cls() (M3) runs
   // during Machine's own constructor and paints through the HAL
@@ -555,7 +556,7 @@ export class App implements AfterViewInit, OnDestroy {
   }
 
   // Compared against each tick's stack snapshot so the Angular zone is
-  // only entered when the stack-bar debug readout actually needs to
+  // only entered when the inspector's stack readout actually needs to
   // change — NOT gated on step()'s status. A whole line can finish *and*
   // the REPL loop can re-block waiting on the next line's ACCEPT within
   // the same step() call (interpret, print ok/error, loop back, block on

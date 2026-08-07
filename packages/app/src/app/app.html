@@ -2,22 +2,12 @@
   <div class="console">
     <canvas #screen class="screen" tabindex="0"></canvas>
 
-    <div class="stack-bar" [class.hidden]="!monitorsVisible()">
-      <span class="stack-label">stack (top→bottom):</span>
-      <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
-    </div>
-
     @if (pausedWord(); as word) {
       <div class="pause-bar">
         <span>paused at {{ word }}</span>
         <button type="button" class="continue-button" (click)="resumeFromBreakpoint()">Continue</button>
       </div>
     }
-
-    <div class="storage-bar">
-      <span class="stack-label">storage:</span>
-      <span class="storage-status">{{ storageStatus() }}</span>
-    </div>
   </div>
 
   <aside class="inspector" [class.hidden]="!monitorsVisible()">
@@ -48,10 +38,21 @@
     </div>
 
     <div class="inspector-section">
+      <div class="inspector-label">stack (top→bottom):</div>
+      <div class="inspector-values stack-values">{{ stack().join(' ') || '(empty)' }}</div>
+    </div>
+
+    <div class="inspector-section">
       <div class="inspector-label">return stack (top→bottom):</div>
       <div class="inspector-values">{{ returnStack().join(' ') || '(empty)' }}</div>
     </div>
+  </aside>
 
+  <!-- Recycled from the old bottom-of-viewport stack-bar overlay (see
+       app.css) — banks/storage status moved here from .inspector, plus
+       a placeholder for a future storage browser (projects/assets
+       currently sitting in localStorage), not built yet. -->
+  <aside class="storage-panel" [class.hidden]="!monitorsVisible()">
     <div class="inspector-section">
       <div class="inspector-label">banks arena 1, {{ formatBankSize(bankUsedBytes()) }} of {{ formatBankSize(arenaSizeBytes()) }}:</div>
       <table class="bank-table">
@@ -64,6 +65,16 @@
           </tr>
         }
       </table>
+    </div>
+
+    <div class="inspector-section">
+      <div class="inspector-label">storage:</div>
+      <div class="inspector-values">{{ storageStatus() }}</div>
+    </div>
+
+    <div class="inspector-section">
+      <div class="inspector-label">storage browser</div>
+      <div class="inspector-empty">(coming soon)</div>
     </div>
   </aside>
 </main>
