@@ -2859,3 +2859,133 @@ updated (`TIB`/`PAD` → `WORK`); `strings.test.ts`'s "too long for PAD"
 test reverted to its original ~199-character probe (briefly bumped to
 exceed 4096 in §23, now correctly exceeding the restored logical 128
 again).
+
+## 25. Storage becomes synchronous (`localStorage`, not OPFS); `BSAVE`/`BLOAD` — done, M33
+
+### Motivation
+
+Asked directly for `BSAVE`/`BLOAD` (save/load one named bank, the
+single-bank counterpart to `SAVE`/`RESTORE`) — but investigating how to
+add them "despite the async constraints" surfaced a bigger, real
+problem worth fixing first, once named plainly: §22's `PROJECT`/`SAVE`/
+`RESTORE` are outer-loop-only special syntax, not real dictionary
+words, purely because OPFS's browser API is Promise-based on the main
+thread. That forced `repl.ts`'s core `step()`/`StepStatus` to grow a
+dedicated `'storage'` suspend/resume state (§22's own design decisions)
+just so a running Forth line could pause around a real disk write.
+
+Checked against `FORTH-ARCHITECTURE.md`'s own porting note for
+`hal_block_read`/`hal_block_write` and `HAL.md` §2: the *original*
+cross-target design describes storage access as "an ordinary bank
+access, not a device call," and real hardware (Rebel-ROM's
+`CStorageModule`) blocks on FAT/USB I/O directly — bare-metal,
+single-threaded, no async concept exists there at all. The async
+requirement in Rebel-Sim never came from the shared spec; it leaked in
+purely because of which browser API M5 originally picked. That's a
+browser-platform artifact dictating the shared cross-target engine
+contract other Rebel targets are supposed to mirror — worth fixing
+generally, not just working around for `BSAVE`/`BLOAD` specifically.
+
+### Alternatives considered
+
+- **A Web Worker for the interpreter**, so a genuinely synchronous OPFS
+  API (`FileSystemSyncAccessHandle`, real but Worker-only — the browser
+  refuses to let the main thread block on file I/O at all) becomes
+  reachable. Rejected: this reverses M7's already-settled "generator/
+  step-function on the main thread, not a Web Worker" call
+  (`PORTING-WEB.md` §6), a much bigger architectural surgery
+  (message-passing for canvas/keyboard/screen sync) than this problem
+  warrants — a decision to make on its own merits (real preemption
+  against a runaway Forth program), not as a side effect of two new
+  words.
+- **`lightning-fs`** (IndexedDB-backed virtual filesystem, suggested as
+  a nicer-shaped alternative to a flat key-value store): checked
+  directly against its own docs, not assumed — it's Promise/callback-
+  only, no synchronous API at all, and IndexedDB itself has no
+  synchronous main-thread access any more than OPFS does. Same
+  underlying problem with nicer POSIX-y ergonomics and a larger quota,
+  not an actual fix.
+- **`localStorage` — chosen.** A real, ordinary Web Storage API:
+  synchronous, no Promises, no Worker needed, ships in every browser,
+  and persists across reloads (unlike a plain in-memory-only fallback,
+  the other genuinely-synchronous option, which was rejected as giving
+  up real working functionality for no gain). Trades away OPFS's larger
+  effective capacity (~5-10MB per origin vs. OPFS's disk-backed quota,
+  browser-dependent) and native directory model — acceptable, since
+  Rebel's own bank sizes (four-to-few-hundred KB size classes) are
+  nowhere near what would bind on that in practice.
+
+### What shipped
+
+`StorageHal` (`storage.ts`) dropped every `Promise` from its interface;
+`Storage`'s methods (`openProject`/`saveAsset`/`loadCart`/`saveCart`)
+and `runStorageSelfTest()` all became plain synchronous methods. One
+new method, `Storage.loadAsset(project, bank)` — the single-bank
+counterpart to `openProject()`'s whole-directory restore, overwriting
+an already-existing bank's memory in place (zero-padded if short,
+throws if the saved payload is too large — a single named request
+deserves a clear error over `openProject()`'s many-files "skip, not
+fatal" tolerance).
+
+`repl.ts`'s `StepStatus` lost `'storage'` entirely; `Machine`'s
+`pendingStorage`/`pendingStorageError` fields and
+`runPendingStorage()`/`throwPendingStorageError()` methods are gone.
+`PROJECT`/`SAVE`/`RESTORE` moved from `interpretExecuting`'s special
+outer-loop syntax into `primitives.ts` as ordinary dispatch cases
+(tokens 126-128) — genuine dictionary entries now, listed, `'`-
+resolvable, `HIDE`/`FORGET`-able, and (for `SAVE`, which parses no
+further input) fully usable compiled or via `EXECUTE`. Two new
+primitives, `BSAVE ( "tag" -- )` / `BLOAD ( "tag" -- )` (tokens
+129-130), resolve a bank via `BankTable.requireBank(tag)` — the same
+single-tag addressing `BANK@` already established — and call
+`saveAsset`/`loadAsset` directly; `BLOAD` repaints the screen only when
+the loaded bank is `CHAR`, same reasoning as `RESTORE`'s existing
+`redrawAll()` call.
+
+**A real, inherited limitation, not new:** `PROJECT`/`RESTORE`/`BSAVE`/
+`BLOAD` all still parse their name/tag argument via `nextInputToken()`
+— the same shape `BANK@`/`CREATE-BANK`/`'` already have, which only
+resolves correctly when interpreted directly (the very next raw token
+in the currently-typed line), not compiled with a following literal
+(the compiler tries to resolve that literal as a word of its own
+first). Real Forth's own file-access words avoid this by taking a
+`c-addr u` string from the stack instead of parsing source text — not
+adopted here since nothing has a concrete need for a *dynamically
+computed* project name/tag yet; revisit if one shows up.
+
+`packages/app/src/app/opfs-storage-hal.ts` deleted; replaced by
+`local-storage-storage-hal.ts` (base64-encodes payloads, namespaces
+keys under `rebel-sim:`, `ensureDir` is a no-op over the flat
+namespace). `app.ts`'s `tick()` lost its `storageInFlight` signal and
+the `'storage'`-status branch entirely — `SAVE`/`RESTORE`/`BSAVE`/
+`BLOAD` now run to completion inside a single `step()` call like any
+other word, needing no separate suspend/resume handling from the pump
+loop at all. The self-test call site became a plain try/catch instead
+of `.then()`/`.catch()`.
+
+### Tests
+
+`storage.test.ts`: every test un-asynced; three new tests for
+`loadAsset` (overwrite in place, false when nothing was ever saved,
+throws when the saved payload is too large). `project.test.ts`:
+every test un-asynced, the `runLine()`-loops-on-`'storage'` helper
+removed entirely (`m.interpret()` just works now), the old "rejected
+inside a colon-definition" test flipped to prove the opposite for
+`SAVE` (no name-parsing argument, so fully compilable/`EXECUTE`-able)
+and to prove `PROJECT`/`RESTORE` are at least genuine dictionary
+entries now (found by `'`, listed) even though their own
+`nextInputToken()` shape still doesn't compose with a following
+literal; a new `BSAVE`/`BLOAD` describe block (no-project-name error,
+single-bank-not-whole-project, unknown-tag error, refresh-in-place
+round trip, no-saved-asset error, genuine-dictionary-entry proof).
+Full engine suite: 293 passed (283 before this milestone, 10 new).
+
+**Live-verified** in a real browser via WebMCP-style remote input,
+including the one check that actually matters for "does this persist
+for real": `PROJECT`/`: GREET 42 ;`/`SAVE`/`BSAVE DICT`, confirmed
+real `rebel-sim:/PROJECTS/...` keys in the browser's own `localStorage`
+(not just in-memory state), then a genuine full-page reload, then
+`RESTORE`/`GREET .` printing `42` and `BLOAD DICT` succeeding —
+proving the whole session survived actual browser storage, not JS
+memory continuity. `BSAVE NOSUCHTAG` produced a proper `? ...`
+Forth-level error, not an uncaught exception.

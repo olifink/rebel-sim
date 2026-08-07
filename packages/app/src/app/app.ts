@@ -14,7 +14,7 @@ import { Machine, runStorageSelfTest, listDictionaryEntries, RemoteChannel } fro
 import type { Bank, DictionaryEntry, StepStatus } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
-import { createOpfsStorageHalIfSupported } from './opfs-storage-hal.js';
+import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
 import { computePresentationSize } from './canvas-presenter.js';
 
 // The real framebuffer resolution (matches repl.ts's DEFAULT_SCREEN_WIDTH/
@@ -53,14 +53,6 @@ export class App implements AfterViewInit, OnDestroy {
   // their call sites for why neither needs to special-case being
   // in/outside the Angular zone.
   protected readonly pausedWord = signal<string | undefined>(undefined);
-  // M29 (project mechanics, repl.ts): `true` while a SAVE/RESTORE's
-  // queued storage operation is being awaited — gates tick()'s step()
-  // calls the same way pausedWord does, since step() won't advance
-  // past the 'storage' pause point until runPendingStorage() clears it
-  // (spec/01-HAL.md §6.2: storage I/O never happens synchronously
-  // inside the interpreter's own dispatch, so something outside it has
-  // to actually await the real async call).
-  protected readonly storageInFlight = signal(false);
   // Currently-armed breakpoint names — polled/diffed in tick() exactly
   // like dictionaryWords/bankTable below, so it stays correct whether a
   // breakpoint was armed from this UI (toggleBreakpoint) or from a
@@ -125,7 +117,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.applyPresentationSize();
     window.addEventListener('resize', this.onResize);
 
-    const storageHal = createOpfsStorageHalIfSupported();
+    const storageHal = createLocalStorageHalIfSupported();
     this.machine = new Machine({
       screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
       storageHal,
@@ -141,25 +133,27 @@ export class App implements AfterViewInit, OnDestroy {
     // (docs/STORAGE.md §8): round-trip a synthetic asset through the real
     // save/open path once at startup and surface PASS/FAIL, rather than
     // only ever finding out storage is broken the first time a real
-    // project tries to use it.
+    // project tries to use it. Synchronous now (localStorage, not OPFS)
+    // — a plain try/catch, no .then()/.catch() needed.
     if (storageHal) {
       // PORTING-WEB.md §7: ask the browser not to casually evict a
-      // user's project data (OPFS) the way ordinary origin storage can
-      // be reclaimed under pressure — losing work because storage was
+      // user's project data the way ordinary origin storage can be
+      // reclaimed under pressure — losing work because storage was
       // tight is a bad failure mode for a tool meant to feel like it
-      // owns its own memory. Best-effort: the browser may still say no
-      // (persist() resolves false), and there's nothing useful to do
-      // about that beyond having asked.
+      // owns its own memory. Best-effort, and less clearly specified for
+      // localStorage than it was for OPFS (persist()'s guarantee is
+      // clearest for IndexedDB/Cache/OPFS's "box" storage), but harmless
+      // to still ask.
       void navigator.storage?.persist?.();
 
-      runStorageSelfTest(storageHal)
-        .then((passed) => this.zone.run(() => this.storageStatus.set(passed ? 'OK' : 'FAILED')))
-        .catch((err: unknown) => {
-          this.zone.run(() => this.storageStatus.set('ERROR'));
-          console.error('storage self-test threw', err);
-        });
+      try {
+        this.storageStatus.set(runStorageSelfTest(storageHal) ? 'OK' : 'FAILED');
+      } catch (err) {
+        this.storageStatus.set('ERROR');
+        console.error('storage self-test threw', err);
+      }
     } else {
-      this.storageStatus.set('unavailable (no OPFS)');
+      this.storageStatus.set('unavailable (no localStorage)');
     }
 
     // Raw keydown/keyup -> the engine's keyboard event queue (M4,
@@ -272,7 +266,7 @@ export class App implements AfterViewInit, OnDestroy {
   // an active injection context. Wrapped defensively: WebMCP is an
   // experimental browser feature (chrome://flags/#enable-webmcp-testing
   // as of this writing) — must degrade silently on browsers without it,
-  // same as OPFS storage support above.
+  // same as localStorage support above.
   private registerWebMcpTools(): void {
     const machine = this.machine;
     const remoteChannel = this.remoteChannel;
@@ -518,7 +512,7 @@ export class App implements AfterViewInit, OnDestroy {
 
   // WebMCP is an experimental browser feature
   // (chrome://flags/#enable-webmcp-testing as of this writing) — must
-  // degrade silently on browsers without it, same as OPFS storage
+  // degrade silently on browsers without it, same as localStorage
   // support above. Guards both a synchronous throw (NG0203-style) and
   // an async rejection from the returned Promise.
   private safeRegisterWebMcpTool(name: string, register: () => Promise<void>): void {
@@ -577,34 +571,25 @@ export class App implements AfterViewInit, OnDestroy {
   // the uneven-pixel-width bug (canvas-presenter.ts).
   //
   // The chain is *not* unconditional: a frame that finds step() blocked
-  // (or skipped — paused at a breakpoint, or a storage op in flight) and
-  // none of the polled UI signals changed lets the chain die instead of
-  // scheduling another frame, rather than redrawing/diffing at 60Hz
-  // forever while the REPL just sits at an idle prompt (the measured
-  // source of persistent idle-tab CPU use). Every place that can make
-  // step() have something to do again calls wake() to restart it: a
-  // keystroke (handleKeyEvent), a WebMCP `type`/breakpoint call, the
-  // Continue button/debug_continue (resumeFromBreakpoint), and a
-  // resolved storage op (below).
+  // (or skipped — paused at a breakpoint) and none of the polled UI
+  // signals changed lets the chain die instead of scheduling another
+  // frame, rather than redrawing/diffing at 60Hz forever while the REPL
+  // just sits at an idle prompt (the measured source of persistent
+  // idle-tab CPU use). Every place that can make step() have something
+  // to do again calls wake() to restart it: a keystroke (handleKeyEvent),
+  // a WebMCP `type`/breakpoint call, and the Continue button/
+  // debug_continue (resumeFromBreakpoint). SAVE/RESTORE/BSAVE/BLOAD are
+  // now ordinary synchronous primitives (localStorage-backed storage,
+  // not OPFS) — they run to completion inside a single step() call like
+  // any other word, no separate suspend/resume phase to gate on here.
   private readonly tick = (): void => {
     let status: StepStatus | undefined;
     try {
-      if (this.pausedWord() === undefined && !this.storageInFlight()) {
+      if (this.pausedWord() === undefined) {
         status = this.machine.step(App.STEP_BUDGET);
         if (status === 'breakpoint') {
           const word = this.machine.pausedAtWord();
           this.zone.run(() => this.pausedWord.set(word));
-        } else if (status === 'storage') {
-          // runPendingStorage() never rejects (repl.ts: a real failure
-          // is captured into pendingStorageError and re-raised through
-          // the *generator's* own error path on the next step() call
-          // instead, which is what replLoop's `? <message>` handling
-          // actually catches) — no .catch() needed here.
-          this.zone.run(() => this.storageInFlight.set(true));
-          void this.machine.runPendingStorage().then(() => {
-            this.zone.run(() => this.storageInFlight.set(false));
-            this.wake();
-          });
         }
       }
     } catch (e) {
@@ -665,10 +650,10 @@ export class App implements AfterViewInit, OnDestroy {
     }
     // 'more-to-run' means step() hit its budget mid-line and genuinely
     // needs another frame to keep making progress; every other status
-    // (including having been skipped entirely while paused/storage-in-
-    // flight) means step() itself has nothing pending until some other
-    // event calls wake() — so only keep scheduling frames if something
-    // was actually pending or actually changed.
+    // (including having been skipped entirely while paused) means
+    // step() itself has nothing pending until some other event calls
+    // wake() — so only keep scheduling frames if something was actually
+    // pending or actually changed.
     if (status !== 'more-to-run' && !changed) {
       this.pumping = false;
       return;

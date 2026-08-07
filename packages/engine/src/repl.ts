@@ -87,7 +87,7 @@ export interface MachineOptions {
    * the CHAR bank / sysvar state is fully correct without one, which is
    * all engine-level tests need. */
   screenHal?: ScreenHal;
-  /** Host-supplied project/cart file I/O (OPFS, etc). Defaults to a
+  /** Host-supplied project/cart file I/O (localStorage, etc). Defaults to a
    * no-op — openProject()/saveAsset() calls just do nothing useful,
    * which is fine for engine-level tests that don't exercise storage. */
   storageHal?: StorageHal;
@@ -112,13 +112,13 @@ export interface MachineOptions {
  * (DEBUGGING.md, M10) — execution paused right before a breakpointed
  * word's body would run; `pausedAtWord()` names it, `step()` again to
  * resume (same "just call step() again" shape as `'blocked'`, but the
- * caller — not a data source — decides when). `'storage'` — execution
- * paused right after `SAVE`/`RESTORE` queued a real async storage
- * operation (`spec/01-HAL.md` §6.2: storage I/O must never happen
- * synchronously inside a running Forth word); call `runPendingStorage()`,
- * await it, then call `step()` again to resume — same suspend/resume
- * shape as blocking `KEY`, just host-driven instead of channel-driven. */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'storage';
+ * caller — not a data source — decides when). Storage (`PROJECT`/`SAVE`/
+ * `RESTORE`/`BSAVE`/`BLOAD`) used to need its own suspend/resume status
+ * here, back when an OPFS-backed `StorageHal` was Promise-based — now
+ * that storage is synchronous (`local-storage-storage-hal.ts`), those
+ * are ordinary `primitives.ts` dispatch cases that run to completion
+ * inside a single `step()` call, same as any other word. */
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -154,26 +154,6 @@ export class Machine implements PrimitiveContext, DictionaryContext {
    * name-based mutation without `Inner` needing dictionary-lookup logic
    * of its own; `Inner` only ever reads it. */
   private readonly breakpoints = new Set<number>();
-
-  /** Set by `SAVE`/`RESTORE`'s cases in `interpretExecuting` right
-   * before yielding `'storage'` — what `runPendingStorage()` actually
-   * does once the host calls it. `undefined` whenever nothing is
-   * pending; only meaningful immediately after `step()` returns
-   * `'storage'`, same "stale until the next real hit" caveat as
-   * `pausedAtWord()`. */
-  private pendingStorage: { op: 'save' | 'restore'; project: string } | undefined;
-
-  /** Set by `runPendingStorage()` instead of rejecting its own promise
-   * when the real storage call fails — a rejection there would escape
-   * to whatever's driving `step()` (`app.ts`'s `tick()`) with no way to
-   * route it back through the *generator's* own error path, which is
-   * what `replLoop()`'s `? <message>`-and-continue handling actually
-   * catches (`tokenizeAndRun`'s `yield*` chain, not `step()`'s outer
-   * try/catch). Instead, `SAVE`/`RESTORE`'s case re-checks this right
-   * after resuming past `yield 'storage'` and throws it *there* — same
-   * "propagates like any other line error" contract every other
-   * outer-loop error already has. */
-  private pendingStorageError: unknown;
 
   // The outer interpreter's own parse position — M8, CORE-VOCABULARY.md
   // §7: CREATE/VARIABLE/CONSTANT/S" all need to consume the *next* word
@@ -319,84 +299,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         if (value === 'breakpoint') {
           return 'breakpoint';
         }
-        if (value === 'storage') {
-          return 'storage';
-        }
       }
       return 'more-to-run';
     } catch (err) {
       this.session = undefined;
-      throw err;
-    }
-  }
-
-  /** Performs the real async storage operation `SAVE`/`RESTORE` queued
-   * right before `step()` returned `'storage'` (spec/01-HAL.md §6.2:
-   * this is the only place `Storage`'s async methods are ever called —
-   * never from inside the synchronous inner-interpreter dispatch). Call
-   * once per `'storage'` status, then resume driving `step()`.
-   *
-   * `'save'` writes every currently active bank — including `MMAP`
-   * itself — as a project asset, in `MMAP` slot order
-   * (`spec/01-HAL.md` §6.3: no special ordering requirement on the save
-   * side). `'restore'` delegates to `Storage.openProject()`'s
-   * `MMAP`-first two-phase restore (§6.3.1), then repaints the visible
-   * screen from the just-restored `CHAR` bank content — a restore
-   * overwrites `CHAR` bytes directly, bypassing the normal per-
-   * character HAL write-through `screen.ts` otherwise always goes
-   * through, so nothing else would trigger a redraw.
-   *
-   * Never itself rejects — a real storage failure is captured into
-   * `pendingStorageError` instead (see its own doc comment for why)
-   * rather than thrown here, so this always resolves and the caller
-   * never needs a catch of its own. Always clears `pendingStorage`,
-   * success or failure, so the session isn't left stuck forever
-   * pointed at a request that's already been resolved one way or the
-   * other. */
-  async runPendingStorage(): Promise<void> {
-    const request = this.pendingStorage;
-    if (!request) {
-      throw new Error('runPendingStorage() called with no pending request');
-    }
-    try {
-      if (request.op === 'save') {
-        for (const bank of this.banks.getAllBanks()) {
-          await this.storage.saveAsset(request.project, bank);
-        }
-      } else {
-        const restored = await this.storage.openProject(request.project);
-        // storage.ts's openProject() treats a missing project directory
-        // as "empty, not an error" (spec/01-HAL.md §6.2's own
-        // hal_list_files contract) — correct at that layer (a real
-        // filesystem's listdir behaves the same way), but silent at
-        // this one leaves RESTORE looking like it worked. Zero banks
-        // restored only happens for a directory that doesn't exist or
-        // was never actually saved — a real SAVE always writes MMAP
-        // plus 8 standard banks, so an existing project can never
-        // legitimately restore to nothing.
-        if (restored.length === 0) {
-          throw new Error(`project '${request.project}' not found`);
-        }
-        this.screen.redrawAll();
-      }
-    } catch (err) {
-      this.pendingStorageError = err;
-    } finally {
-      this.pendingStorage = undefined;
-    }
-  }
-
-  /** Called by `SAVE`/`RESTORE` right after resuming past `yield
-   * 'storage'` — re-raises whatever `runPendingStorage()` caught, into
-   * the generator's own error path this time (`replLoop()`'s `? <message>`
-   * handling, or `step()`'s propagate-and-clear contract for a
-   * programmatic caller), rather than the disconnected promise-catch a
-   * plain rethrow from `runPendingStorage()` would only reach `tick()`
-   * with. A no-op if the operation actually succeeded. */
-  private throwPendingStorageError(): void {
-    if (this.pendingStorageError !== undefined) {
-      const err = this.pendingStorageError;
-      this.pendingStorageError = undefined;
       throw err;
     }
   }
@@ -589,35 +495,6 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     if (upper === 'IMMEDIATE') {
       markLatestImmediate(this);
       yield 'progress';
-      return;
-    }
-    // Project mechanics (spec/01-HAL.md §6): special outer-loop syntax,
-    // exactly like `;`/`IMMEDIATE` above — never dictionary entries, so
-    // never usable inside a colon-definition (this method only ever
-    // runs outside compiling mode — tokenizeAndRun's own branch — which
-    // alone satisfies §6.2's "never inside a running Forth word's own
-    // execution"), never reachable via EXECUTE or '.
-    if (upper === 'PROJECT') {
-      this.sysvars.setProjectName(this.nextInputToken().toUpperCase());
-      yield 'progress';
-      return;
-    }
-    if (upper === 'SAVE') {
-      const project = this.sysvars.getProjectName();
-      if (!project) {
-        throw new Error('no project name set - use PROJECT name first');
-      }
-      this.pendingStorage = { op: 'save', project };
-      yield 'storage';
-      this.throwPendingStorageError();
-      return;
-    }
-    if (upper === 'RESTORE') {
-      const project = this.nextInputToken().toUpperCase();
-      this.sysvars.setProjectName(project);
-      this.pendingStorage = { op: 'restore', project };
-      yield 'storage';
-      this.throwPendingStorageError();
       return;
     }
     const found = findWord(this, upper);

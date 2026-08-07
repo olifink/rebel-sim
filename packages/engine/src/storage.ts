@@ -20,11 +20,17 @@
  * Persistence happens at project open/close time, not per Forth memory
  * access (FORTH-ARCHITECTURE.md §7's porting note for `hal_block_read`/
  * `write`) — Forth-visible words only ever read/write a resident bank
- * directly; nothing here is (or needs to be) a synchronous Forth
- * primitive. That's also why this class is plain async TypeScript methods
- * rather than anything wired into primitives.ts's switch dispatch: the
- * only async boundary in the whole engine is "open/save a project,"
- * orchestrated by the host, never something Forth source itself awaits.
+ * directly. This class is plain synchronous TypeScript, same as every
+ * other engine module — matching real hardware's own storage access
+ * (Rebel-ROM's `CStorageModule`, bare-metal blocking FAT/USB I/O, no
+ * async concept at all) rather than the Promise-based shape an earlier
+ * OPFS-backed `StorageHal` once forced onto this class and, from there,
+ * into the engine's core execution model (`repl.ts` used to carry a
+ * dedicated `'storage'` `StepStatus` just so a running Forth line could
+ * suspend itself around a real disk write). `PROJECT`/`SAVE`/`RESTORE`/
+ * `BSAVE`/`BLOAD` are ordinary `primitives.ts` dispatch cases now,
+ * calling straight into this class like any other primitive calls into
+ * `banks`/`screen`/`sysvars` — see `DEVELOPING.md`'s storage section.
  *
  * Automatic per-write DIRTY-flag tracking (docs/STORAGE.md §6 — "closing
  * a project writes back only banks marked dirty") is deliberately not
@@ -75,30 +81,34 @@ const EXTENSION_TO_TAG: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(TAG_TO_EXTENSION).map(([tag, ext]) => [ext, tag]),
 );
 
-/** Host-supplied file I/O (an Origin Private File System directory tree
- * in Rebel-Sim's case, PORTING-WEB.md §5) — the engine has zero direct
+/** Host-supplied file I/O (localStorage in Rebel-Sim's case,
+ * `local-storage-storage-hal.ts` — synchronous, same reasoning as this
+ * whole module's own header comment above) — the engine has zero direct
  * filesystem/DOM dependencies, same boundary shape as ScreenHal/keyboard
  * host wiring. Paths are POSIX-style, always absolute, e.g.
- * `/PROJECTS/REBELDEF/00000000.DAT`. */
+ * `/PROJECTS/REBELDEF/00000000.DAT`. Synchronous throughout, matching
+ * real hardware's own blocking storage access — a host implementation is
+ * free to throw synchronously (a real quota-exceeded error, say) and let
+ * it propagate like any other primitive's error. */
 export interface StorageHal {
-  ensureDir(path: string): Promise<void>;
+  ensureDir(path: string): void;
   /** Filenames only (not subdirectories), empty array if the directory
    * doesn't exist. */
-  listFiles(path: string): Promise<string[]>;
+  listFiles(path: string): string[];
   /** undefined if the file doesn't exist. */
-  readFile(path: string): Promise<Uint8Array | undefined>;
-  writeFile(path: string, bytes: Uint8Array): Promise<void>;
+  readFile(path: string): Uint8Array | undefined;
+  writeFile(path: string, bytes: Uint8Array): void;
 }
 
 export const NULL_STORAGE_HAL: StorageHal = {
-  async ensureDir(): Promise<void> {},
-  async listFiles(): Promise<string[]> {
+  ensureDir(): void {},
+  listFiles(): string[] {
     return [];
   },
-  async readFile(): Promise<Uint8Array | undefined> {
+  readFile(): Uint8Array | undefined {
     return undefined;
   },
-  async writeFile(): Promise<void> {},
+  writeFile(): void {},
 };
 
 export class Storage {
@@ -144,9 +154,9 @@ export class Storage {
    * any size class in the fresh-create fallback, are skipped rather
    * than aborting the whole open (matches `LoadAssetFile`). Returns
    * every bank it created or restored, MMAP first when restored. */
-  async openProject(projectName: string): Promise<Bank[]> {
+  openProject(projectName: string): Bank[] {
     const dir = this.projectDir(projectName);
-    const files = await this.hal.listFiles(dir);
+    const files = this.hal.listFiles(dir);
     const loaded: Bank[] = [];
 
     const mmapExt = TAG_TO_EXTENSION[MMAP_TAG];
@@ -155,7 +165,7 @@ export class Storage {
     let mmapRestored = false;
 
     if (mmapFile && mmapBank) {
-      const bytes = await this.hal.readFile(`${dir}/${mmapFile}`);
+      const bytes = this.hal.readFile(`${dir}/${mmapFile}`);
       if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
         const payload = bytes.subarray(ASSET_HEADER_SIZE);
         if (payload.length <= mmapBank.size) {
@@ -176,7 +186,7 @@ export class Storage {
       const tag = EXTENSION_TO_TAG[file.slice(dot + 1).toUpperCase()];
       if (!tag) continue; // unrecognized extension — not this module's concern
 
-      const bytes = await this.hal.readFile(`${dir}/${file}`);
+      const bytes = this.hal.readFile(`${dir}/${file}`);
       if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue; // short/missing read aborts this file
       const payload = bytes.subarray(ASSET_HEADER_SIZE);
       const basename = file.slice(0, dot).toUpperCase();
@@ -212,14 +222,14 @@ export class Storage {
    * openProject(), a missing directory here is not an error. The bank's
    * own `name` becomes the file's basename; `tag` maps to the
    * extension. */
-  async saveAsset(projectName: string, bank: Bank): Promise<void> {
+  saveAsset(projectName: string, bank: Bank): void {
     const ext = TAG_TO_EXTENSION[bank.tag];
     if (!ext) {
       throw new Error(`no known asset file extension for bank tag ${bank.tag}`);
     }
 
     const dir = this.projectDir(projectName);
-    await this.hal.ensureDir(dir);
+    this.hal.ensureDir(dir);
 
     const bytes = new Uint8Array(ASSET_HEADER_SIZE + bank.size);
     bytes[0] = ASSET_MAGIC_0;
@@ -231,19 +241,53 @@ export class Storage {
       bytes[ASSET_HEADER_SIZE + i] = this.arena.readByte(bank.base + i);
     }
 
-    await this.hal.writeFile(`${dir}/${bank.name}.${ext}`, bytes);
+    this.hal.writeFile(`${dir}/${bank.name}.${ext}`, bytes);
+  }
+
+  /** Reads one bank's previously-saved asset file back into that bank's
+   * own, already-existing memory region, in place — the single-bank
+   * counterpart to `openProject()`'s whole-directory restore, for
+   * `BLOAD` (`DEVELOPING.md` §8.6-adjacent storage section, M33). Unlike
+   * `openProject()`'s phase-2 tolerance (silently skip a payload too
+   * large for its recorded slot, among many files), a too-large payload
+   * here throws — a single explicit named request deserves a clear
+   * error over a silent partial load. Zero-pads if the saved payload is
+   * shorter than the bank's current size. Returns `false`, changing
+   * nothing, if no asset file exists yet for this bank in this project —
+   * a `BLOAD` before any matching `BSAVE`, not treated as an error here
+   * so the primitive calling this can phrase its own message. */
+  loadAsset(projectName: string, bank: Bank): boolean {
+    const ext = TAG_TO_EXTENSION[bank.tag];
+    if (!ext) {
+      throw new Error(`no known asset file extension for bank tag ${bank.tag}`);
+    }
+    const dir = this.projectDir(projectName);
+    const bytes = this.hal.readFile(`${dir}/${bank.name}.${ext}`);
+    if (!bytes || bytes.length < ASSET_HEADER_SIZE) {
+      return false;
+    }
+    const payload = bytes.subarray(ASSET_HEADER_SIZE);
+    if (payload.length > bank.size) {
+      throw new Error(
+        `saved asset for ${bank.tag}/${bank.name} is ${payload.length} bytes, too large for its ${bank.size}-byte bank`,
+      );
+    }
+    for (let i = 0; i < bank.size; i++) {
+      this.arena.writeByte(bank.base + i, i < payload.length ? payload[i] : 0);
+    }
+    return true;
   }
 
   /** Opaque cart file I/O (docs/STORAGE.md §6) — "read this one file
    * in"/"here's where a finished one gets written," nothing more. A
    * cart's internal layout is Phase 11 territory, not this module's. */
-  async loadCart(cartName: string): Promise<Uint8Array | undefined> {
+  loadCart(cartName: string): Uint8Array | undefined {
     return this.hal.readFile(this.cartPath(cartName));
   }
 
-  async saveCart(cartName: string, bytes: Uint8Array): Promise<void> {
-    await this.hal.ensureDir(CARTS_ROOT);
-    await this.hal.writeFile(this.cartPath(cartName), bytes);
+  saveCart(cartName: string, bytes: Uint8Array): void {
+    this.hal.ensureDir(CARTS_ROOT);
+    this.hal.writeFile(this.cartPath(cartName), bytes);
   }
 }
 
@@ -265,10 +309,7 @@ export class Storage {
  * name-collision case docs/STORAGE.md §8 already flags as a harmless but
  * real limitation — simulating two separate "boots" here sidesteps it
  * rather than reproducing it. */
-export async function runStorageSelfTest(
-  hal: StorageHal,
-  projectName = 'REBELDEF',
-): Promise<boolean> {
+export function runStorageSelfTest(hal: StorageHal, projectName = 'REBELDEF'): boolean {
   const size = roundToSizeClass(256)!;
 
   const writeArena = new Arena(1 << 16);
@@ -278,12 +319,12 @@ export async function runStorageSelfTest(
   for (let i = 0; i < written.size; i++) {
     writeArena.writeByte(written.base + i, i & 0xff);
   }
-  await writeStorage.saveAsset(projectName, written);
+  writeStorage.saveAsset(projectName, written);
 
   const readArena = new Arena(1 << 16);
   const readBanks = new BankTable(readArena);
   const readStorage = new Storage(readArena, readBanks, hal);
-  const reloaded = await readStorage.openProject(projectName);
+  const reloaded = readStorage.openProject(projectName);
   const roundTripped = reloaded.find((b) => b.name === 'TESTDATA');
   if (!roundTripped) {
     return false;

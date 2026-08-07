@@ -21,6 +21,7 @@ import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
 import { BankTable } from './banks.js';
+import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
 import {
   compileCell,
@@ -52,6 +53,12 @@ export interface PrimitiveContext extends DictionaryContext {
    * mirrors the padBase/padSize precedent (M16), exposing something the
    * host already tracks rather than duplicating it as arena bytes. */
   readonly banks: BankTable;
+  /** DEVELOPING.md's storage section, M33: `PROJECT`/`SAVE`/`RESTORE`/
+   * `BSAVE`/`BLOAD` call straight into this, the same way `BANK@`/
+   * `CREATE-BANK` already call into `banks` above — storage is
+   * synchronous now (localStorage, not OPFS), so there's no suspension
+   * mechanism left for these to need; they're ordinary primitives. */
+  readonly storage: Storage;
   getBase(): number;
   /** Consumes the next word directly from whatever line the outer
    * interpreter is currently walking — see repl.ts's header comment on
@@ -842,6 +849,85 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // until now.
       s.push(ctx.sysvars.fieldOffset('FORTH', 'HERE'));
       break;
+
+    // --- Project/bank storage (DEVELOPING.md's storage section, M33):
+    // ordinary primitives now that StorageHal is synchronous
+    // (local-storage-storage-hal.ts, not the earlier OPFS/Promise-based
+    // one) — genuinely usable inside a colon-definition or via EXECUTE,
+    // unlike the outer-loop-only special syntax PROJECT/SAVE/RESTORE
+    // used to be (repl.ts's now-removed 'storage' StepStatus). ---
+    case 126: // PROJECT ( "name" -- )
+      ctx.sysvars.setProjectName(ctx.nextInputToken().toUpperCase());
+      break;
+
+    case 127: { // SAVE ( -- ) — every currently active bank, MMAP
+      // included, in MMAP slot order (spec/01-HAL.md §6.3: no special
+      // ordering requirement on the save side).
+      const project = ctx.sysvars.getProjectName();
+      if (!project) {
+        throw new Error('no project name set - use PROJECT name first');
+      }
+      for (const bank of ctx.banks.getAllBanks()) {
+        ctx.storage.saveAsset(project, bank);
+      }
+      break;
+    }
+
+    case 128: { // RESTORE ( "name" -- ) — Storage.openProject()'s
+      // MMAP-first two-phase restore (§6.3.1), then repaint the visible
+      // screen: a restore overwrites CHAR bytes directly, bypassing the
+      // normal per-character HAL write-through screen.ts otherwise
+      // always goes through, so nothing else would trigger a redraw.
+      const project = ctx.nextInputToken().toUpperCase();
+      ctx.sysvars.setProjectName(project);
+      const restored = ctx.storage.openProject(project);
+      // openProject() treats a missing project directory as "empty, not
+      // an error" (§6.2's own hal_list_files contract) — correct at
+      // that layer, but silent at this one leaves RESTORE looking like
+      // it worked. Zero banks restored only happens for a directory
+      // that doesn't exist or was never actually saved — a real SAVE
+      // always writes MMAP plus 8 standard banks, so an existing
+      // project can never legitimately restore to nothing.
+      if (restored.length === 0) {
+        throw new Error(`project '${project}' not found`);
+      }
+      ctx.screen.redrawAll();
+      break;
+    }
+
+    case 129: { // BSAVE ( "tag" -- ) — save just one already-existing
+      // bank, resolved by tag the same way BANK@ (case 99) does: "the
+      // bank with this tag," first match if more than one shares it.
+      const project = ctx.sysvars.getProjectName();
+      if (!project) {
+        throw new Error('no project name set - use PROJECT name first');
+      }
+      const tag = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.requireBank(tag);
+      ctx.storage.saveAsset(project, bank);
+      break;
+    }
+
+    case 130: { // BLOAD ( "tag" -- ) — the single-bank counterpart to
+      // RESTORE: overwrites one already-existing bank's own memory in
+      // place from its previously-BSAVEd asset, rather than restoring a
+      // whole project. Repaints the screen for the same reason RESTORE
+      // does, only when the loaded bank is actually CHAR.
+      const project = ctx.sysvars.getProjectName();
+      if (!project) {
+        throw new Error('no project name set - use PROJECT name first');
+      }
+      const tag = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.requireBank(tag);
+      const ok = ctx.storage.loadAsset(project, bank);
+      if (!ok) {
+        throw new Error(`no saved asset for bank ${tag} in project '${project}'`);
+      }
+      if (bank.tag === 'CHAR') {
+        ctx.screen.redrawAll();
+      }
+      break;
+    }
 
     default:
       throw new Error(`unknown primitive token ${tokenId}`);

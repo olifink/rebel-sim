@@ -387,13 +387,23 @@ Every dictionary entry, identical layout across all languages:
   disk happening at project open/close time, already built and
   byte-exact-verified by `CKernel::RunStorageSelfTest`.
   * **Porting to Rebel-Sim (TypeScript):** back the equivalent of
-    `/PROJECTS/<name>/` with a virtual filesystem abstraction (IndexedDB,
-    keyed by project name + typed asset name) mirroring the same
+    `/PROJECTS/<name>/` with a virtual filesystem abstraction keyed by
+    project name + typed asset name, mirroring the same
     directory/typed-extension shape `docs/STORAGE.md` §3/§4 describes —
     not a single flat blob per project — so a project genuinely round-trips
     between Rebel-Sim and Rebel-ROM asset-for-asset. `hal_block_read/write`
     operate on the in-memory `SCRS` bank exactly as on Rebel-ROM; only the
-    load/save-to-disk step differs.
+    load/save-to-disk step differs. **[Revised, M33]** originally
+    implemented against OPFS (a closer conceptual match to real
+    directories), then switched to `localStorage`: OPFS's Promise-based
+    API broke this very note's own "an ordinary bank access, not a device
+    call" instruction by forcing `SAVE`/`RESTORE` into a suspend/resume
+    interpreter state — real hardware's storage access is synchronous
+    with no async concept at all, so a synchronous browser backend
+    (`localStorage`, trading OPFS's larger quota and native directory
+    model for it) is the actual match this note called for, not a
+    compromise. See `PORTING-WEB.md` §5 and `HAL.md` §2 for the full
+    reasoning.
   * **Porting to Rebel-Board (RISC-V):** back it with the board's QSPI
     flash, organized the same way conceptually (named project/asset
     regions, not raw numbered sectors) — exact on-flash layout is

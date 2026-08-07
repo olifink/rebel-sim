@@ -194,34 +194,71 @@ note), not the browser's own cooked-input conveniences:
   dev tools, etc.) don't fight your input model once this is running as
   an installed PWA rather than a page with other UI to tab through.
 
-## 5. Storage: prefer a real filesystem API over key-value storage
+## 5. Storage: synchronous beats a closer directory-shape match
 
 The Rebel-ROM storage model (`docs/STORAGE.md`, summarized in
 `FORTH-ARCHITECTURE.md` §7's porting note) is a real directory structure —
 named project folders, each holding named typed asset files — not a flat
-block device. Pick a browser storage API that matches that shape, rather
-than bending a key-value store to fit it:
+block device. An earlier version of this section picked a browser storage
+API by *shape* match (a real filesystem API over key-value storage);
+**[Revised, M33]** shape turned out to be the wrong axis to optimize —
+synchronicity is, for a reason specific to this project's cross-target
+premise:
 
-- The **Origin Private File System** (`navigator.storage.getDirectory()`,
-  real directory handles, real file handles, byte-range reads/writes) is
-  the closer conceptual match to what `/PROJECTS/<name>/asset.ext` and
-  `/CARTS/<name>.CRT` actually are, and worth defaulting to over
-  IndexedDB for that reason. IndexedDB remains a reasonable fallback for
-  broader browser support if OPFS coverage turns out to be a real
-  constraint for your target audience — that's a call to make based on
-  actual support requirements, not a foregone conclusion either way.
-- Whichever you pick, preserve the *addressing contract*
-  `FORTH-ARCHITECTURE.md` establishes: `hal_block_read`/`hal_block_write`
-  operate on an in-memory bank (a resident "screens" bank, in the
-  classic-Forth-blocks sense), and persistence to your chosen storage
-  backend happens at project open/close time — a bank access, not a
-  storage-device call on every read/write.
+- **[Originally decided, then reversed, M33]** OPFS
+  (`navigator.storage.getDirectory()`) was the first real implementation —
+  real directory/file handles, the closer conceptual match to
+  `/PROJECTS/<name>/asset.ext`. But OPFS's actual read/write calls are
+  Promise-based on the main thread (its synchronous
+  `FileSystemSyncAccessHandle` API is Worker-only, and `packages/app`'s
+  interpreter runs on the main thread, §6's own settled M7 call — unchanged
+  by this section). That async requirement didn't stay contained to the
+  storage module: it forced `repl.ts`'s core `step()`/`StepStatus` to grow
+  a dedicated `'storage'` suspend-and-resume state just so `SAVE`/`RESTORE`
+  could exist at all, which in turn meant those had to be special
+  outer-loop-only syntax rather than genuine dictionary words — unusable
+  inside a colon-definition or via `EXECUTE`, a real vocabulary-level
+  wart. That's a browser-platform artifact dictating the shared
+  cross-target engine contract other Rebel targets are supposed to
+  mirror, not a real requirement — real hardware's own storage access
+  (Rebel-ROM's `CStorageModule`, bare-metal blocking FAT/USB I/O) has no
+  async concept at all.
+- **The fix:** swap to `localStorage` — synchronous, no Promises, no
+  Worker needed, ships in every browser, still persists across reloads.
+  `StorageHal` (`packages/engine/src/storage.ts`) dropped every `Promise`
+  from its interface as a direct result; `repl.ts`'s `'storage'`
+  `StepStatus` and its suspend/resume machinery were deleted entirely;
+  `PROJECT`/`SAVE`/`RESTORE` became ordinary primitives, and `BSAVE`/
+  `BLOAD` (single-bank save/load) were added the same way, with zero
+  special mechanism needed. Real costs accepted deliberately: values must
+  be base64-encoded strings (localStorage has no binary payload type),
+  and quota is much smaller than OPFS's effective disk-backed capacity
+  (~5-10MB per origin, browser-dependent) — acceptable given Rebel's own
+  bank sizes (four-to-few-hundred KB size classes) are nowhere near what
+  would bind on that in practice.
+- **General principle this established** — worth applying to any future
+  Rebel-Sim-only accommodation, not just storage: before letting a
+  browser API's shape (async, or anything else genuinely absent on real
+  hardware) become a requirement in the shared engine/vocabulary contract,
+  check whether it's actually load-bearing for the cross-target premise or
+  just the easiest-looking web implementation. Prefer a Rebel-Sim-side
+  workaround — even one that trades away capacity, native ergonomics, or
+  a closer conceptual match — over letting the web dictate what other
+  targets are allowed to look like.
+- The *addressing contract* `FORTH-ARCHITECTURE.md` establishes is
+  unchanged by any of this: `hal_block_read`/`hal_block_write` operate on
+  an in-memory bank, and persistence to the storage backend happens at
+  project open/close time (now: `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` calls) —
+  a bank access, not a storage-device call on every read/write.
 - For moving state in and out of the browser sandbox entirely (sharing a
   project with someone, or with a real Rebel-ROM device) — the File
   System Access API (`showOpenFilePicker`/`showSaveFilePicker`) or a
   plain download/upload flow are both reasonable "insert a USB stick"
-  analogs. Neither is clearly correct in the abstract; pick based on
-  which browsers/contexts you actually need to support.
+  analogs, and both are still synchronous-vs-async-neutral to this
+  section's own concern (they're one-shot user-gesture-triggered
+  transfers, not something a running Forth word calls into). Neither is
+  clearly correct in the abstract; pick based on which browsers/contexts
+  you actually need to support.
 
 ## 6. The execution loop, and Angular's zone
 

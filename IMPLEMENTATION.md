@@ -561,24 +561,32 @@ opposite direction: the bank's raw bytes, preceded by a small 6-byte
 sanity header (a two-byte magic plus the bank's own tag — a cheap,
 optional cross-check, not something a load actually depends on).
 
-**Why storage operations are plain async functions, not Forth
-primitives:** every other subsystem (screen, keyboard) is driven by
-synchronous primitives dispatched through the same `switch` as `DUP`/
-`+`. Storage deliberately isn't — persistence only ever happens at
-*project open/close* time, as an explicit, host-triggered operation, not
-on every individual memory read/write a Forth program makes. Once a
+**Storage operations are ordinary synchronous Forth primitives, same as
+everything else:** `PROJECT`/`SAVE`/`RESTORE`/`BSAVE`/`BLOAD`
+dispatch through the same `switch` as `DUP`/`+`, no different from any
+other word — persistence only ever happens at *project open/close* time
+(now: when one of these five words runs), as an explicit act, not on
+every individual memory read/write a Forth program makes. Once a
 project's banks are loaded, Forth code just reads and writes them
 directly, the same as any other bank — no storage-device call hides
-behind an ordinary `@`/`!`.
+behind an ordinary `@`/`!`. **[Revised, M33]** this used to require a
+dedicated interpreter-suspension mechanism (a `'storage'` `StepStatus`,
+§1.23's blocking-`KEY` shape reused for a different reason) because the
+original backend (OPFS) was Promise-based — that's gone now that storage
+is genuinely synchronous; see `DEVELOPING.md` §25 for the full story.
 
 *Implementation:* `storage.ts` — the `Storage` class (`openProject`,
-`saveAsset`, `loadCart`, `saveCart`), all `async`. Talks to a
-host-supplied `StorageHal` (`ensureDir`/`listFiles`/`readFile`/
-`writeFile`) rather than any browser API directly — in
-`packages/app`, `OpfsStorageHal` backs this with the Origin Private File
-System. `runStorageSelfTest()` is a standalone round-trip proof (write a
-byte-pattern bank, save it, reload it fresh, compare) that `app.ts` runs
-once at startup, surfaced as a small `storage: OK`/`FAILED` status line.
+`saveAsset`, `loadAsset`, `loadCart`, `saveCart`), all plain synchronous
+methods. Talks to a host-supplied `StorageHal` (`ensureDir`/`listFiles`/
+`readFile`/`writeFile`) rather than any browser API directly — in
+`packages/app`, `LocalStorageStorageHal` backs this with `localStorage`
+(base64-encoded payloads under one key namespace; a real directory
+hierarchy doesn't exist over a flat key-value store, so `ensureDir` is a
+no-op and "listing a directory" is a prefix scan over `localStorage`'s
+own keys). `runStorageSelfTest()` is a standalone round-trip proof
+(write a byte-pattern bank, save it, reload it fresh, compare) that
+`app.ts` runs once at startup, surfaced as a small `storage: OK`/`FAILED`
+status line.
 
 ### 1.23 Blocking `KEY` — suspending mid-execution, without threads
 
@@ -895,7 +903,7 @@ and an async `Promise` rejection, since WebMCP is gated behind
 `chrome://flags/#enable-webmcp-testing` even on Chrome 150 and the app
 must keep booting normally without it (verified: `document.modelContext`
 absent → zero console errors, same degrade-gracefully contract already
-established for OPFS storage).
+established for storage HAL support).
 
 Verified fully end-to-end via the Chrome DevTools MCP server against
 the deployed GitHub Pages build: with the flag enabled,
@@ -1387,11 +1395,16 @@ host array, not `MMAP` — both real, explicit follow-on work.
 `Bank` gained a real `flags` field for the first time: `BankFlagResident`/
 `BankFlagExternal`/`BankFlagSwappable`/`BankFlagDirty` match
 `rebel-rom`'s real `TBankFlags` bit-for-bit; `BankFlagActive` (bit 4) is
-a new Rebel-Sim-first addition, default-on — atomic exclusion during a
-flush (`storage.ts`'s `saveAsset()` is genuinely `async`, the
-interpreter keeps stepping between awaits) instead of finally wiring up
-`DIRTY`, which needs a write-interception point neither side's `@`/`!`
-gives it.
+a new Rebel-Sim-first addition, default-on — pure per-slot occupancy for
+`mmap.ts`'s own bump allocator (a slot with it set is a real,
+currently-allocated bank; without it, free for `allocate()` to reuse),
+not the "atomic exclusion during an async flush" guard this section
+originally described (a real, since-corrected mismatch between the
+flag's originally-discussed motivation and what actually shipped, made
+doubly moot at M33 anyway — `saveAsset()` is fully synchronous now, so
+there's no longer an await point for anything to interleave with)
+instead of finally wiring up `DIRTY`, which needs a write-interception
+point neither side's `@`/`!` gives it.
 
 **A real bug, found and fixed:** the first pass had `mmap.ts` importing
 `BANK_NAME_LEN` from `banks.ts` while `banks.ts` imports `MemoryMap`
@@ -1912,7 +1925,7 @@ exactly as it would be on the bare-metal target.
 | **Cart** | A single flat baked binary, meant only to be run, not edited. Baking (producing one from a project) isn't built yet. |
 | **Asset file** | One project file, always `<bank-name>.<extension>` — the extension maps to the bank's `tag` (`DATA`↔`.DAT`, etc.), preceded by a small 6-byte sanity header. |
 | **Size class** | One of a fixed ladder of bank sizes (XS 4 KiB through XXL 4 MiB, each 4x the previous). A loaded file's bank size is looked up (round up to the smallest class that fits), not calculated. |
-| **`StorageHal`** | Rebel-Sim's HAL interface for project/cart file I/O: `ensureDir`/`listFiles`/`readFile`/`writeFile`. Backed by OPFS in `packages/app`; defaults to a no-op (`NULL_STORAGE_HAL`) so engine tests don't need a real filesystem. |
+| **`StorageHal`** | Rebel-Sim's HAL interface for project/cart file I/O: synchronous `ensureDir`/`listFiles`/`readFile`/`writeFile` (M33 — originally `Promise`-based). Backed by `localStorage` in `packages/app`; defaults to a no-op (`NULL_STORAGE_HAL`) so engine tests don't need a real browser environment. |
 | **Generator (JS)** | A function that can pause itself mid-execution (`yield`) and be resumed later exactly where it left off, with its local variables intact. What `executeXT` is built on (§1.23) — the mechanism blocking `KEY` needs. |
 | **`StepSignal`** | What `executeXT`'s generator yields on every pause: `'progress'` (one step completed, likely more to do) or `'blocked'` (waiting on the bound `Channel`, the same point will be retried on resume). |
 | **`StepStatus`** | What `Machine.step()` returns to its caller: `'idle'` (nothing running), `'blocked'`, or `'more-to-run'` (budget ran out, call `step()` again). |
@@ -1967,5 +1980,6 @@ exactly as it would be on the bare-metal target.
 | **M27** | A real bank-naming collision bug, found while reviewing storage (§1.48): `CREATE-BANK` bypassed the uniqueness check and named banks after their tag, so two Forth-created banks sharing a tag always collided — reproduced end-to-end through `saveAsset()`/`openProject()`. Fixed by moving the bank-naming serial counter into `MMAP`'s own header (available before `Sysvars` even exists, avoiding a sysvar-backed design's real chicken-and-egg problem). Header grows 4→16 bytes: `NEXT-BANK` (the fix), `ARENA-SIZE` (moved out of `CORE`), `ARENA-ID` (reserved, future multi-arena bookkeeping). | `mmap.ts`, `banks.ts`, `primitives.ts`, `repl.ts`, `rebel-opcodes.json` |
 | **M28** | The stack pointer becomes a real sysvar: `SP@`/`SP!`/`SP0`, `RP@`/`RP!`/`RP0` (§1.49, tokens 119-124). `DataStack`'s private `sp` field is gone — replaced by a getter/setter over two new `FORTH` sysvar fields (`SP`/`RP`, live) alongside the already-reserved-but-never-written `SP0`/`RP0` (constant base), matching how `HERE`/`LATEST`/`BASE`/`STATE` already avoid an engine-side copy. `SP0`/`RP0`/`SP@`/`RP@`/`SP!`/`RP!` push/pop through the sysvar directly; `RP!` carries a real, named risk (a wrong mid-execution write corrupts the live call chain), same "authentic risk" stance as `MMAP`'s raw writes. | `stack.ts`, `rebel-opcodes.json`, `primitives.ts`, `repl.ts` |
 | **M32** | `FORGET` (`DEVELOPING.md` §8.6), picked back up after being left as an open question since M13: one new primitive, `HERE-ADDR` (token 125), exposing `FORTH.HERE`'s own cell address the same `fieldOffset()` pattern `LATEST-ADDR` (M13) established for `LATEST` — the half of the gap M13 deferred, since reclaiming a forgotten word's `DICT` space needs to roll `HERE` back too, not just relink `LATEST`. `FORGET` itself is pure Forth in `system.fth`, reusing `HIDE`'s reverse chain-walk with a different found-branch: `LATEST`/`HERE` roll back to the forgotten entry's own link/address, the same rollback `dictionary.ts`'s `abortDefinition` already does for a half-built definition, just reachable for any named word. Known limitation, unaddressed: forgetting a word a `VOCABULARY` branch point depends on corrupts that vocabulary's chain — not designed, no concrete joint use case yet. | `rebel-opcodes.json`, `primitives.ts`, `system.fth` |
+| **M33** | Storage becomes synchronous, `localStorage` not OPFS (§1.22, `DEVELOPING.md` §25), plus `BSAVE`/`BLOAD`. Asked for `BSAVE`/`BLOAD`; investigating surfaced that `PROJECT`/`SAVE`/`RESTORE` (M29) were outer-loop-only special syntax purely because OPFS's Promise-based API had forced a dedicated `'storage'` `StepStatus`/`StepSignal` onto the core interpreter — checked against `FORTH-ARCHITECTURE.md`'s own porting note, real hardware's storage access has no async concept at all, so this was a browser-platform artifact in the shared engine contract, not a genuine requirement. Rejected: a Web Worker (reverses M7's settled main-thread decision) and `lightning-fs` (Promise/callback-only, same IndexedDB main-thread limitation as OPFS, checked directly against its docs). Fixed by swapping to `localStorage` (genuinely synchronous, smaller quota, base64-encoded payloads, `local-storage-storage-hal.ts` replacing `opfs-storage-hal.ts`): `StorageHal`/`Storage` dropped every `Promise`; `repl.ts`'s `'storage'` `StepStatus` and its suspend/resume fields/methods deleted outright; `PROJECT`/`SAVE`/`RESTORE` moved into `primitives.ts` as ordinary dispatch cases (tokens 126-128) — genuine dictionary entries, `SAVE` fully usable compiled/`EXECUTE`d. Two new primitives, `BSAVE`/`BLOAD` (tokens 129-130, `( "tag" -- )`), resolve a bank via `BankTable.requireBank` and call `saveAsset`/a new `Storage.loadAsset()`. Known, inherited limitation: `PROJECT`/`RESTORE`/`BSAVE`/`BLOAD` still parse their argument via `nextInputToken()`, the same shape `BANK@`/`CREATE-BANK`/`'` already have — only resolves correctly interpreted directly, not compiled with a following literal. | `storage.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `local-storage-storage-hal.ts`, `app.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

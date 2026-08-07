@@ -6,12 +6,14 @@ import { Storage, StorageHal, runStorageSelfTest } from './storage.js';
 
 /** A real (not no-op) in-memory StorageHal — lets these tests exercise
  * actual read-back behavior, the same role vi.fn() spies play for
- * ScreenHal in screen.test.ts, without needing a real OPFS/browser. */
+ * ScreenHal in screen.test.ts, without needing a real browser. Synchronous
+ * now (M33: StorageHal dropped Promises when the real backend moved from
+ * OPFS to localStorage), matching the interface it implements. */
 function memoryHal(): StorageHal {
   const files = new Map<string, Uint8Array>();
   return {
-    async ensureDir(): Promise<void> {},
-    async listFiles(path: string): Promise<string[]> {
+    ensureDir(): void {},
+    listFiles(path: string): string[] {
       const prefix = path.endsWith('/') ? path : path + '/';
       const names: string[] = [];
       for (const key of files.keys()) {
@@ -21,17 +23,17 @@ function memoryHal(): StorageHal {
       }
       return names;
     },
-    async readFile(path: string): Promise<Uint8Array | undefined> {
+    readFile(path: string): Uint8Array | undefined {
       return files.get(path);
     },
-    async writeFile(path: string, bytes: Uint8Array): Promise<void> {
+    writeFile(path: string, bytes: Uint8Array): void {
       files.set(path, bytes);
     },
   };
 }
 
 describe('Storage', () => {
-  it('saveAsset then openProject (fresh bank table, same hal) restores identical bytes', async () => {
+  it('saveAsset then openProject (fresh bank table, same hal) restores identical bytes', () => {
     const hal = memoryHal();
 
     const writeArena = new Arena(1 << 16);
@@ -41,12 +43,12 @@ describe('Storage', () => {
     for (let i = 0; i < bank.size; i++) {
       writeArena.writeByte(bank.base + i, (i * 3) & 0xff);
     }
-    await writeStorage.saveAsset('APROJECT', bank);
+    writeStorage.saveAsset('APROJECT', bank);
 
     const readArena = new Arena(1 << 16);
     const readBanks = new BankTable(readArena);
     const readStorage = new Storage(readArena, readBanks, hal);
-    const loaded = await readStorage.openProject('APROJECT');
+    const loaded = readStorage.openProject('APROJECT');
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].tag).toBe('DATA');
@@ -60,7 +62,7 @@ describe('Storage', () => {
     }
   });
 
-  it('two CREATE-BANK banks sharing a tag no longer collide on save (DEVELOPING.md §20, M27 — the real bug this fixes)', async () => {
+  it('two CREATE-BANK banks sharing a tag no longer collide on save (DEVELOPING.md §20, M27 — the real bug this fixes)', () => {
     const hal = memoryHal();
     const m = new Machine();
     const storage = new Storage(m.arena, m.banks, hal);
@@ -77,13 +79,13 @@ describe('Storage', () => {
     expect(created[0].name).not.toBe(created[1].name); // the actual fix
 
     for (const bank of created) {
-      await storage.saveAsset('COLLIDEPROJ', bank);
+      storage.saveAsset('COLLIDEPROJ', bank);
     }
 
     const readArena = new Arena(1 << 16);
     const readBanks = new BankTable(readArena);
     const readStorage = new Storage(readArena, readBanks, hal);
-    const reloaded = await readStorage.openProject('COLLIDEPROJ');
+    const reloaded = readStorage.openProject('COLLIDEPROJ');
 
     // Before M27, both banks shared name "DATA" — reproduced directly
     // while reviewing this: the second saveAsset() silently clobbered
@@ -96,52 +98,52 @@ describe('Storage', () => {
     expect(bytes).toEqual([111, 222]);
   });
 
-  it('skips files with an unrecognized extension rather than throwing', async () => {
+  it('skips files with an unrecognized extension rather than throwing', () => {
     const hal = memoryHal();
-    await hal.writeFile('/PROJECTS/P/README.TXT', new Uint8Array([1, 2, 3]));
+    hal.writeFile('/PROJECTS/P/README.TXT', new Uint8Array([1, 2, 3]));
 
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, hal);
-    const loaded = await storage.openProject('P');
+    const loaded = storage.openProject('P');
     expect(loaded).toHaveLength(0);
   });
 
-  it('skips a file too short to hold the asset header rather than throwing', async () => {
+  it('skips a file too short to hold the asset header rather than throwing', () => {
     const hal = memoryHal();
-    await hal.writeFile('/PROJECTS/P/SHORT.DAT', new Uint8Array([1, 2]));
+    hal.writeFile('/PROJECTS/P/SHORT.DAT', new Uint8Array([1, 2]));
 
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, hal);
-    const loaded = await storage.openProject('P');
+    const loaded = storage.openProject('P');
     expect(loaded).toHaveLength(0);
   });
 
-  it('openProject on a project directory that does not exist returns no banks', async () => {
+  it('openProject on a project directory that does not exist returns no banks', () => {
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, memoryHal());
-    const loaded = await storage.openProject('NOPE');
+    const loaded = storage.openProject('NOPE');
     expect(loaded).toHaveLength(0);
   });
 
-  it('saveAsset writes the 6-byte RA + tag header before the payload', async () => {
+  it('saveAsset writes the 6-byte RA + tag header before the payload', () => {
     const hal = memoryHal();
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, hal);
     const bank = banks.createBank('DATA', 64, 'HDRTEST');
-    await storage.saveAsset('P', bank);
+    storage.saveAsset('P', bank);
 
-    const written = await hal.readFile('/PROJECTS/P/HDRTEST.DAT');
+    const written = hal.readFile('/PROJECTS/P/HDRTEST.DAT');
     expect(written).toBeDefined();
     expect(String.fromCharCode(written![0], written![1])).toBe('RA');
     expect(String.fromCharCode(written![2], written![3], written![4], written![5])).toBe('DATA');
     expect(written!.length).toBe(6 + bank.size);
   });
 
-  it('saveAsset throws for a bank tag with no known file extension', async () => {
+  it('saveAsset throws for a bank tag with no known file extension', () => {
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, memoryHal());
@@ -150,30 +152,79 @@ describe('Storage', () => {
     // SYSV/DSTK/RSTK/CHAR/KMAP/MMAP/WORK, which this module's
     // TAG_TO_EXTENSION now covers (M29/M31).
     const bank = banks.createBank('CART', 64);
-    await expect(storage.saveAsset('P', bank)).rejects.toThrow(/no known asset file extension/);
+    expect(() => storage.saveAsset('P', bank)).toThrow(/no known asset file extension/);
   });
 
-  it('cart save/load round-trips an opaque flat binary', async () => {
+  it('loadAsset overwrites an already-existing bank in place from its saved asset', () => {
+    const hal = memoryHal();
+
+    const writeArena = new Arena(1 << 16);
+    const writeBanks = new BankTable(writeArena);
+    const writeStorage = new Storage(writeArena, writeBanks, hal);
+    const bank = writeBanks.createBank('DATA', 64, 'REFRESH');
+    for (let i = 0; i < bank.size; i++) {
+      writeArena.writeByte(bank.base + i, 1);
+    }
+    writeStorage.saveAsset('BPROJ', bank);
+
+    // A fresh bank, same identity, different content — loadAsset should
+    // overwrite it in place, not create/return a new Bank.
+    const readArena = new Arena(1 << 16);
+    const readBanks = new BankTable(readArena);
+    const readStorage = new Storage(readArena, readBanks, hal);
+    const freshBank = readBanks.createBank('DATA', 64, 'REFRESH');
+    expect(readStorage.loadAsset('BPROJ', freshBank)).toBe(true);
+    for (let i = 0; i < bank.size; i++) {
+      expect(readArena.readByte(freshBank.base + i)).toBe(1);
+    }
+  });
+
+  it('loadAsset returns false, changing nothing, when no asset was ever saved', () => {
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, memoryHal());
+    const bank = banks.createBank('DATA', 64, 'NEVERSVD');
+    arena.writeByte(bank.base, 42);
+    expect(storage.loadAsset('NOPROJ', bank)).toBe(false);
+    expect(arena.readByte(bank.base)).toBe(42); // untouched
+  });
+
+  it('loadAsset throws for a saved payload too large for the current bank, rather than silently truncating', () => {
+    const hal = memoryHal();
+    const bigArena = new Arena(1 << 20);
+    const bigBanks = new BankTable(bigArena);
+    const bigStorage = new Storage(bigArena, bigBanks, hal);
+    const bigBank = bigBanks.createBank('DATA', 16 * 1024, 'BIGONE'); // S class
+    bigStorage.saveAsset('P', bigBank);
+
+    const smallArena = new Arena(1 << 16);
+    const smallBanks = new BankTable(smallArena);
+    const smallStorage = new Storage(smallArena, smallBanks, hal);
+    const smallBank = smallBanks.createBank('DATA', 4096, 'BIGONE'); // XS class — too small
+    expect(() => smallStorage.loadAsset('P', smallBank)).toThrow(/too large/);
+  });
+
+  it('cart save/load round-trips an opaque flat binary', () => {
     const hal = memoryHal();
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, hal);
     const bytes = new Uint8Array([9, 8, 7, 6, 5]);
-    await storage.saveCart('MYCART', bytes);
-    const loaded = await storage.loadCart('MYCART');
+    storage.saveCart('MYCART', bytes);
+    const loaded = storage.loadCart('MYCART');
     expect(loaded).toEqual(bytes);
   });
 
-  it('loadCart returns undefined for a cart that was never saved', async () => {
+  it('loadCart returns undefined for a cart that was never saved', () => {
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, memoryHal());
-    expect(await storage.loadCart('NOPE')).toBeUndefined();
+    expect(storage.loadCart('NOPE')).toBeUndefined();
   });
 });
 
 describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, M29)', () => {
-  it('restores the 8 standard banks plus an extra CREATE-BANKd bank at their exact original bases', async () => {
+  it('restores the 8 standard banks plus an extra CREATE-BANKd bank at their exact original bases', () => {
     const hal = memoryHal();
 
     const m1 = new Machine({ storageHal: hal });
@@ -184,14 +235,14 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
     const extraBank = m1.banks.getAllBanks().find((b) => b.tag === 'DATA');
     expect(extraBank).toBeDefined();
 
-    // Mirrors what Machine.runPendingStorage()'s 'save' branch does —
-    // every active bank, in MMAP slot order, MMAP included.
+    // Mirrors what the SAVE primitive itself does — every active bank,
+    // in MMAP slot order, MMAP included.
     for (const bank of m1.banks.getAllBanks()) {
-      await m1.storage.saveAsset('EXACTPRJ', bank);
+      m1.storage.saveAsset('EXACTPRJ', bank);
     }
 
     const m2 = new Machine({ storageHal: hal });
-    const restored = await m2.storage.openProject('EXACTPRJ');
+    const restored = m2.storage.openProject('EXACTPRJ');
 
     // Every standard bank's base is unchanged (deterministic given the
     // same boot constants — restoring MMAP's bytes reproduces values
@@ -218,18 +269,18 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
     expect(restored.length).toBeGreaterThan(0);
   });
 
-  it('falls back to fresh bump-allocated banks when no MMAP.MAP asset is present (today\'s baseline, unchanged)', async () => {
+  it('falls back to fresh bump-allocated banks when no MMAP.MAP asset is present (today\'s baseline, unchanged)', () => {
     const hal = memoryHal();
     const arena = new Arena(1 << 16);
     const banks = new BankTable(arena);
     const storage = new Storage(arena, banks, hal);
     const bank = banks.createBank('DATA', 64, 'PLAINBNK'); // BANK_NAME_LEN = 8
-    await storage.saveAsset('NOMAP', bank); // MMAP itself never saved
+    storage.saveAsset('NOMAP', bank); // MMAP itself never saved
 
     const readArena = new Arena(1 << 16);
     const readBanks = new BankTable(readArena);
     const readStorage = new Storage(readArena, readBanks, hal);
-    const loaded = await readStorage.openProject('NOMAP');
+    const loaded = readStorage.openProject('NOMAP');
 
     expect(loaded).toHaveLength(1);
     expect(loaded[0].name).toBe('PLAINBNK');
@@ -240,21 +291,21 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
 });
 
 describe('runStorageSelfTest', () => {
-  it('passes against a working StorageHal', async () => {
-    expect(await runStorageSelfTest(memoryHal())).toBe(true);
+  it('passes against a working StorageHal', () => {
+    expect(runStorageSelfTest(memoryHal())).toBe(true);
   });
 
-  it('fails against a HAL that never actually persists anything', async () => {
+  it('fails against a HAL that never actually persists anything', () => {
     const brokenHal: StorageHal = {
-      async ensureDir(): Promise<void> {},
-      async listFiles(): Promise<string[]> {
+      ensureDir(): void {},
+      listFiles(): string[] {
         return [];
       },
-      async readFile(): Promise<Uint8Array | undefined> {
+      readFile(): Uint8Array | undefined {
         return undefined;
       },
-      async writeFile(): Promise<void> {}, // silently drops the write
+      writeFile(): void {}, // silently drops the write
     };
-    expect(await runStorageSelfTest(brokenHal)).toBe(false);
+    expect(runStorageSelfTest(brokenHal)).toBe(false);
   });
 });

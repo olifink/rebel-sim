@@ -141,19 +141,29 @@ contract.
 
 ```ts
 export interface StorageHal {
-  ensureDir(path: string): Promise<void>;
-  listFiles(path: string): Promise<string[]>;
-  readFile(path: string): Promise<Uint8Array | undefined>;
-  writeFile(path: string, bytes: Uint8Array): Promise<void>;
+  ensureDir(path: string): void;
+  listFiles(path: string): string[];
+  readFile(path: string): Uint8Array | undefined;
+  writeFile(path: string, bytes: Uint8Array): void;
 }
 ```
 
-Async, POSIX-style absolute paths (`/PROJECTS/<name>/…`,
-`/CARTS/<name>.CRT`), backed by OPFS in the real app
-(`PORTING-WEB.md` §5). Persistence happens at project open/close time,
-never per-Forth-memory-access — nothing here is a synchronous Forth
-primitive, matching `FORTH-ARCHITECTURE.md`'s own porting note for
-`hal_block_read`/`write`.
+**[Revised, M33]** Synchronous, not async — POSIX-style absolute paths
+(`/PROJECTS/<name>/…`, `/CARTS/<name>.CRT`), backed by `localStorage` in
+the real app (`PORTING-WEB.md` §5, base64-encoded payloads under one key
+namespace), not OPFS as originally implemented. The original OPFS backend
+was Promise-based, which forced `repl.ts`'s core execution model to grow
+a dedicated `'storage'` suspend/resume `StepStatus` and made
+`PROJECT`/`SAVE`/`RESTORE` special outer-loop-only syntax rather than
+real dictionary words — a browser-platform artifact leaking into the
+shared cross-target engine contract, not a genuine requirement (real
+hardware's storage access has no async concept at all — see below).
+Switching to `localStorage` removed that whole mechanism: `PROJECT`/
+`SAVE`/`RESTORE` are ordinary primitives now, callable inside a
+colon-definition or via `EXECUTE`, and two new ones, `BSAVE`/`BLOAD`
+(single-bank save/load), needed no special mechanism to add. Persistence
+still happens at project open/close time (now: `SAVE`/`RESTORE`/`BSAVE`/
+`BLOAD` calls), never per-Forth-memory-access.
 
 **Rebel-ROM** (`rebel-rom/src/storagemodule.h`, Phase 9): `CStorageModule`
 — `LoadCart`/`SaveCart`/`EnsureLayout`/`LoadAssetFile`, backed by real
@@ -162,7 +172,8 @@ the concept level (project/cart directories, asset files by tag/
 extension, `rebel-rom/docs/STORAGE.md` §4/§8's tag↔extension table is
 the same table `storage.ts`'s `TAG_TO_EXTENSION` implements) but differ
 in one real, verified way: **USB mass storage needs polling/mount-
-detection state that OPFS doesn't.**
+detection state that a browser storage API (OPFS originally, localStorage
+now, M33) doesn't.**
 
 **Sysvars — `STORAGE` group.** Rebel-ROM's is real and populated
 (`rebel-rom/src/storagemodule.cpp:58-59` binds
@@ -179,10 +190,10 @@ struct TStorageSysVars {
 Rebel-Sim's `STORAGE` sysvar group is still fully reserved/empty
 (`rebel-opcodes.json`) — checked, not assumed: `storage.ts` touches
 `sysvars` **zero** times. This isn't a gap to close; it's a genuine
-architectural difference. OPFS access is synchronously available
-through the browser once granted — there's no USB-hotplug-style
-attach/detach cycle to poll for, so `nMounted`/`nDeviceSeen` have no
-Rebel-Sim referent. `nLastError` is the one field that *could* map to
+architectural difference. Browser storage (localStorage since M33,
+originally OPFS) is available through the browser once granted — there's
+no USB-hotplug-style attach/detach cycle to poll for, so
+`nMounted`/`nDeviceSeen` have no Rebel-Sim referent. `nLastError` is the one field that *could* map to
 something (`DEVELOPING.md` §9's now-shipped `ABORT`/`? <message>` path
 is the closest current equivalent, but nothing wires a numeric error
 code into a sysvar today — see §6 below).
