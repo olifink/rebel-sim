@@ -61,6 +61,14 @@ export class App implements AfterViewInit, OnDestroy {
   protected readonly breakpointWords = signal<ReadonlySet<string>>(new Set());
   protected readonly breakpointList = computed(() => Array.from(this.breakpointWords()).sort());
 
+  // Web-only UI, no engine/spec involvement: the inspector aside and
+  // stack-bar are a HUD overlay (app.css — position: fixed, not a flex
+  // sibling) rather than a layout column, so toggling this never shifts
+  // the canvas — prep for eventually letting the canvas itself grow
+  // into the space this used to reserve. Ctrl+`/Ctrl+\ (handleKeyEvent)
+  // toggles it; defaults visible, matching today's look on first load.
+  protected readonly monitorsVisible = signal(true);
+
   // Constructed in ngAfterViewInit — the engine's Screen.cls() (M3) runs
   // during Machine's own constructor and paints through the HAL
   // immediately, so the canvas must already exist before `new Machine()`.
@@ -244,6 +252,19 @@ export class App implements AfterViewInit, OnDestroy {
   private handleKeyEvent(e: KeyboardEvent, pressed: boolean): void {
     if (pressed && e.repeat) {
       return; // auto-repeat isn't a new press edge (docs/KEYBOARD.md §1)
+    }
+    // Host UI shortcut (monitorsVisible), not a Forth keystroke — caught
+    // and consumed here, before codeToUsage, so it never reaches the
+    // emulated keyboard at all (checked on both keydown and keyup so
+    // neither half of the chord leaks through if Ctrl happens to be
+    // released before the letter key is). Either binding works — some
+    // layouts make one of the two awkward to reach.
+    if (e.ctrlKey && (e.code === 'Backquote' || e.code === 'Backslash')) {
+      e.preventDefault();
+      if (pressed) {
+        this.toggleMonitors();
+      }
+      return;
     }
     const usageCode = codeToUsage(e.code);
     if (usageCode === undefined) {
@@ -461,6 +482,14 @@ export class App implements AfterViewInit, OnDestroy {
         this.injector,
       ),
     );
+  }
+
+  // Ctrl+`/Ctrl+\ (handleKeyEvent) — called from outside the Angular
+  // zone (the keydown listener is registered via runOutsideAngular),
+  // so the write needs zone.run() to actually reach the DOM, same
+  // reasoning as resumeFromBreakpoint() just below.
+  private toggleMonitors(): void {
+    this.zone.run(() => this.monitorsVisible.update((v) => !v));
   }
 
   // Shared by the debug_continue WebMCP tool and the inspector's

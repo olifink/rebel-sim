@@ -1,3 +1,7 @@
+/* .inspector was a flex sibling here until it became a fixed-position
+   overlay (above) — .repl now only ever lays out .console, centered in
+   the full viewport width rather than a width shared with a reserved
+   side column. */
 .repl {
   display: flex;
   flex-direction: row;
@@ -10,7 +14,6 @@
   font-size: 16px;
   padding: 8px;
   box-sizing: border-box;
-  gap: 16px;
 }
 
 .console {
@@ -42,13 +45,25 @@
                     text field to visually distinguish focus from */
 }
 
+/* Overlay, not a flex sibling in .console's own flow (Ctrl+`/Ctrl+\
+   toggle, app.ts's monitorsVisible) — deliberately so hiding it never
+   shifts the canvas/pause-bar/storage-bar above it, and so it stays
+   viewport-anchored once the canvas itself is free to grow to fill
+   the space this used to reserve. */
 .stack-bar {
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 100%;
   max-width: 640px;
-  border-top: 1px solid #0f0;
-  padding: 4px 0;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid #0f0;
+  padding: 4px 8px;
   opacity: 0.8;
   font-size: 14px;
+  z-index: 10;
 }
 
 .stack-label {
@@ -94,16 +109,35 @@
   color: #000;
 }
 
+/* Overlay, not a flex sibling in .repl's own layout (Ctrl+`/Ctrl+\
+   toggle, app.ts's monitorsVisible) — a HUD floating over the console
+   rather than a column that reserves horizontal space, so hiding it
+   never shifts the canvas and the canvas is free to grow to fill the
+   space this used to reserve. */
 .inspector {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: 300px;
+  background: rgba(0, 0, 0, 0.85);
   border: 1px solid #0f0;
-  min-width: 260px;
-  max-width: 320px;
-  max-height: 100%;
   overflow-y: auto;
   font-size: 13px;
   padding: 8px;
   box-sizing: border-box;
   opacity: 0.9;
+  z-index: 10;
+}
+
+/* Shared by .inspector/.stack-bar — toggled by app.ts's
+   monitorsVisible signal (Ctrl+`/Ctrl+\). display:none rather than
+   visibility:hidden: both are already out of normal document flow
+   (position: fixed), so there's nothing left to reflow either way —
+   display:none additionally drops them from hit-testing/tab order,
+   which visibility:hidden alone wouldn't. */
+.hidden {
+  display: none;
 }
 
 .inspector-section + .inspector-section {

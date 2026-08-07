@@ -2,7 +2,7 @@
   <div class="console">
     <canvas #screen class="screen" tabindex="0"></canvas>
 
-    <div class="stack-bar">
+    <div class="stack-bar" [class.hidden]="!monitorsVisible()">
       <span class="stack-label">stack (top→bottom):</span>
       <span class="stack-values">{{ stack().join(' ') || '(empty)' }}</span>
     </div>
@@ -20,7 +20,7 @@
     </div>
   </div>
 
-  <aside class="inspector">
+  <aside class="inspector" [class.hidden]="!monitorsVisible()">
     <div class="inspector-section">
       <div class="inspector-label">breakpoints ({{ breakpointList().length }}):</div>
       <div class="inspector-words breakpoint-list">
