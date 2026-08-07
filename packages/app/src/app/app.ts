@@ -21,9 +21,10 @@ import { buildZip } from './zip-writer.js';
 // The real framebuffer resolution (matches repl.ts's DEFAULT_SCREEN_WIDTH/
 // HEIGHT — the engine has no reason to expose these, they're boot-fixed
 // per FORTH-ARCHITECTURE.md's current "no runtime mode change" state).
-const FRAMEBUFFER_WIDTH = 320;
-const FRAMEBUFFER_HEIGHT = 240;
-const TARGET_CSS_WIDTH = 640; // ~2x at devicePixelRatio 1, same footprint as before
+// EXPERIMENTAL bump 320x240 -> 512x384 — see repl.ts's own constants.
+const FRAMEBUFFER_WIDTH = 512;
+const FRAMEBUFFER_HEIGHT = 384;
+const TARGET_CSS_WIDTH = 1024; // ~2x at devicePixelRatio 1, same on-screen scale factor as before
 
 @Component({
   selector: 'app-root',
@@ -246,8 +247,13 @@ export class App implements AfterViewInit, OnDestroy {
     );
     canvas.width = size.backingWidth;
     canvas.height = size.backingHeight;
+    // Only width is set inline — height is deliberately left for
+    // app.css's aspect-ratio:4/3 to derive (a real bug, found and
+    // fixed alongside the 640x480 experiment: setting both explicitly
+    // meant max-width:100% clamping the width on a narrow viewport had
+    // nothing to make height follow, visibly squashing the canvas
+    // instead of scaling down uniformly — see .screen's own comment).
     canvas.style.width = `${size.cssWidth}px`;
-    canvas.style.height = `${size.cssHeight}px`;
     // Resizing a canvas resets its 2D context state, including
     // imageSmoothingEnabled — reapply it every time.
     if (this.presentCtx) {
