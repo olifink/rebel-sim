@@ -77,7 +77,11 @@
       <div class="inspector-label">project storage:</div>
       <div class="inspector-words">
         @for (name of projectNames(); track name) {
-          <span class="inspector-word" [title]="projectBankTooltip(name)">{{ name }}</span>
+          <span
+            class="inspector-word project-name"
+            [title]="projectBankTooltip(name)"
+            (click)="downloadProject(name)"
+          >{{ name }}</span>
         } @empty {
           <span class="inspector-empty">(none)</span>
         }

@@ -16,6 +16,7 @@ import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
 import { computePresentationSize } from './canvas-presenter.js';
+import { buildZip } from './zip-writer.js';
 
 // The real framebuffer resolution (matches repl.ts's DEFAULT_SCREEN_WIDTH/
 // HEIGHT — the engine has no reason to expose these, they're boot-fixed
@@ -556,6 +557,27 @@ export class App implements AfterViewInit, OnDestroy {
       return '(no banks found)';
     }
     return assets.map((a) => `${a.tag}/${a.name} (${this.formatBankSize(a.size)})`).join('\n');
+  }
+
+  // "project storage" panel, click on a project name — one ZIP, every
+  // raw file the project actually has on disk (Storage.listProjectFiles(),
+  // unfiltered — a faithful copy, not the engine's own filtered/parsed
+  // bank view listProjectAssets() above uses). Namespaced under a
+  // top-level <name>/ folder in the archive so multiple files land
+  // somewhere sane once extracted, rather than dumping loose files.
+  protected downloadProject(name: string): void {
+    const files = this.machine.storage.listProjectFiles(name);
+    const zipBytes = buildZip(files.map((f) => ({ filename: `${name}/${f.filename}`, bytes: f.bytes })));
+    // .slice() first: Uint8Array's .buffer is typed ArrayBufferLike
+    // (could theoretically be a SharedArrayBuffer) in current DOM libs,
+    // which Blob's BlobPart type rejects — .slice() returns a fresh
+    // Uint8Array TypeScript can see is backed by a real ArrayBuffer.
+    const url = URL.createObjectURL(new Blob([zipBytes.slice().buffer], { type: 'application/zip' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // WebMCP is an experimental browser feature

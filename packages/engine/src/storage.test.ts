@@ -266,6 +266,33 @@ describe('Storage', () => {
     expect(storage.listProjectAssets('MIXED')).toEqual([{ tag: 'DATA', name: 'REAL', size: bank.size }]);
   });
 
+  it('listProjectFiles returns every raw file, byte for byte, unfiltered by extension/header validity', () => {
+    const hal = memoryHal();
+    hal.writeFile('/PROJECTS/RAWPRJ/README.TXT', new Uint8Array([1, 2, 3])); // unrecognized extension
+    hal.writeFile('/PROJECTS/RAWPRJ/SHORT.DAT', new Uint8Array([1, 2])); // too short to be a real asset
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, hal);
+    const bank = banks.createBank('DATA', 64, 'REAL');
+    storage.saveAsset('RAWPRJ', bank);
+
+    const files = storage.listProjectFiles('RAWPRJ');
+    const byName = Object.fromEntries(files.map((f) => [f.filename, f.bytes]));
+    expect(Object.keys(byName).sort()).toEqual(['README.TXT', 'REAL.DAT', 'SHORT.DAT']);
+    expect(byName['README.TXT']).toEqual(new Uint8Array([1, 2, 3]));
+    expect(byName['SHORT.DAT']).toEqual(new Uint8Array([1, 2]));
+    // saveAsset's own real output, header included — same bytes
+    // hal.readFile() would hand back directly.
+    expect(byName['REAL.DAT']).toEqual(hal.readFile('/PROJECTS/RAWPRJ/REAL.DAT'));
+  });
+
+  it('listProjectFiles returns an empty list for a project that was never saved', () => {
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, memoryHal());
+    expect(storage.listProjectFiles('NOPE')).toEqual([]);
+  });
+
   it('cart save/load round-trips an opaque flat binary', () => {
     const hal = memoryHal();
     const arena = new Arena(1 << 16);

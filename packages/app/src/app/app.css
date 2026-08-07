@@ -155,6 +155,18 @@
   text-decoration: underline;
 }
 
+/* "project storage" panel — every listed name downloads that project
+   as a ZIP on click (app.ts's downloadProject()), unlike .breakable
+   dictionary words where only some are clickable — every project name
+   here always is. */
+.inspector-word.project-name {
+  cursor: pointer;
+}
+
+.inspector-word.project-name:hover {
+  text-decoration: underline;
+}
+
 /* Same class used for both an armed word inside the dictionary list
    and a chip in the dedicated breakpoints section above it — an armed
    word is always breakable, so this alone is enough to also imply

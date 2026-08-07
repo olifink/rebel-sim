@@ -164,6 +164,28 @@ export class Storage {
     return assets;
   }
 
+  /** Every raw file currently saved under one project's directory,
+   * filename and exact on-disk bytes (header included) — a faithful
+   * copy for e.g. exporting/downloading a whole project, unlike
+   * `listProjectAssets()`: nothing here is parsed or filtered by tag/
+   * header validity, since the point is "what's actually in the
+   * directory," not "what the engine would load as a bank." A file
+   * `listFiles()` reports but that vanishes before its `readFile()`
+   * call (a real race in a multi-writer environment, not something
+   * this synchronous single-writer engine can hit itself) is silently
+   * skipped rather than represented as a hole. */
+  listProjectFiles(projectName: string): { filename: string; bytes: Uint8Array }[] {
+    const dir = this.projectDir(projectName);
+    const files: { filename: string; bytes: Uint8Array }[] = [];
+    for (const filename of this.hal.listFiles(dir)) {
+      const bytes = this.hal.readFile(`${dir}/${filename}`);
+      if (bytes) {
+        files.push({ filename, bytes });
+      }
+    }
+    return files;
+  }
+
   /** Scans /PROJECTS/<name>/ and loads every recognized asset file.
    * Two-phase whenever an MMAP.MAP asset is present (spec/01-HAL.md
    * §6.3.1 — MMAP is the arena's own bank table, so restoring it
