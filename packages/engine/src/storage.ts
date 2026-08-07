@@ -95,6 +95,11 @@ export interface StorageHal {
   /** Filenames only (not subdirectories), empty array if the directory
    * doesn't exist. */
   listFiles(path: string): string[];
+  /** Immediate subdirectory names only (not nested further, not files),
+   * empty array if the directory doesn't exist — `listFiles`'s
+   * counterpart, needed for e.g. listing every project under
+   * `/PROJECTS/` without knowing any of their names ahead of time. */
+  listDirs(path: string): string[];
   /** undefined if the file doesn't exist. */
   readFile(path: string): Uint8Array | undefined;
   writeFile(path: string, bytes: Uint8Array): void;
@@ -103,6 +108,9 @@ export interface StorageHal {
 export const NULL_STORAGE_HAL: StorageHal = {
   ensureDir(): void {},
   listFiles(): string[] {
+    return [];
+  },
+  listDirs(): string[] {
     return [];
   },
   readFile(): Uint8Array | undefined {
@@ -124,6 +132,36 @@ export class Storage {
 
   private cartPath(cartName: string): string {
     return `${CARTS_ROOT}/${cartName}.CRT`;
+  }
+
+  /** Every project currently under `/PROJECTS/`, sorted — the UI-facing
+   * "what's actually saved" question `openProject`/`saveAsset` alone
+   * can't answer without already knowing a name to ask about. Read-only,
+   * touches no arena/bank state (unlike `openProject`, which loads). */
+  listProjects(): string[] {
+    return this.hal.listDirs(PROJECTS_ROOT);
+  }
+
+  /** One project's saved banks, by tag/name/payload size — read-only,
+   * same "introspect without loading" reasoning as `listProjects()`.
+   * Mirrors `openProject()`'s own per-file tag/basename parsing exactly
+   * (`DEVELOPING.md`'s storage section), but never touches the arena or
+   * creates/overwrites a single bank; a file skipped there (unrecognized
+   * extension, too short to hold the asset header) is skipped here too,
+   * for the same reasons. */
+  listProjectAssets(projectName: string): { tag: string; name: string; size: number }[] {
+    const dir = this.projectDir(projectName);
+    const assets: { tag: string; name: string; size: number }[] = [];
+    for (const file of this.hal.listFiles(dir)) {
+      const dot = file.lastIndexOf('.');
+      if (dot < 0) continue;
+      const tag = EXTENSION_TO_TAG[file.slice(dot + 1).toUpperCase()];
+      if (!tag) continue;
+      const bytes = this.hal.readFile(`${dir}/${file}`);
+      if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue;
+      assets.push({ tag, name: file.slice(0, dot).toUpperCase(), size: bytes.length - ASSET_HEADER_SIZE });
+    }
+    return assets;
   }
 
   /** Scans /PROJECTS/<name>/ and loads every recognized asset file.

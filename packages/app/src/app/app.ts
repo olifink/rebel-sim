@@ -45,6 +45,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.bankTable().reduce((sum, b) => sum + b.size, 0),
   );
   protected readonly storageStatus = signal<string>('checking…');
+  // The "project storage" panel — every project name currently saved
+  // (Machine.storage.listProjects(), a plain localStorage scan), polled/
+  // diffed in tick() exactly like bankTable/dictionaryWords below.
+  protected readonly projectNames = signal<string[]>([]);
 
   // DEBUGGING.md (M10) UI: `undefined` while running; the paused
   // word's name once step() returns 'breakpoint'. Both the pump loop
@@ -540,6 +544,20 @@ export class App implements AfterViewInit, OnDestroy {
     return `${value} ${label}`;
   }
 
+  // "project storage" panel — a native title-attribute tooltip listing
+  // one saved project's banks, read directly off Storage.listProjectAssets()
+  // (read-only, no arena/bank mutation) rather than cached — called from
+  // the template on hover, cheap enough (a handful of small localStorage
+  // reads) not to need its own polled signal the way the panel's own
+  // project-name list does.
+  protected projectBankTooltip(name: string): string {
+    const assets = this.machine.storage.listProjectAssets(name);
+    if (assets.length === 0) {
+      return '(no banks found)';
+    }
+    return assets.map((a) => `${a.tag}/${a.name} (${this.formatBankSize(a.size)})`).join('\n');
+  }
+
   // WebMCP is an experimental browser feature
   // (chrome://flags/#enable-webmcp-testing as of this writing) — must
   // degrade silently on browsers without it, same as localStorage
@@ -567,6 +585,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastLatestAddr = -1;
   private lastBankCount = 0;
   private lastBreakpointWords: ReadonlySet<string> = new Set();
+  private lastProjectNames: string[] = [];
 
   // Restarts the requestAnimationFrame chain if tick() previously let it
   // die from having nothing to do. Idempotent — safe to call from any
@@ -678,6 +697,18 @@ export class App implements AfterViewInit, OnDestroy {
       this.zone.run(() => this.breakpointWords.set(currentBreakpoints));
       changed = true;
     }
+    // "project storage" panel — only PROJECT/SAVE/BSAVE (all ordinary
+    // primitives now, M33) can ever add a new name, but there's no
+    // separate "storage changed" signal to gate on the way bankCount/
+    // LATEST-address stand in for their own sections, so this just
+    // re-scans every tick like the others — a plain localStorage prefix
+    // scan, cheap enough not to need a real change signal.
+    const currentProjects = this.machine.storage.listProjects();
+    if (!arraysEqual(currentProjects, this.lastProjectNames)) {
+      this.lastProjectNames = currentProjects;
+      this.zone.run(() => this.projectNames.set(currentProjects));
+      changed = true;
+    }
     // 'more-to-run' means step() hit its budget mid-line and genuinely
     // needs another frame to keep making progress; every other status
     // (including having been skipped entirely while paused) means
@@ -692,7 +723,7 @@ export class App implements AfterViewInit, OnDestroy {
   };
 }
 
-function arraysEqual(a: number[], b: number[]): boolean {
+function arraysEqual<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 

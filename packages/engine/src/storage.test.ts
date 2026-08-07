@@ -23,6 +23,17 @@ function memoryHal(): StorageHal {
       }
       return names;
     },
+    listDirs(path: string): string[] {
+      const prefix = path.endsWith('/') ? path : path + '/';
+      const names = new Set<string>();
+      for (const key of files.keys()) {
+        if (!key.startsWith(prefix)) continue;
+        const rest = key.slice(prefix.length);
+        const slash = rest.indexOf('/');
+        if (slash > 0) names.add(rest.slice(0, slash));
+      }
+      return [...names].sort();
+    },
     readFile(path: string): Uint8Array | undefined {
       return files.get(path);
     },
@@ -204,6 +215,57 @@ describe('Storage', () => {
     expect(() => smallStorage.loadAsset('P', smallBank)).toThrow(/too large/);
   });
 
+  it('listProjects lists every project saved so far, sorted, empty when none exist', () => {
+    const hal = memoryHal();
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, hal);
+
+    expect(storage.listProjects()).toEqual([]);
+
+    const bank = banks.createBank('DATA', 64, 'ONE');
+    storage.saveAsset('ZEBRA', bank);
+    storage.saveAsset('APPLE', bank);
+    expect(storage.listProjects()).toEqual(['APPLE', 'ZEBRA']); // sorted, not insertion order
+  });
+
+  it('listProjectAssets reports every saved bank by tag/name/size without touching the arena', () => {
+    const hal = memoryHal();
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, hal);
+    const bank = banks.createBank('DATA', 64, 'MYASSET');
+    storage.saveAsset('INTROPRJ', bank);
+
+    const before = arena.readByte(0);
+    const assets = storage.listProjectAssets('INTROPRJ');
+    // bank.size, not the 64 requested — createBank() already rounded up
+    // to the XS size class, and the saved payload is the bank's real
+    // (rounded) size, not the raw request.
+    expect(assets).toEqual([{ tag: 'DATA', name: 'MYASSET', size: bank.size }]);
+    expect(arena.readByte(0)).toBe(before); // read-only — nothing written into this arena
+  });
+
+  it('listProjectAssets returns an empty list for a project that was never saved', () => {
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, memoryHal());
+    expect(storage.listProjectAssets('NOPE')).toEqual([]);
+  });
+
+  it('listProjectAssets skips unrecognized-extension and too-short files, same as openProject', () => {
+    const hal = memoryHal();
+    hal.writeFile('/PROJECTS/MIXED/README.TXT', new Uint8Array([1, 2, 3]));
+    hal.writeFile('/PROJECTS/MIXED/SHORT.DAT', new Uint8Array([1, 2]));
+    const arena = new Arena(1 << 16);
+    const banks = new BankTable(arena);
+    const storage = new Storage(arena, banks, hal);
+    const bank = banks.createBank('DATA', 64, 'REAL');
+    storage.saveAsset('MIXED', bank);
+
+    expect(storage.listProjectAssets('MIXED')).toEqual([{ tag: 'DATA', name: 'REAL', size: bank.size }]);
+  });
+
   it('cart save/load round-trips an opaque flat binary', () => {
     const hal = memoryHal();
     const arena = new Arena(1 << 16);
@@ -299,6 +361,9 @@ describe('runStorageSelfTest', () => {
     const brokenHal: StorageHal = {
       ensureDir(): void {},
       listFiles(): string[] {
+        return [];
+      },
+      listDirs(): string[] {
         return [];
       },
       readFile(): Uint8Array | undefined {

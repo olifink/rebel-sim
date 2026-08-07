@@ -72,6 +72,19 @@ export class LocalStorageStorageHal implements StorageHal {
     return names;
   }
 
+  listDirs(path: string): string[] {
+    const prefix = KEY_PREFIX + (path.endsWith('/') ? path : path + '/');
+    const names = new Set<string>();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(prefix)) continue;
+      const rest = key.slice(prefix.length);
+      const slash = rest.indexOf('/');
+      if (slash > 0) names.add(rest.slice(0, slash)); // first path segment only
+    }
+    return [...names].sort();
+  }
+
   readFile(path: string): Uint8Array | undefined {
     const raw = localStorage.getItem(KEY_PREFIX + path);
     return raw === null ? undefined : base64ToBytes(raw);

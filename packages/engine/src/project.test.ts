@@ -21,6 +21,17 @@ function memoryHal(): StorageHal {
       }
       return names;
     },
+    listDirs(path: string): string[] {
+      const prefix = path.endsWith('/') ? path : path + '/';
+      const names = new Set<string>();
+      for (const key of files.keys()) {
+        if (!key.startsWith(prefix)) continue;
+        const rest = key.slice(prefix.length);
+        const slash = rest.indexOf('/');
+        if (slash > 0) names.add(rest.slice(0, slash));
+      }
+      return [...names].sort();
+    },
     readFile(path: string): Uint8Array | undefined {
       return files.get(path);
     },
@@ -106,6 +117,9 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
     const brokenHal: StorageHal = {
       ensureDir(): void {},
       listFiles(): string[] {
+        return [];
+      },
+      listDirs(): string[] {
         return [];
       },
       readFile(): Uint8Array | undefined {

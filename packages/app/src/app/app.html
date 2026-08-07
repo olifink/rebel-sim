@@ -49,9 +49,10 @@
   </aside>
 
   <!-- Recycled from the old bottom-of-viewport stack-bar overlay (see
-       app.css) — banks/storage status moved here from .inspector, plus
-       a placeholder for a future storage browser (projects/assets
-       currently sitting in localStorage), not built yet. -->
+       app.css) — banks/storage status moved here from .inspector,
+       plus "project storage": every project currently saved, one
+       hoverable name per project, its tooltip listing that project's
+       own saved banks (Storage.listProjectAssets(), read-only). -->
   <aside class="storage-panel" [class.hidden]="!monitorsVisible()">
     <div class="inspector-section">
       <div class="inspector-label">banks arena 1, {{ formatBankSize(bankUsedBytes()) }} of {{ formatBankSize(arenaSizeBytes()) }}:</div>
@@ -73,8 +74,14 @@
     </div>
 
     <div class="inspector-section">
-      <div class="inspector-label">storage browser</div>
-      <div class="inspector-empty">(coming soon)</div>
+      <div class="inspector-label">project storage:</div>
+      <div class="inspector-words">
+        @for (name of projectNames(); track name) {
+          <span class="inspector-word" [title]="projectBankTooltip(name)">{{ name }}</span>
+        } @empty {
+          <span class="inspector-empty">(none)</span>
+        }
+      </div>
     </div>
   </aside>
 </main>
