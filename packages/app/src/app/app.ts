@@ -562,12 +562,14 @@ export class App implements AfterViewInit, OnDestroy {
   // "project storage" panel, click on a project name — one ZIP, every
   // raw file the project actually has on disk (Storage.listProjectFiles(),
   // unfiltered — a faithful copy, not the engine's own filtered/parsed
-  // bank view listProjectAssets() above uses). Namespaced under a
-  // top-level <name>/ folder in the archive so multiple files land
-  // somewhere sane once extracted, rather than dumping loose files.
+  // bank view listProjectAssets() above uses). Files sit at the
+  // archive's own top level, not nested under a <name>/ folder — the
+  // ZIP's own filename (<name>.zip) already carries that, and a real
+  // project's files (00000000.SYS, DICT.DCT, ...) are already uniquely
+  // named within one project, so nothing collides without it.
   protected downloadProject(name: string): void {
     const files = this.machine.storage.listProjectFiles(name);
-    const zipBytes = buildZip(files.map((f) => ({ filename: `${name}/${f.filename}`, bytes: f.bytes })));
+    const zipBytes = buildZip(files.map((f) => ({ filename: f.filename, bytes: f.bytes })));
     // .slice() first: Uint8Array's .buffer is typed ArrayBufferLike
     // (could theoretically be a SharedArrayBuffer) in current DOM libs,
     // which Blob's BlobPart type rejects — .slice() returns a fresh
