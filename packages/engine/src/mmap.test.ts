@@ -13,6 +13,14 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
     expect(mmapBank.flags).toBe(BankFlagResident | BankFlagActive);
   });
 
+  it('is exactly one XS size class (4096 bytes), no longer an exception to the size-class rule (spec §5.3)', () => {
+    // Comfortably covers the default 64-slot table's raw 1552-byte
+    // requirement (16-byte header + 64 * 24-byte slots) — the
+    // module-load-time assertion in mmap.ts is what actually guards
+    // against MAX_SLOTS someday outgrowing this class.
+    expect(MMAP_SIZE).toBe(4096);
+  });
+
   it("registers itself as its own slot 0 — describes itself, no implicit exception", () => {
     const banks = new BankTable(new Arena(1 << 16));
     expect(banks.mmap.getAllSlots()).toHaveLength(1);
@@ -29,8 +37,10 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   it('allocates sequential banks with no gaps and no overlaps, derived fresh each time — no cursor cell involved', () => {
     const banks = new BankTable(new Arena(1 << 16));
     const a = banks.createBank('DSTK', 64);
-    // 4 KiB-aligned, not raw MMAP_SIZE (spec/02-MEMORY-MODEL.md §4.4) —
-    // MMAP's own 1552 bytes round up to the first 4 KiB boundary.
+    // 4 KiB-aligned (spec/02-MEMORY-MODEL.md §4.4) — trivially exact
+    // now that MMAP_SIZE (4096, XS-class, §5.3) is itself already a
+    // 4 KiB multiple; the `& ~4095` mask is a no-op here, kept so this
+    // assertion still documents the real rule rather than a coincidence.
     expect(a.base).toBe((MMAP_SIZE + 4095) & ~4095);
 
     const b = banks.createBank('RSTK', 128);

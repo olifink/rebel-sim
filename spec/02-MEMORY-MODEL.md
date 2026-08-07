@@ -388,20 +388,32 @@ with different capacities.
   formatting concern (`01-HAL.md` §6), not this table's in-memory
   representation.
 
-### 5.3 `MMAP`'s own size — the one exception to §4.3
+### 5.3 `MMAP`'s own size — conforms to §4.3 like any other bank
 
-`MMAP`'s total byte size is `16 + MAX_SLOTS × 24` — a fixed function of
-a build-time constant, not describable "content" that could be rounded
-into one of §4.3's six classes. It is the **one** carved bank
-exempted from the size-class-only rule, and the exemption is narrow and
-specific to this structural reason — it is not a precedent for giving
-any other bank (§4.6's list, or any future one) an arbitrary exact
-size. Every other carved bank still must obey §4.3 without exception.
-`MMAP`'s placement still goes through the ordinary 4 KiB-aligned
-allocator (§4.4) like any other bank — it is simply always the first
-one, so its own placement never needs rounding (offset `0` is trivially
-aligned), and it's what makes the *next* bank's placement the one that
-does.
+`MMAP`'s raw content requirement is `16 + MAX_SLOTS × 24` bytes — a
+fixed function of a build-time constant. **[Revised]** an earlier
+version of this spec exempted `MMAP` from §4.3's size-class rule
+entirely, treating this computed byte count as the bank's actual,
+exact size. That exemption is gone: `MMAP`'s declared size **MUST** be
+this raw requirement rounded up to the smallest §4.3 size class that
+fits, exactly like any other carved bank's content-driven request
+(§4.3's own "this rule applies uniformly to every source of a
+bank-size request" already covered this case; `MMAP` was simply never
+routed through it). With the recommended default of `MAX_SLOTS = 64`,
+the raw requirement is 1552 bytes, comfortably inside the smallest
+class, **XS (4 KiB)** — so `MMAP`'s declared size is 4096 bytes, not
+1552. A target with a larger `MAX_SLOTS` recomputes the same way; only
+a `MAX_SLOTS` whose raw requirement exceeds 4 KiB (more than roughly
+169 slots) would round to a larger class instead.
+
+There is now no exception left in this section at all: `MMAP`'s
+placement still goes through the ordinary 4 KiB-aligned allocator
+(§4.4) like any other bank, it is simply always the first one (so its
+own placement trivially needs no rounding, offset `0` already being
+aligned) — and because its declared size is now itself a 4 KiB
+multiple like every other size class, the bank placed immediately
+after it lands pre-aligned too, with no rounding step actually doing
+anything anywhere in the sequence (§5.4).
 
 ### 5.4 Worked example
 
@@ -409,11 +421,12 @@ The bank sequence below (`MMAP` implicitly first, then `SYSV`, `DSTK`,
 `RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`, all XS-class except `DICT`
 at M-class) is exactly the kind of arena an implementation this suite
 governs produces, computed per §4.3/§4.4/§5.3 with `MAX_SLOTS = 64`
-(`MMAP` size = `16 + 64×24 = 1552` bytes):
+(`MMAP`'s raw requirement, `16 + 64×24 = 1552` bytes, rounds up to the
+XS class, 4096 bytes — §5.3):
 
 | Bank | Base | Size | Class |
 |---|---|---|---|
-| `MMAP` | `0x00000` (0) | 1552 | — (§5.3) |
+| `MMAP` | `0x00000` (0) | 4096 | XS (§5.3) |
 | `SYSV` | `0x01000` (4096) | 4096 | XS |
 | `DSTK` | `0x02000` (8192) | 4096 | XS |
 | `RSTK` | `0x03000` (12288) | 4096 | XS |
@@ -422,11 +435,17 @@ governs produces, computed per §4.3/§4.4/§5.3 with `MAX_SLOTS = 64`
 | `KMAP` | `0x15000` (86016) | 4096 | XS |
 | `WORK` | `0x16000` (90112) | 4096 | XS |
 
-Note every base after `SYSV` lands pre-aligned with no further rounding
-needed — the direct consequence of every size class already being a
-4 KiB multiple (§4.4). Only the very first placement (`SYSV`, right
-after `MMAP`'s non-class-sized 1552 bytes) actually needs the round-up
-to do anything. A conformant target's own allocator, run against the
+Every base lands pre-aligned with no rounding step actually doing
+anything anywhere in this sequence — the direct consequence of every
+bank, `MMAP` included now, always being an exact 4 KiB-multiple size
+class (§4.4). **[Revised]** an earlier version of this table had `MMAP`
+at its old, non-class-sized 1552 bytes, which meant `SYSV`'s placement
+right after it was the one spot the round-up step actually did
+something; with `MMAP` itself now XS-class-sized, that was the last
+remaining case where rounding had real work to do, and it's gone too —
+every bank in a conformant target's sequence, this one included,
+already lands on a 4 KiB boundary without the allocator needing to
+round anything up. A conformant target's own allocator, run against the
 same bank sequence with the same `MAX_SLOTS`, **MUST** reproduce this
 table exactly.
 

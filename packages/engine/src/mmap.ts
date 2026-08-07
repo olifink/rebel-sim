@@ -61,10 +61,31 @@ const SLOT_BASE_OFFSET = TAG_SIZE + NAME_SIZE;
 const SLOT_SIZE_OFFSET = SLOT_BASE_OFFSET + 4;
 const SLOT_FLAGS_OFFSET = SLOT_SIZE_OFFSET + 4;
 
-/** Total size MMAP itself reserves, header + all slots — not a size
- * class (like CHAR's bank, MMAP's size is a computed constant, not a
- * requested one). */
-export const MMAP_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
+/** Raw content requirement — header + all slots — before size-class
+ * rounding. Not exported: nothing outside this module needs the
+ * pre-rounded figure, only the actual declared bank size below. */
+const MMAP_RAW_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
+
+/** [Revised, spec/02-MEMORY-MODEL.md §5.3] MMAP used to be the one
+ * carved bank exempted from size-class rounding, declaring its exact
+ * raw byte count (1552, with the default 64 slots) as its size. That
+ * exemption is gone — MMAP now conforms to the same size-class rule
+ * (§4.3) as every other bank, for consistency, at the cost of a real,
+ * accepted breaking change for any already-saved project (no real
+ * project data exists yet to migrate). 4096 (XS, `BankSizeXS` in
+ * banks.ts — not imported here, same avoid-a-circular-dependency
+ * reason as NAME_SIZE above) comfortably covers the 64-slot default's
+ * 1552-byte raw requirement; a build with a much larger MAX_SLOTS
+ * would need to round to a bigger class instead — this constant is
+ * asserted against the raw requirement below specifically so a future
+ * MAX_SLOTS change can't silently outgrow it. */
+export const MMAP_SIZE = 4096;
+
+if (MMAP_RAW_SIZE > MMAP_SIZE) {
+  throw new Error(
+    `MMAP's raw content requirement (${MMAP_RAW_SIZE} bytes) no longer fits its declared XS-class size (${MMAP_SIZE} bytes) — MAX_SLOTS grew too far; round MMAP_SIZE up to the next size class.`,
+  );
+}
 
 /** Matches rebel-rom's real TBankFlags (src/membank.h) bit-for-bit for
  * the first four; ACTIVE (DEVELOPING.md §11/§14, M19/M22) is a
@@ -195,14 +216,15 @@ export class MemoryMap {
    * The computed free-cursor position is then rounded up to the next
    * 4 KiB boundary (spec/02-MEMORY-MODEL.md §4.4) before anything gets
    * placed there — every size class is itself already a multiple of
-   * 4 KiB, so in practice only the very first placement after `MMAP`'s
-   * own non-class-sized 1552 bytes ever needs real rounding; every
-   * placement after that already lands pre-aligned. Applied
-   * unconditionally, including for `MMAP`'s own self-registration
+   * 4 KiB, and (since MMAP itself became XS-class-sized too, spec
+   * §5.3) so is MMAP now, so in practice no placement ever needs real
+   * rounding — every bank already lands pre-aligned regardless. Applied
+   * unconditionally anyway, including for `MMAP`'s own self-registration
    * (`BankTable`'s constructor) — harmless there since offset 0 is
    * already aligned, and it's what keeps this the one place base
    * alignment is enforced rather than something each caller must
-   * remember.
+   * remember (a future non-class-sized bank, should one ever exist
+   * again, would need it to actually do something).
    *
    * Returns the actual stored descriptor (`ACTIVE` always forced on,
    * regardless of what `flags` requested) rather than just the new

@@ -2989,3 +2989,82 @@ real `rebel-sim:/PROJECTS/...` keys in the browser's own `localStorage`
 proving the whole session survived actual browser storage, not JS
 memory continuity. `BSAVE NOSUCHTAG` produced a proper `? ...`
 Forth-level error, not an uncaught exception.
+
+## 26. `MMAP` conforms to the size-class rule — no more exception — done, M34
+
+### Motivation
+
+Suggested directly, following on from M33's own storage work: bump
+`MMAP`'s size to the XS size class (4096 bytes) instead of its exact
+computed 1552 bytes — "makes everything look more consistent." `MMAP`
+had been the **one** carved bank exempted from
+`spec/02-MEMORY-MODEL.md` §4.3's "every carved bank occupies exactly
+one size class" rule (§5.3), declaring its raw `16 + MAX_SLOTS × 24`
+byte requirement as an exact size instead. A real, deliberately
+accepted breaking change for anything already saved — a pre-M34
+`MMAP.MAP` asset is 1552 bytes, a post-M34 one is 4096 — accepted
+because no real project data exists yet to migrate.
+
+### What actually changes (checked, not assumed)
+
+Traced through `mmap.ts`'s bump allocator (`allocate()`) before
+touching anything: `alignedBase = (base + 4095) & ~4095`, computed
+fresh from the cumulative active-slot high-water mark on every call,
+not derived from `MMAP`'s size directly. Both `(1552 + 4095) & ~4095`
+and `(4096 + 4095) & ~4095` equal `4096` — **the exact same result**.
+So this change is layout-neutral for every other bank: `SYSV`'s base
+(and everything after it) is unchanged, confirmed by the full existing
+test suite passing unmodified except for one stale comment. Only
+`MMAP`'s own declared `.size` field changes (1552 → 4096), and its own
+asset file grows to reserve the same 4096 bytes any other XS-class
+bank does — the extra 2544 bytes are the same "legitimately unused
+slack within the class" every size-class bank already carries (§4.3),
+not new complexity.
+
+A pleasant side effect, worth stating precisely rather than just
+"it's fine now": with `MMAP` itself now an exact 4 KiB multiple,
+**no bank placement in the whole sequence ever needs real rounding
+anymore** — before this, `SYSV`'s placement (right after `MMAP`'s
+non-class-sized 1552 bytes) was the one spot the round-up step did
+real work; every other transition was already a no-op rounding
+(every size class already being a 4 KiB multiple). That one remaining
+case is gone too now.
+
+### What shipped
+
+`mmap.ts`: `MMAP_SIZE` is now a literal `4096` (XS, matching
+`banks.ts`'s `BankSizeXS` — not imported, same avoid-a-circular-
+dependency reason `NAME_SIZE` already has), rather than the computed
+`HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE` expression. That raw
+computation is kept internally (`MMAP_RAW_SIZE`, unexported) purely to
+guard the constant: a module-load-time check throws if `MMAP_RAW_SIZE`
+ever exceeds `MMAP_SIZE` — cheap insurance against a future
+`MMAP_MAX_SLOTS` increase silently outgrowing the XS class without
+anyone noticing (would need roughly 170+ slots to happen; 64 is nowhere
+close).
+
+`spec/02-MEMORY-MODEL.md` §5.3 rewritten: no longer "the one exception
+to §4.3," now states plainly that `MMAP`'s declared size **MUST** be
+its raw requirement rounded up to the smallest size class, like any
+other carved bank. §5.4's worked example table updated (`MMAP`: 1552 →
+4096, class `—` → `XS`) along with its explanatory prose (no placement
+in the sequence needs rounding anymore, not just "every placement after
+the first").
+
+Checked whether `rebel-rom` needs a matching change: no — its own bank
+table (`membank.h`'s `CBank m_Banks[BANK_TABLE_MAX_BANKS]`) is a plain
+host-side C++ array, not yet an arena-resident bank the way `MMAP` is
+here (`HAL.md`'s own "ahead on the hardware substrate, but its Forth
+executor doesn't exist yet" framing) — the size-class question doesn't
+apply there until it adopts the arena-resident `MMAP` model at all.
+
+### Tests
+
+`mmap.test.ts`: one new test pinning `MMAP_SIZE` at exactly `4096`;
+one stale comment (referencing `MMAP`'s old 1552-byte size needing
+real rounding) corrected to explain the assertion is now trivially
+exact rather than a real rounding case. No other test needed any
+change — every existing assertion was already parameterized through
+the `MMAP_SIZE` constant, not a hardcoded byte count, confirming the
+layout-neutrality claim above empirically, not just by derivation.
+Full engine suite: 294 passed (293 before this milestone, 1 new).

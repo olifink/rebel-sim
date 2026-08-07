@@ -453,6 +453,21 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `BANK@`/`CREATE-BANK`/`'` already have, which only resolves
     correctly interpreted directly, not compiled with a following
     literal. Detailed below.
+34. **M34 — `MMAP` conforms to the size-class rule, no more exception**
+    — **done**: suggested directly, following on from M33 — bump
+    `MMAP`'s size to the XS class (4096 bytes) instead of its exact
+    computed 1552, "makes everything look more consistent," a real,
+    accepted breaking change for anything already saved (no real
+    project data exists yet). Traced through the bump allocator before
+    touching anything: `(1552 + 4095) & ~4095` and
+    `(4096 + 4095) & ~4095` both equal `4096` — layout-neutral for
+    every other bank, confirmed by the full existing test suite passing
+    unmodified except one stale comment. `spec/02-MEMORY-MODEL.md` §5.3
+    rewritten (`MMAP` no longer "the one exception to §4.3," now
+    conforms like every other carved bank) and §5.4's worked example
+    updated. `rebel-rom` needs no matching change — its bank table is
+    still a plain host-side C++ array, not yet an arena-resident `MMAP`
+    the way this repo has it. Detailed below.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -2943,3 +2958,62 @@ Live-verified in a real browser: `PROJECT`/`: GREET 42 ;`/`SAVE`/
 browser's actual `localStorage`, a genuine full-page reload, then
 `RESTORE`/`GREET .` printing `42` and `BLOAD DICT` succeeding — proof
 against real browser storage, not JS memory continuity.
+
+## M34 — `MMAP` conforms to the size-class rule, no more exception — done
+
+Full design/motivation: `DEVELOPING.md` §26. Short version: suggested
+directly, following on from M33's own storage work — bump `MMAP`'s
+size to the XS size class (4096 bytes) instead of its exact computed
+1552 bytes, for consistency with every other carved bank. `MMAP` had
+been the one bank `spec/02-MEMORY-MODEL.md` §5.3 exempted from §4.3's
+"every carved bank occupies exactly one size class" rule, declaring
+its raw `16 + MAX_SLOTS × 24` byte requirement as an exact size
+instead. A real, deliberately accepted breaking change for anything
+already saved (a pre-M34 `MMAP.MAP` asset is 1552 bytes, post-M34 is
+4096) — accepted because no real project data exists yet to migrate.
+
+**Checked, not assumed, before touching anything:** traced through the
+bump allocator's actual rounding math (`mmap.ts`'s `allocate()`):
+`alignedBase = (base + 4095) & ~4095`, computed fresh from the
+cumulative active-slot high-water mark, not from `MMAP`'s size
+directly. `(1552 + 4095) & ~4095` and `(4096 + 4095) & ~4095` both
+equal `4096` — the exact same result — so this change is
+layout-neutral for every other bank: `SYSV`'s base (and everything
+after it) is unchanged. Confirmed empirically, not just derived: the
+full existing engine test suite passed unmodified except one stale
+comment, since every existing assertion was already parameterized
+through the `MMAP_SIZE` constant rather than a hardcoded byte count.
+
+A pleasant side effect worth naming precisely: with `MMAP` itself now
+an exact 4 KiB multiple, no bank placement in the whole sequence ever
+needs real rounding anymore — before this, `SYSV`'s placement (right
+after `MMAP`'s non-class-sized 1552 bytes) was the one spot the
+round-up step did real work; that last remaining case is gone too.
+
+**What shipped:** `mmap.ts`'s `MMAP_SIZE` is now a literal `4096`
+(matching `banks.ts`'s `BankSizeXS`, not imported, same
+avoid-a-circular-dependency reason `NAME_SIZE` already has) instead of
+the computed `HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE` expression —
+kept internally as `MMAP_RAW_SIZE` purely to guard the constant with a
+module-load-time assertion (throws if the raw requirement ever exceeds
+4096, cheap insurance against a future `MAX_SLOTS` increase silently
+outgrowing the class). `spec/02-MEMORY-MODEL.md` §5.3 rewritten: no
+longer "the one exception to §4.3," now states `MMAP`'s declared size
+**MUST** be its raw requirement rounded up to the smallest size class,
+like any other carved bank. §5.4's worked example table and prose
+updated to match (`MMAP`: 1552 bytes/no class → 4096 bytes/XS; no
+placement in the sequence needs rounding anymore, not just "every
+placement after the first").
+
+**Checked whether `rebel-rom` needs a matching change: no.** Its own
+bank table (`membank.h`'s `CBank m_Banks[BANK_TABLE_MAX_BANKS]`) is a
+plain host-side C++ array, not yet an arena-resident bank the way
+`MMAP` is here — `HAL.md`'s own "ahead on the hardware substrate, but
+its Forth executor doesn't exist yet" framing. The size-class question
+doesn't apply there until it adopts the arena-resident `MMAP` model at
+all.
+
+**Tests:** `mmap.test.ts` gained one new test pinning `MMAP_SIZE` at
+exactly `4096`; one stale comment (about `MMAP`'s old 1552-byte size
+needing real rounding) corrected. No other test needed any change.
+Full engine suite: 294 passed (293 before this milestone, 1 new).
