@@ -948,6 +948,14 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     // reconstruction (repl.ts's readonly fields), not anything this
     // switch can do in place.
 
+    case 133: // REDRAW ( -- ) — same Screen.redrawAll() call RESTORE
+      // (128) and BLOAD (130) already make internally after overwriting
+      // CHAR directly; exposed as an ordinary word so Forth source that
+      // pokes CHAR itself (BANK@ CHAR ... C!) has a way to repaint
+      // without needing storage's fix-up path as an excuse to reach it.
+      ctx.screen.redrawAll();
+      break;
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

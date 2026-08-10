@@ -1960,6 +1960,27 @@ tests: five `dictionary.test.ts` cases, one `app.spec.ts` case. Full
 engine suite: 310 passed (305 before, 5 new). App suite: 19 passed (18
 before, 1 new).
 
+### 1.52 `REDRAW` (M37, `DEVELOPING.md` §29)
+
+Poking `CHAR` directly (`BANK@ CHAR ... C!`) writes the byte but never
+blits it — only `writeChar()` (`EMIT`/`CHAR!`/...) goes through
+`screen.hal.blitGlyph()`. `REDRAW ( -- )`, token 133, one-line
+`primitives.ts` case exposing the already-existing `Screen.redrawAll()`
+(§1.25-adjacent, M29) — the same call `RESTORE`/`BLOAD` already make
+internally for the identical reason. Unlike §1.51's tooltip, this is a
+real cross-target primitive, not web-only: `rebel-rom`'s
+`CScreenModule::Redraw()` (`src/screenmodule.h`/`.cpp`) is the
+identical concept on real hardware, checked directly rather than
+assumed. Deliberately whole-buffer only for now (no single-cell/
+rectangle variant) — the point is finding out empirically how
+expensive a full sweep is in a real use case before adding anything
+more targeted.
+
+*Implementation:* `rebel-opcodes.json` (token 133), `primitives.ts`
+(case 133). One new `screen.test.ts` case (poke leaves `blitGlyph`
+uncalled, `REDRAW` then repaints every cell). Full engine suite: 311
+passed (310 before, 1 new). App suite unaffected.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2100,5 +2121,6 @@ exactly as it would be on the bare-metal target.
 | **M34** | `MMAP` conforms to the size-class rule, no more exception (`DEVELOPING.md` §26). Suggested directly, following on from M33: bump `MMAP`'s size to the XS class (4096 bytes) instead of its exact computed 1552, for consistency — a real, accepted breaking change for anything already saved (no real project data exists yet). Traced through the bump allocator's actual rounding math before touching anything: `(1552+4095)&~4095` and `(4096+4095)&~4095` both equal `4096`, so this is layout-neutral for every other bank — confirmed empirically, the full engine suite passed unmodified except one stale comment. `mmap.ts`'s `MMAP_SIZE` is now a literal `4096` (matching `BankSizeXS`, not imported, same reason `NAME_SIZE` isn't); the raw `16 + MAX_SLOTS × 24` computation is kept internally only to assert it never exceeds 4096. `spec/02-MEMORY-MODEL.md` §5.3 rewritten (`MMAP` no longer exempt from §4.3, now rounds up like any other carved bank) and §5.4's worked example updated. `rebel-rom` needs no matching change — its bank table is still a plain host-side array, not yet an arena-resident `MMAP`. | `mmap.ts`, `spec/02-MEMORY-MODEL.md` |
 | **M35** | `WARM`/`COLD` (§1.50, `DEVELOPING.md` §27), picked back up after M29 deferred both citing `Machine`'s `readonly` fields as the blocker. Split by how much state each touches instead of making `Machine` rebuildable: `WARM` (token 131) is a plain primitive clearing both stacks, `DICT`/`MMAP` untouched. `COLD` (token 132) is a pure Forth-to-host signal — a fourth `StepSignal`/`StepStatus` value, `'cold'`, riding M10's breakpoint-yield mechanism — since a full reset genuinely can't happen in place; the host (`app.ts`) reacts by constructing a brand new `Machine`. Two real bugs found and fixed along the way: an `ngAfterViewInit` reordering that broke keyboard-listener registration's implicit "before the first `await`" invariant (caught by an existing test going flaky, not assumed), and `registerWebMcpTools()` capturing a now-stale `Machine` reference at registration time. | `rebel-opcodes.json`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts` |
 | **M36** | Dictionary hover tooltip shows a primitive's note (§1.51, `DEVELOPING.md` §28). Web-only monitor-panel sugar, requested directly, out of scope for `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`. New `dictionary.ts` export `getPrimitiveNote(name)` — a name→note lookup over `opcodes.primitives`, not a `DictionaryEntry` field (a note is documentation, not runtime state). `app.ts`'s `wordTooltip()` shows the note when one exists, falling back to the original breakpoint-hint text for every user-defined word and note-less primitive. Click-to-toggle-breakpoint behavior itself is unchanged. | `dictionary.ts`, `index.ts`, `app.ts`, `app.html` |
+| **M37** | `REDRAW` (§1.52, `DEVELOPING.md` §29): repaints the framebuffer from `CHAR` content, for when Forth source pokes `CHAR` directly (`BANK@ CHAR ... C!`) and bypasses `writeChar()`'s HAL write-through. Exposes the already-existing `Screen.redrawAll()` (M29) as an ordinary word (token 133) — no new mechanism. A real cross-target primitive (checked against `rebel-rom`'s `CScreenModule::Redraw()`, not assumed), unlike M36's web-only tooltip. Deliberately whole-buffer only for now, to find out empirically how expensive a full sweep is before adding a targeted single-cell/rectangle variant. | `rebel-opcodes.json`, `primitives.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

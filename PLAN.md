@@ -499,6 +499,24 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     falling back to the original breakpoint-hint text otherwise (every
     user-defined word, and most low-level primitives with no recorded
     note). Detailed below.
+37. **M37 — `REDRAW`: repaint the framebuffer from `CHAR` content** —
+    **done**: real cross-target primitive (verified against
+    `rebel-rom/src/screenmodule.h`/`.cpp` — `CScreenModule::Redraw()`
+    already exists there, same purpose, used by `AttachArena()`), not
+    web-only. Poking `CHAR` directly (`BANK@ CHAR ... C!`) bypasses
+    `writeChar()`'s per-character HAL write-through, so nothing repaints
+    the visible screen — previously only reachable indirectly via
+    `RESTORE`/`BLOAD`'s internal `Screen.redrawAll()` call. `REDRAW`
+    exposes that same call as an ordinary word. Discussed first, not
+    jumped into: considered a shadow-buffer-with-consolidated-updates
+    approach and intercepting `Arena.writeXxx` to auto-detect `CHAR`
+    writes, both rejected as either not portable or an ugly workaround
+    for what's fundamentally a caller-side bookkeeping problem — the
+    caller (e.g. a screen editor) knows best how often it touches
+    `CHAR` and can judge the cost of a full redraw itself. Starting
+    with the simple whole-buffer version specifically to find out how
+    expensive it really is in practice before considering anything
+    more targeted (a single-cell or rectangle variant). Detailed below.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -3161,3 +3179,53 @@ note-less primitive (`DUP`), and a user-defined word (`SQUARE`). Live-
 verified in a real browser via WebMCP/chrome-devtools before writing
 the tests, not just after. Full engine suite: 310 passed (305 before,
 5 new). App suite: 19 passed (18 before, 1 new).
+
+## M37 — `REDRAW`: repaint the framebuffer from `CHAR` content — done
+
+Prompted by a direct question: how do you efficiently redraw the
+screen after poking `CHAR` bytes directly (`BANK@ CHAR ... C!`), since
+that path writes the byte but never calls `screen.hal.blitGlyph()` —
+only `writeChar()` (`EMIT`, `CHAR!`, ...) does that per-character
+write-through. Two alternatives were considered and rejected before
+settling on the simple answer: a shadow buffer with consolidated
+update batching, and hooking `Arena.writeXxx` itself to detect writes
+landing inside the `CHAR` bank and auto-repaint. Both were judged
+either not portable enough (the second would need every target's
+arena-access layer to carry redraw-detection logic it has no other
+reason to have) or an ugly workaround for what's really a caller-side
+concern: whoever is poking `CHAR` directly (a screen editor, most
+concretely) already knows how often it touches the buffer and can
+judge for itself whether a full redraw's cost is acceptable each time,
+far better than any engine-side heuristic could guess.
+
+The mechanism already existed and needed no new engine work:
+`Screen.redrawAll()` (M29) — used internally by `RESTORE`/`BLOAD` for
+exactly this same reason, since restoring a project also overwrites
+`CHAR` directly. `REDRAW` (token 133) is a one-line `primitives.ts`
+case exposing it: `ctx.screen.redrawAll(); break;`. Checked against
+`rebel-rom` before treating this as settled, not assumed: real
+hardware already has the identical concept,
+`CScreenModule::Redraw()` (`src/screenmodule.h`/`.cpp`) — "repaints
+every cell from `m_pCharBank`'s current contents," used by
+`AttachArena()` after repointing the shared screen at a different
+arena's `CHAR` bank — so this is a genuine cross-target primitive, not
+web-only sugar the way M36's tooltip was.
+
+Deliberately starting with only the whole-buffer version, not a
+single-cell or rectangle variant, specifically to find out empirically
+how expensive a full `cols × rows` `blitGlyph` sweep actually is in a
+real use case (a screen editor, most likely) before adding anything
+more targeted — the targeted version's cost is "caller tracks its own
+dirty region," real complexity worth deferring until the simple
+version is shown to actually need it.
+
+**Tests:** `screen.test.ts` gained one new case — `72 BANK@ CHAR C!`
+lands the byte but calls `blitGlyph` zero times, `REDRAW` then calls it
+`cols × rows` times including the poked cell — proving the exact
+poke → nothing visible → `REDRAW` → repainted pipeline the question was
+about, not just that `redrawAll()` works in isolation (already covered
+by an M29 test). Live-verified in a real browser first (`72 BANK@ CHAR
+C!` leaves the top-left cell showing its old glyph; `REDRAW` turns it
+into `H`), same discipline as M35/M36. Full engine suite: 311 passed
+(310 before, 1 new). App suite unaffected — no `app.ts`/`app.html`
+change, this is a pure `primitives.ts`/`rebel-opcodes.json` addition.

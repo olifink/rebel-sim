@@ -3257,3 +3257,38 @@ time, but confirmed the exact tooltip text for `ABORT`/`COLD`/`WARM`/
 `DUP`/`SQUARE` matched what the tests then pinned down. Full engine
 suite: 310 passed (305 before, 5 new). App suite: 19 passed (18
 before, 1 new).
+
+## 29. `REDRAW` — done, M37
+
+Direct question: poking `CHAR` bytes via `BANK@ CHAR ... C!` writes the
+byte but never blits it — only `writeChar()` (`EMIT`/`CHAR!`/...) goes
+through `screen.hal.blitGlyph()`. Two alternatives were weighed and
+rejected before landing on the simple answer: a shadow buffer with
+consolidated update batching, and hooking `Arena.writeXxx` to auto-
+detect writes into the `CHAR` bank and repaint. Both rejected — not
+portable enough, or an ugly workaround for a caller-side judgment call
+(how often it pokes `CHAR`, and whether a full redraw's cost is
+acceptable) no engine-side heuristic can make better than the caller
+itself (a screen editor, most concretely).
+
+No new mechanism needed: `Screen.redrawAll()` (M29) already exists,
+already used internally by `RESTORE`/`BLOAD` for the identical reason.
+`REDRAW` (token 133, `primitives.ts` case 133) is a one-line exposure:
+`ctx.screen.redrawAll(); break;`. Checked against `rebel-rom` before
+treating this as settled: `CScreenModule::Redraw()`
+(`src/screenmodule.h`/`.cpp`) is the real hardware's own identical
+concept — "repaints every cell from `m_pCharBank`'s current contents,"
+used by `AttachArena()` — so unlike M36's tooltip, this is a genuine
+cross-target primitive, not web-only sugar.
+
+Deliberately whole-buffer only for now, not single-cell/rectangle —
+the point of starting here is finding out empirically how expensive a
+full `cols × rows` `blitGlyph` sweep is in a real use case (a screen
+editor) before adding anything more targeted.
+
+**Tests:** `screen.test.ts` gained one case: `72 BANK@ CHAR C!` lands
+the byte with zero `blitGlyph` calls; `REDRAW` then calls it
+`cols × rows` times, poked cell included. Live-verified in a real
+browser first (poke leaves the old glyph on screen; `REDRAW` repaints
+it), same discipline as M35/M36. Full engine suite: 311 passed (310
+before, 1 new). App suite unaffected — no `app.ts`/`app.html` change.

@@ -43,6 +43,24 @@ describe('Screen', () => {
     expect(m.screen.readChar(0, 0)).toBe(72);
   });
 
+  it('REDRAW (133): poking CHAR directly via BANK@/C! draws nothing until REDRAW repaints it', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    // The exact scenario REDRAW exists for: BANK@ CHAR gives a raw
+    // address into the CHAR bank, C! writes straight to arena bytes —
+    // neither goes anywhere near writeChar()'s HAL write-through.
+    m.interpret('72 BANK@ CHAR C!');
+    expect(m.screen.readChar(0, 0)).toBe(72); // the byte landed...
+    expect(hal.blitGlyph).not.toHaveBeenCalled(); // ...but nothing repainted
+
+    m.interpret('REDRAW');
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 72, 0x00ff00, 0x000000);
+    expect(hal.blitGlyph).toHaveBeenCalledTimes(m.screen.cols * m.screen.rows);
+  });
+
   it('EMIT wraps to the next row at the end of a row, and to row 0 at the bottom — no scrolling', () => {
     const m = new Machine();
     const { cols, rows } = m.screen;
