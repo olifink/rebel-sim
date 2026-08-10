@@ -234,8 +234,17 @@ export class App implements AfterViewInit, OnDestroy {
   // Bound once so removeEventListener actually matches. Recomputes the
   // visible canvas's backing resolution — devicePixelRatio can change at
   // runtime (dragging the window to a different-DPI display, browser
-  // zoom), and `resize` fires for the common cases of that.
-  private readonly onResize = (): void => this.applyPresentationSize();
+  // zoom), and `resize` fires for the common cases of that. Assigning
+  // canvas.width/height inside applyPresentationSize() clears the visible
+  // canvas back to transparent black (that's the DOM canvas spec, not a
+  // bug) — wake() forces the idle-gated pump to run one more tick() so
+  // its drawImage repaints the just-cleared canvas from the offscreen
+  // framebuffer immediately, instead of leaving it black until the next
+  // keystroke or other event happens to call wake() anyway.
+  private readonly onResize = (): void => {
+    this.applyPresentationSize();
+    this.wake();
+  };
 
   private applyPresentationSize(): void {
     const canvas = this.screenRef.nativeElement;
