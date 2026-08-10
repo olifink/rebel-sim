@@ -33,7 +33,7 @@ It does not specify:
 ### 2.1 Why this needs saying explicitly
 
 A real, working reference implementation of this system currently ships
-**130 native primitives**. Cross-referencing that implementation's own
+**132 native primitives**. Cross-referencing that implementation's own
 design history against itself surfaces something worth stating plainly:
 its own governing design document (predating this specification)
 already drew a **`CORE`/`STANDARD-for-now`** distinction — `CORE` words
@@ -104,15 +104,19 @@ part of the *portable* contract.
 
 ### 2.4 The headline number
 
-Applying §2.2's test to the full 130-word reference vocabulary (§6)
-reclassifies **53 of them as BOOTSTRAP** — everything from stack
-shufflers (`OVER`, `ROT`, `2DUP`, `NIP`, `TUCK`, …) to, more
+Applying §2.2's test to the full 132-word reference vocabulary (§6;
+130 plus the `WARM`/`COLD` reset words added after this catalog's first
+pass, §6.12) reclassifies **54 of them as BOOTSTRAP** — everything from
+stack shufflers (`OVER`, `ROT`, `2DUP`, `NIP`, `TUCK`, …) to, more
 significantly, **the entire structured-control-flow compiler layer**
 (`IF`/`ELSE`/`THEN`/`BEGIN`/`UNTIL`/`WHILE`/`REPEAT`/`DO`/`LOOP`/
-`+LOOP`/`RECURSE`/`I`/`J`) and **`VARIABLE`/`CONSTANT`**, both fully
-expressible from lower primitives that already exist. That leaves a
-**77-word required native kernel** — see §6 for the full, word-by-word
-table and §6.5/§6.6 for the two highest-value derivations.
+`+LOOP`/`RECURSE`/`I`/`J`), **`VARIABLE`/`CONSTANT`**, and — once a
+target already has `SP0`/`SP!`/`RP0`/`RP!` for `DEPTH`/`PICK`/`I`/`J`
+anyway (§6.10) — **`WARM`** itself, all fully expressible from lower
+primitives that already exist. That leaves a **78-word required native
+kernel** — see §6 for the full, word-by-word table, §6.5/§6.6 for the
+two highest-value derivations, and §6.12/§4.6 for why `COLD`, unlike
+`WARM`, has no such shortcut.
 
 ---
 
@@ -296,6 +300,47 @@ non-conformant — but where a target does implement it, reusing the
 existing suspend point rather than inventing a second mechanism is
 strongly RECOMMENDED, since one interpreter re-entrancy model
 (§4.4) is simpler to get right than two.
+
+### 4.6 `COLD`: ending the session, not suspending it
+
+`COLD` (§6.12) is dispatched specially for a different reason than
+`KEY`/`ACCEPT` (§4.3, §6.9): it is not a suspend point to resume later —
+it is a **terminal** signal that the entire current interpreter session
+must end and be replaced by one equivalent to a fresh boot, not merely
+paused.
+
+**Dispatching `COLD` MUST result in the dictionary (`DICT`), bank
+layout (`MMAP`), both stacks, and every sysvar being reinitialized
+exactly as they would be at a fresh boot, before the next line of
+Forth source is interpreted.** This document does not mandate *how* —
+the two valid shapes mirror §4.4's own target-agnostic framing:
+
+- A target whose core interpreter state is genuinely reinitializable in
+  place (a bare-metal target simply re-running its own boot routine
+  against the same resident RAM, the same way a real power-on reset
+  works) MAY implement `COLD` as an ordinary primitive that performs
+  that reinitialization directly, returning control to the now-fresh
+  outer interpreter itself.
+- A target whose implementation makes in-place reinitialization
+  impractical (core interpreter state established once, immutably, at
+  process startup, say) MAY instead implement `COLD` as a signal that
+  unwinds the current interpreter session entirely and hands control to
+  a supervising boot routine — the same one a genuine first boot already
+  runs — to construct a replacement from scratch.
+
+From the perspective of the next line of Forth source, the two are
+indistinguishable; which one a target uses is an artifact of that
+target's own implementation language and runtime, not a cross-target
+requirement (`01-HAL.md` §5.5's treatment of the suspension mechanism
+is the direct precedent for this framing).
+
+**Either way, `COLD` reduces the dictionary to its fresh-boot state —
+every bootstrap-layer word (§7) is gone immediately afterward**, `WARM`
+(§6.12) included, since it's one of them. A conformant target's
+post-`COLD` sequence MUST re-run the same bootstrap load (§7.1) a
+genuine power-on boot runs — not merely restart the interactive prompt
+against a dictionary that currently has nothing in it past the native
+KERNEL words.
 
 ---
 
@@ -624,7 +669,7 @@ op — the general principle (§4.4's suspension mechanism composes
 through ordinary Forth-source loops automatically) covers every case
 that would otherwise seem to need one.
 
-### 6.10 Dictionary/bootstrap-support primitives
+### 6.10 Dictionary/interpreter-state access primitives
 
 | Word | Effect | |
 |---|---|---|
@@ -632,6 +677,12 @@ that would otherwise seem to need one.
 | `EXECUTE` | `( xt -- )`, run the word at `xt` | **KERNEL** — re-enters §4.2's threading loop at an arbitrary address; not expressible as a primitive that doesn't itself touch `ip`. |
 | `LATEST-ADDR` | `( -- addr )`, the `FORTH.LATEST` sysvar's own address | **KERNEL** — direct sysvar-address exposure. |
 | `HERE-ADDR` | `( -- addr )`, the `FORTH.HERE` sysvar's own address | **KERNEL** — same pattern; this is the exact precedent §6.9 recommends extending to `CURSOR-X`/`CURSOR-Y`. |
+| `SP0` | `( -- addr )`, the data stack's constant empty-state address | **KERNEL** — set once at boot (`03-SYSVARS.md` §11's `FORTH.SP0`), never mutated again; direct sysvar-address exposure, same shape as `HERE-ADDR`/`LATEST-ADDR`. |
+| `SP@` | `( -- addr )`, the data stack's *live* pointer | **KERNEL** — the foundation `DEPTH`/`PICK` (§6.1) and `.S` (§6.8) all build on; nothing lower to derive it from. |
+| `SP!` | `( addr -- )`, set the data stack's live pointer | **KERNEL** — direct stack-pointer mutation; what `WARM` (§6.12) resets with. |
+| `RP0` | `( -- addr )`, the return stack's constant empty-state address | **KERNEL** — same pattern as `SP0`, for `RSTK`. |
+| `RP@` | `( -- addr )`, the return stack's *live* pointer | **KERNEL** — what `I`/`J` (§6.5) read loop control through. |
+| `RP!` | `( addr -- )`, set the return stack's live pointer | **KERNEL** — direct stack-pointer mutation; the other half of what `WARM` resets. |
 
 `WORDS`, `SEE`, `HIDE`, `FORGET`, `VOCABULARY`, `USE` are **not** in
 this catalog at all — they are bootstrap-layer library words (§7),
@@ -658,6 +709,28 @@ would become expressible as a loop over `BSAVE`-equivalent calls. Not
 recommended as a change on its own — the enumeration primitive isn't
 otherwise needed, and adding one solely to shrink this one word isn't
 worth it by itself.
+
+### 6.12 System reset
+
+| Word | Effect | | Definition (if BOOTSTRAP) |
+|---|---|---|---|
+| `WARM` | `( -- )`, soft reset: clears both stacks; `DICT`/`MMAP`/every sysvar otherwise untouched | BOOTSTRAP | `: WARM SP0 SP! RP0 RP! ;` |
+| `COLD` | `( -- )`, full reset: dictionary, bank layout, stacks, and every sysvar reinitialized exactly as at a fresh boot | **KERNEL** | See §4.6 — the contract (fresh-boot-equivalent state before the next line runs) is fixed there; no target-independent mechanism can be given here, because none exists. |
+
+`WARM`'s derivation is worth tracing once, since it's a genuine finding
+in its own right: `SP0 SP!` resets the data stack's live pointer to its
+own constant empty-state address (§6.10); `RP0 RP!` does the same for
+the return stack, using the (already-just-reset) data stack as
+transient scratch space to carry `RP0`'s value across to `RP!` — safe
+precisely because a push immediately followed by a pop nets to zero
+effect on the very stack `WARM` is in the middle of resetting. **A
+dedicated `WARM` primitive is not required at all** once a target has
+`SP0`/`SP!`/`RP0`/`RP!` (§6.10) — which it needs regardless, as the
+foundation `DEPTH`/`PICK`/`I`/`J`/`.S` already build on (§6.1, §6.5,
+§6.8). `COLD` has no equivalent shortcut: it isn't that no one has
+found the derivation yet, it's that no primitive dispatch — Forth-
+defined or native — can rebuild the environment it's currently
+executing inside of (§4.6).
 
 ---
 
@@ -686,6 +759,11 @@ or a host-file fetch on a hosted target where that's the natural fit.
 What's fixed is the *outcome* — every BOOTSTRAP word from §6, defined
 and callable, before the first interactive prompt — not the delivery
 mechanism.
+
+**This same load MUST run again after `COLD`** (§4.6, §6.12) — a full
+reset wipes `DICT` back to its fresh-boot state, so every BOOTSTRAP
+word is gone until the bootstrap layer is reloaded exactly as it was at
+genuine first boot.
 
 ### 7.2 Bootstrap library words beyond §6
 
@@ -804,4 +882,6 @@ today:
 | A mid-compilation error rolls back the half-built entry before the next line runs | §5.5 |
 | Every §6 KERNEL-marked word is implemented natively | §6 |
 | Every §6 BOOTSTRAP-marked word, plus §7.2's library words, is defined and loaded before the first interactive prompt | §7.1 |
+| `COLD` reinitializes `DICT`/`MMAP`/both stacks/every sysvar to fresh-boot state before the next line runs, by whatever target-appropriate mechanism | §4.6, §6.12 |
+| The bootstrap load (§7.1) re-runs after `COLD`, exactly as at genuine first boot | §4.6, §7.1 |
 | Any uncaught error clears both stacks, reports via `hal_report_error`, and returns to a clean prompt | §8 |
