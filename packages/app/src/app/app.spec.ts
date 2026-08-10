@@ -160,6 +160,33 @@ describe('App', () => {
     expect(breakpointsSection?.textContent ?? '').toContain('SQUARE');
   });
 
+  // Web-only monitor-panel sugar (dictionary.ts's getPrimitiveNote,
+  // app.ts's wordTooltip): a primitive with a rebel-opcodes.json `note`
+  // shows it as the hover tooltip instead of the breakpoint hint; a
+  // primitive with no recorded note, and any user-defined word (which
+  // never has one), keep the original breakpoint-oriented text.
+  it('the dictionary hover tooltip shows a primitive\'s note when it has one, falling back to the breakpoint hint otherwise', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+    };
+
+    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
+    fixture.detectChanges();
+
+    const words = Array.from(compiled.querySelectorAll('.dictionary-list .inspector-word')) as HTMLElement[];
+    const titleOf = (name: string) =>
+      words.find((el) => el.textContent?.trim().replace('*', '') === name)?.title;
+
+    expect(titleOf('ABORT')).toContain('DEVELOPING.md');
+    expect(titleOf('DUP')).toBe('no compiled body to break on');
+    expect(titleOf('SQUARE')).toBe('click to toggle a breakpoint');
+  });
+
   it('WARM clears the stack but leaves the dictionary untouched', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();

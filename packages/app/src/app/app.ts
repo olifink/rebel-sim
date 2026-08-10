@@ -10,7 +10,7 @@ import {
   OnDestroy,
   declareExperimentalWebMcpTool,
 } from '@angular/core';
-import { Machine, runStorageSelfTest, listDictionaryEntries, RemoteChannel } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, RemoteChannel } from '@rebel-sim/engine';
 import type { Bank, DictionaryEntry, StepStatus } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
@@ -597,6 +597,22 @@ export class App implements AfterViewInit, OnDestroy {
       this.machine.setBreakpoint(word.name);
     }
     this.wake();
+  }
+
+  // Web-only monitor-panel sugar, not a portable engine concern
+  // (dictionary.ts's own comment on getPrimitiveNote): the dictionary
+  // list's hover tooltip. A primitive with a rebel-opcodes.json `note`
+  // shows that instead of the breakpoint hint — strictly more useful
+  // there, since primitives are never breakable anyway (the hint would
+  // just say "no compiled body to break on"). Falls back to the
+  // original breakpoint-oriented text for user-defined words (which
+  // never have a note) and for primitives with no recorded note.
+  protected wordTooltip(word: DictionaryEntry): string {
+    const note = getPrimitiveNote(word.name);
+    if (note) {
+      return note;
+    }
+    return word.breakable ? 'click to toggle a breakpoint' : 'no compiled body to break on';
   }
 
   protected clearBreakpointByName(name: string): void {

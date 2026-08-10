@@ -30,7 +30,7 @@
             class="inspector-word"
             [class.breakable]="w.breakable"
             [class.breakpoint-word]="breakpointWords().has(w.name)"
-            [title]="w.breakable ? 'click to toggle a breakpoint' : 'no compiled body to break on'"
+            [title]="wordTooltip(w)"
             (click)="toggleBreakpoint(w)"
           >{{ w.name }}@if (w.immediate) {<span class="flag-immediate">*</span>}</span>
         }

@@ -61,6 +61,32 @@ export interface DictionaryEntry {
   readonly breakable: boolean;
 }
 
+// Web-only UI sugar (a monitor-panel tooltip), not a cross-target
+// concern — rebel-opcodes.json's per-primitive `note` field is
+// Rebel-Sim-authored documentation, not runtime dictionary state, so
+// it's exposed as a standalone lookup rather than a `DictionaryEntry`
+// field every target's dictionary walk would otherwise carry. Built
+// once, keyed by name (matches dictionary lookups' own
+// case-insensitive convention) — only primitives ever have a `note`;
+// user-defined (colon-definition) words never will.
+const PRIMITIVE_NOTES: Readonly<Record<string, string>> = (() => {
+  const notes: Record<string, string> = {};
+  for (const p of opcodes.primitives) {
+    if ('note' in p && typeof p.note === 'string') {
+      notes[p.name] = p.note;
+    }
+  }
+  return notes;
+})();
+
+/** The `note` rebel-opcodes.json records for a primitive of this name,
+ * if any — `undefined` for user-defined words (never have one) and for
+ * primitives whose entry omits `note` (most low-level stack/arithmetic
+ * words, self-explanatory enough not to need one). */
+export function getPrimitiveNote(name: string): string | undefined {
+  return PRIMITIVE_NOTES[name.toUpperCase()];
+}
+
 function decodeName(ctx: DictionaryContext, addr: number, len: number): string {
   let name = '';
   for (let i = 0; i < len; i++) {

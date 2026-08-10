@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
-import { FLAG_HIDDEN, FLAG_IMMEDIATE, listDictionaryEntries, writeHeader } from './dictionary.js';
+import { FLAG_HIDDEN, FLAG_IMMEDIATE, getPrimitiveNote, listDictionaryEntries, writeHeader } from './dictionary.js';
 
 describe('colon-definitions', () => {
   it('defines and calls a simple word', () => {
@@ -199,5 +199,32 @@ describe('HERE-ADDR (DEVELOPING.md §8.6, FORGET)', () => {
     // Confirmed from the Forth side too, not just the TS accessor.
     m.interpret('HERE .');
     expect(m.screen.readRowText(0).trimEnd()).toBe(String(beforeHere));
+  });
+});
+
+describe('getPrimitiveNote (web-only monitor-panel tooltip support)', () => {
+  it('returns the rebel-opcodes.json note for a primitive that has one', () => {
+    // ABORT's note is a stable, unlikely-to-churn one (M17) — matched
+    // loosely (a substring) so this doesn't break if the note's wording
+    // is later polished without changing its meaning.
+    expect(getPrimitiveNote('ABORT')).toContain('DEVELOPING.md');
+  });
+
+  it('is case-insensitive, matching every other dictionary lookup', () => {
+    expect(getPrimitiveNote('abort')).toBe(getPrimitiveNote('ABORT'));
+  });
+
+  it('returns undefined for a primitive with no recorded note (e.g. DUP)', () => {
+    expect(getPrimitiveNote('DUP')).toBeUndefined();
+  });
+
+  it('returns undefined for a user-defined word — notes only ever come from rebel-opcodes.json', () => {
+    const m = new Machine();
+    m.interpret(': SQUARE DUP * ;');
+    expect(getPrimitiveNote('SQUARE')).toBeUndefined();
+  });
+
+  it('returns undefined for an unrecognized name entirely', () => {
+    expect(getPrimitiveNote('NOSUCHWORD')).toBeUndefined();
   });
 });

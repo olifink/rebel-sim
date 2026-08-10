@@ -3215,3 +3215,45 @@ dictionary entirely, replaced by a fresh boot's `system.fth` vocabulary
 replaced the old one, not just a stack clear. Full engine suite: 305
 passed (300 before this milestone, 5 new). App suite: 18 passed (16
 before, 2 new).
+
+## 28. Dictionary hover tooltip shows a primitive's note — done, M36
+
+Requested directly: the inspector panel's dictionary list already gave
+every word a hover tooltip via `title`, but it only ever showed
+breakpoint-click info (`click to toggle a breakpoint` /
+`no compiled body to break on`) — for a primitive, which
+`DictionaryEntry.breakable` is *always* false for, that second message
+never told you anything useful, while `rebel-opcodes.json` already
+carries real per-primitive documentation in its `note` field for many
+of them. Explicitly scoped as web-only UI sugar, not a cross-target
+concern — no `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md` change.
+
+`dictionary.ts` gains `getPrimitiveNote(name: string): string |
+undefined` — a name→note map built once from `opcodes.primitives`
+(only entries with a `note` field), exported via `index.ts`. Not added
+as a `DictionaryEntry` field: a note is Rebel-Sim-authored
+documentation about a primitive, not runtime dictionary state — every
+target's dictionary chain-walk would otherwise have to carry a field
+that only ever has a value on this one target, for host-language
+metadata that isn't even arena-resident.
+
+`app.ts` gains `wordTooltip(word: DictionaryEntry): string` — returns
+`getPrimitiveNote(word.name)` when it's defined, otherwise exactly the
+original `breakable ? 'click to toggle a breakpoint' : 'no compiled
+body to break on'` text. `app.html`'s dictionary-list `[title]`
+binding calls it instead of inlining the ternary directly.
+Click-to-toggle-breakpoint itself is unchanged — `toggleBreakpoint`
+was already a no-op for non-breakable words (i.e. every primitive), so
+only the tooltip's *text* changed, never its click behavior.
+
+**Tests:** `dictionary.test.ts` gained five cases for
+`getPrimitiveNote` (has a note — `ABORT`; case-insensitive; no note
+recorded — `DUP`; a user-defined word; an unrecognized name).
+`app.spec.ts` gained one case asserting the rendered `title` for a
+noted primitive, a note-less primitive, and a user-defined word.
+Live-verified in a real browser (WebMCP tools via chrome-devtools)
+before writing the tests, not just after — caught nothing new this
+time, but confirmed the exact tooltip text for `ABORT`/`COLD`/`WARM`/
+`DUP`/`SQUARE` matched what the tests then pinned down. Full engine
+suite: 310 passed (305 before, 5 new). App suite: 19 passed (18
+before, 1 new).

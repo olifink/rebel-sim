@@ -1934,6 +1934,32 @@ branch, `registerWebMcpTools()`'s closures). New tests: `warm.test.ts`,
 (300 before this milestone, 5 new). App suite: 18 passed (16 before, 2
 new).
 
+### 1.51 Dictionary hover tooltip shows a primitive's note (M36, `DEVELOPING.md` §28)
+
+Web-only monitor-panel sugar, requested directly — not a cross-target
+concern, no `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md` change. The
+dictionary list's hover tooltip previously only ever showed
+breakpoint-click info; for a primitive (always `breakable: false`,
+§1.31) that was dead weight, while `rebel-opcodes.json`'s `note` field
+already carries real documentation for many of them.
+
+`dictionary.ts` gains `getPrimitiveNote(name): string | undefined` — a
+name→note lookup built once from `opcodes.primitives`, exported via
+`index.ts`. Deliberately not a `DictionaryEntry` field: a note is
+Rebel-Sim-authored documentation, not runtime dictionary state every
+target's chain-walk would otherwise carry. `app.ts`'s `wordTooltip()`
+returns the note when `getPrimitiveNote` finds one, otherwise the
+original breakpoint-hint text; `app.html`'s dictionary-list `[title]`
+binding calls it instead of inlining the ternary. Click-to-toggle-
+breakpoint itself (§1.31) is unchanged — only the tooltip text
+changed.
+
+*Implementation:* `dictionary.ts` (`getPrimitiveNote`), `index.ts`
+(export), `app.ts` (`wordTooltip`), `app.html` (`[title]` binding). New
+tests: five `dictionary.test.ts` cases, one `app.spec.ts` case. Full
+engine suite: 310 passed (305 before, 5 new). App suite: 19 passed (18
+before, 1 new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2073,5 +2099,6 @@ exactly as it would be on the bare-metal target.
 | **M33** | Storage becomes synchronous, `localStorage` not OPFS (§1.22, `DEVELOPING.md` §25), plus `BSAVE`/`BLOAD`. Asked for `BSAVE`/`BLOAD`; investigating surfaced that `PROJECT`/`SAVE`/`RESTORE` (M29) were outer-loop-only special syntax purely because OPFS's Promise-based API had forced a dedicated `'storage'` `StepStatus`/`StepSignal` onto the core interpreter — checked against `FORTH-ARCHITECTURE.md`'s own porting note, real hardware's storage access has no async concept at all, so this was a browser-platform artifact in the shared engine contract, not a genuine requirement. Rejected: a Web Worker (reverses M7's settled main-thread decision) and `lightning-fs` (Promise/callback-only, same IndexedDB main-thread limitation as OPFS, checked directly against its docs). Fixed by swapping to `localStorage` (genuinely synchronous, smaller quota, base64-encoded payloads, `local-storage-storage-hal.ts` replacing `opfs-storage-hal.ts`): `StorageHal`/`Storage` dropped every `Promise`; `repl.ts`'s `'storage'` `StepStatus` and its suspend/resume fields/methods deleted outright; `PROJECT`/`SAVE`/`RESTORE` moved into `primitives.ts` as ordinary dispatch cases (tokens 126-128) — genuine dictionary entries, `SAVE` fully usable compiled/`EXECUTE`d. Two new primitives, `BSAVE`/`BLOAD` (tokens 129-130, `( "tag" -- )`), resolve a bank via `BankTable.requireBank` and call `saveAsset`/a new `Storage.loadAsset()`. Known, inherited limitation: `PROJECT`/`RESTORE`/`BSAVE`/`BLOAD` still parse their argument via `nextInputToken()`, the same shape `BANK@`/`CREATE-BANK`/`'` already have — only resolves correctly interpreted directly, not compiled with a following literal. | `storage.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `local-storage-storage-hal.ts`, `app.ts` |
 | **M34** | `MMAP` conforms to the size-class rule, no more exception (`DEVELOPING.md` §26). Suggested directly, following on from M33: bump `MMAP`'s size to the XS class (4096 bytes) instead of its exact computed 1552, for consistency — a real, accepted breaking change for anything already saved (no real project data exists yet). Traced through the bump allocator's actual rounding math before touching anything: `(1552+4095)&~4095` and `(4096+4095)&~4095` both equal `4096`, so this is layout-neutral for every other bank — confirmed empirically, the full engine suite passed unmodified except one stale comment. `mmap.ts`'s `MMAP_SIZE` is now a literal `4096` (matching `BankSizeXS`, not imported, same reason `NAME_SIZE` isn't); the raw `16 + MAX_SLOTS × 24` computation is kept internally only to assert it never exceeds 4096. `spec/02-MEMORY-MODEL.md` §5.3 rewritten (`MMAP` no longer exempt from §4.3, now rounds up like any other carved bank) and §5.4's worked example updated. `rebel-rom` needs no matching change — its bank table is still a plain host-side array, not yet an arena-resident `MMAP`. | `mmap.ts`, `spec/02-MEMORY-MODEL.md` |
 | **M35** | `WARM`/`COLD` (§1.50, `DEVELOPING.md` §27), picked back up after M29 deferred both citing `Machine`'s `readonly` fields as the blocker. Split by how much state each touches instead of making `Machine` rebuildable: `WARM` (token 131) is a plain primitive clearing both stacks, `DICT`/`MMAP` untouched. `COLD` (token 132) is a pure Forth-to-host signal — a fourth `StepSignal`/`StepStatus` value, `'cold'`, riding M10's breakpoint-yield mechanism — since a full reset genuinely can't happen in place; the host (`app.ts`) reacts by constructing a brand new `Machine`. Two real bugs found and fixed along the way: an `ngAfterViewInit` reordering that broke keyboard-listener registration's implicit "before the first `await`" invariant (caught by an existing test going flaky, not assumed), and `registerWebMcpTools()` capturing a now-stale `Machine` reference at registration time. | `rebel-opcodes.json`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts` |
+| **M36** | Dictionary hover tooltip shows a primitive's note (§1.51, `DEVELOPING.md` §28). Web-only monitor-panel sugar, requested directly, out of scope for `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`. New `dictionary.ts` export `getPrimitiveNote(name)` — a name→note lookup over `opcodes.primitives`, not a `DictionaryEntry` field (a note is documentation, not runtime state). `app.ts`'s `wordTooltip()` shows the note when one exists, falling back to the original breakpoint-hint text for every user-defined word and note-less primitive. Click-to-toggle-breakpoint behavior itself is unchanged. | `dictionary.ts`, `index.ts`, `app.ts`, `app.html` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

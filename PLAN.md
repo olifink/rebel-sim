@@ -487,6 +487,18 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     `zone.runOutsideAngular()`), and `registerWebMcpTools()` capturing a
     `const machine = this.machine` at registration time that would have
     gone stale the first time `COLD` replaced it. Detailed below.
+36. **M36 — Dictionary hover tooltip shows a primitive's
+    `rebel-opcodes.json` note** — **done**: web-only monitor-panel
+    sugar, explicitly out of scope for `FORTH-ARCHITECTURE.md`/
+    `PORTING-WEB.md`. The dictionary list's hover tooltip used to only
+    ever show breakpoint-click info, dead weight for primitives (never
+    breakable). New `dictionary.ts` export, `getPrimitiveNote(name)` —
+    a name→note lookup over `opcodes.primitives`, not a
+    `DictionaryEntry` field (a note is documentation, not runtime
+    state). `app.ts`'s `wordTooltip()` shows the note when one exists,
+    falling back to the original breakpoint-hint text otherwise (every
+    user-defined word, and most low-level primitives with no recorded
+    note). Detailed below.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -3114,3 +3126,38 @@ tests) plus two new `app.spec.ts` tests (WARM clears the stack but
 leaves the dictionary untouched; COLD resets the dictionary to boot +
 `system.fth` vocabulary). Full engine suite: 305 passed (300 before
 this milestone, 5 new). App suite: 18 passed (16 before, 2 new).
+
+## M36 — Dictionary hover tooltip shows a primitive's `rebel-opcodes.json` note — done
+
+Web-only monitor-panel sugar, explicitly scoped as such — not a
+cross-target concern, no `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`
+treatment needed. Requested directly: the inspector panel's dictionary
+list already gave every word a hover tooltip, but it only ever showed
+breakpoint-click info (`click to toggle a breakpoint` /
+`no compiled body to break on`) — for a primitive, which is never
+breakable, that second message is dead weight when `rebel-opcodes.json`
+already carries real documentation for many of them.
+
+`dictionary.ts` gains `getPrimitiveNote(name): string | undefined` — a
+name→note lookup built once from `opcodes.primitives`, exported from
+the engine (`index.ts`) since `rebel-opcodes.json` already lives there
+as the source of truth. Deliberately **not** added as a
+`DictionaryEntry` field: a note is Rebel-Sim-authored documentation,
+not runtime dictionary state every target's chain-walk would otherwise
+have to carry. `app.ts` gains a thin `wordTooltip(word)` wrapper:
+returns the note if `getPrimitiveNote` finds one, otherwise the
+original breakpoint-hint text — user-defined words (never have a note)
+and notes-less primitives (most low-level stack/arithmetic words) fall
+through to exactly the old behavior. `app.html`'s dictionary-list
+`[title]` binding calls it. Click-to-toggle-breakpoint itself is
+unchanged (`toggleBreakpoint` was already a no-op for non-breakable
+words, i.e. every primitive) — only the tooltip *text* changed.
+
+**Tests:** five new `dictionary.test.ts` cases for `getPrimitiveNote`
+(has a note, case-insensitive, no note recorded, user-defined word,
+unrecognized name) plus one new `app.spec.ts` test asserting the
+rendered `title` attribute for a noted primitive (`ABORT`), a
+note-less primitive (`DUP`), and a user-defined word (`SQUARE`). Live-
+verified in a real browser via WebMCP/chrome-devtools before writing
+the tests, not just after. Full engine suite: 310 passed (305 before,
+5 new). App suite: 19 passed (18 before, 1 new).
