@@ -503,9 +503,11 @@ deliberately separate:**
 (kilobytes) and per-arena, so switching attachment away from an arena
 and back means that arena's screen reads exactly as it was left —
 attaching an arena means repointing the one shared screen surface at
-*that* arena's own `CHAR` bank and redrawing from it, not clearing and
-starting over. This is the actual "feels like visiting a separate
-machine" property the isolation model exists to deliver.
+*that* arena's own `CHAR` bank and redrawing from it — one call to the
+portable Screen Module's `redraw_all()` (`01-HAL.md` §3.2), not a new
+mechanism — rather than clearing and starting over. This is the actual
+"feels like visiting a separate machine" property the isolation model
+exists to deliver.
 
 ### 6.3 Capacity and sizing
 

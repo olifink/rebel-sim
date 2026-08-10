@@ -33,7 +33,7 @@ It does not specify:
 ### 2.1 Why this needs saying explicitly
 
 A real, working reference implementation of this system currently ships
-**132 native primitives**. Cross-referencing that implementation's own
+**133 native primitives**. Cross-referencing that implementation's own
 design history against itself surfaces something worth stating plainly:
 its own governing design document (predating this specification)
 already drew a **`CORE`/`STANDARD-for-now`** distinction — `CORE` words
@@ -104,16 +104,17 @@ part of the *portable* contract.
 
 ### 2.4 The headline number
 
-Applying §2.2's test to the full 132-word reference vocabulary (§6;
-130 plus the `WARM`/`COLD` reset words added after this catalog's first
-pass, §6.12) reclassifies **54 of them as BOOTSTRAP** — everything from
-stack shufflers (`OVER`, `ROT`, `2DUP`, `NIP`, `TUCK`, …) to, more
-significantly, **the entire structured-control-flow compiler layer**
+Applying §2.2's test to the full 133-word reference vocabulary (§6;
+130 plus the `WARM`/`COLD` reset words, §6.12, plus `REDRAW`, §6.9,
+added after this catalog's first pass) reclassifies **54 of them as
+BOOTSTRAP** — everything from stack shufflers (`OVER`, `ROT`, `2DUP`,
+`NIP`, `TUCK`, …) to, more significantly, **the entire
+structured-control-flow compiler layer**
 (`IF`/`ELSE`/`THEN`/`BEGIN`/`UNTIL`/`WHILE`/`REPEAT`/`DO`/`LOOP`/
 `+LOOP`/`RECURSE`/`I`/`J`), **`VARIABLE`/`CONSTANT`**, and — once a
 target already has `SP0`/`SP!`/`RP0`/`RP!` for `DEPTH`/`PICK`/`I`/`J`
 anyway (§6.10) — **`WARM`** itself, all fully expressible from lower
-primitives that already exist. That leaves a **78-word required native
+primitives that already exist. That leaves a **79-word required native
 kernel** — see §6 for the full, word-by-word table, §6.5/§6.6 for the
 two highest-value derivations, and §6.12/§4.6 for why `COLD`, unlike
 `WARM`, has no such shortcut.
@@ -621,6 +622,7 @@ carrying it alongside a now-redundant bootstrap definition.
 | `EMIT` `CR` `CHAR!` `CHAR@` `CLS` `AT-XY` `INK` `PAPER` | Screen (`01-HAL.md` §3). |
 | `KEY?` `KEY` | Non-blocking poll / blocking read via the bound channel (`01-HAL.md` §4, §5). |
 | `CURSEN` `CURSDIS` | Visible-cursor show/hide (`01-HAL.md` §3.5). |
+| `REDRAW` | `( -- )`, repaint the whole framebuffer from `CHAR`'s current content (`01-HAL.md` §3.2's `redraw_all()`). |
 
 All **KERNEL** — every one calls directly into the portable Screen/
 Keyboard/Channel modules `01-HAL.md` specifies, which is exactly the
@@ -632,6 +634,24 @@ there's no other Forth-visible way to invoke a glyph redraw, so a
 Forth-source version that only flipped `CURSOR-VISIBLE` would leave the
 screen stale until the next unrelated cursor move. Genuinely CORE, not
 an oversight.
+
+`REDRAW` exists for the same underlying reason, generalized to the
+whole grid: `CHAR!` (and everything built on it) keeps `CHAR` and the
+framebuffer synchronized automatically, but a direct `C!` into the
+`CHAR` bank (`BANK@ CHAR ...`) bypasses that write-through entirely,
+same as a storage operation overwriting `CHAR` in bulk (`RESTORE`/
+`BLOAD`, §6.11) does. There is no way to express "repaint from `CHAR`
+without touching it" in terms of any other primitive in this
+catalog — `CHAR!` always writes `CHAR` as a side effect, which is
+precisely what needs avoiding here — so this is genuinely CORE, not an
+oversight either. **`RESTORE`/`BLOAD` (§6.11) call the same portable
+`redraw_all()` internally**, whenever the bank they just loaded is
+`CHAR`; `REDRAW` is that exact mechanism exposed as an ordinary word so
+Forth source that pokes `CHAR` directly has its own way to
+resynchronize, without needing a storage operation as an excuse to
+reach it. Confirmed as a genuine cross-target concept, not a
+browser-only convenience: a reference bare-metal implementation already
+has the identical operation.
 
 **`ACCEPT`** — `( addr len -- len2 )`, classic line input (read-echo,
 handle Backspace, stop at Enter) — is **KERNEL today**, but is this
@@ -701,7 +721,11 @@ to build against.
 | `PROJECT` `SAVE` `RESTORE` `BSAVE` `BLOAD` | Direct `01-HAL.md` §6 Storage-module access — naming, saving, and restoring project state. |
 
 All **KERNEL** — these are the Forth-level surface of the storage HAL
-boundary itself, not derived behavior. `SAVE` (save every active bank)
+boundary itself, not derived behavior. `RESTORE`/`BLOAD` call the
+portable `redraw_all()` (`01-HAL.md` §3.2, `REDRAW`'s own underlying
+mechanism, §6.9) whenever the bank they just overwrote is `CHAR`, so
+the visible screen never goes stale after a project or single-bank
+load. `SAVE` (save every active bank)
 is mechanically "loop over every bank, save it" — if a future revision
 adds a Forth-visible bank-*enumeration* primitive (there isn't one
 today; `BANK@` only looks up by tag, it doesn't walk the table), `SAVE`

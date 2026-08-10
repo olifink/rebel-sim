@@ -158,6 +158,33 @@ target, built once against the four required HAL functions in §3.3.
   might move the cursor.
 - `ink`/`paper` accessors read/write the `SCREEN` sysvar group's
   `INK`/`PAPER` fields directly; no HAL involvement.
+- `redraw_all()` — repaints every character cell from its already-stored
+  `CHAR` content, in row-major order, applying cursor inversion
+  (`ink`/`paper` swapped) at the current cursor position if
+  `CURSOR-VISIBLE` is set (§3.5) — the whole-grid generalization of
+  `redraw_cursor_at` (§3.5), built the same way: **never writes into
+  `CHAR`, only reads from it.** Requires no HAL surface beyond
+  `hal_blit_glyph`, already in §3.3.
+
+  This exists because every *other* write path in this module
+  (`write_char`, and therefore `emit`) keeps `CHAR` and the framebuffer
+  synchronized automatically — but nothing stops a target's storage
+  layer (`01-HAL.md` §6, e.g. a project restore or a single-bank
+  `CHAR` load) or Forth source itself (a direct `C!` into the `CHAR`
+  bank, bypassing `write_char` entirely) from overwriting `CHAR` bytes
+  without going through it. `redraw_all()` is the portable recovery
+  path for exactly that case: resynchronize the framebuffer from
+  whatever `CHAR` now actually contains. A conformant target's storage
+  module (§6.3.1's `openProject`, and any single-bank load restoring
+  `CHAR` specifically) **MUST** call this after overwriting `CHAR`
+  directly, for the same reason — and **SHOULD** expose it as an
+  ordinary Forth primitive too (a real, cross-target concept — not a
+  browser-only convenience), so Forth source that pokes `CHAR` directly
+  has its own way to resynchronize without needing a storage operation
+  as an excuse to reach it. `02-MEMORY-MODEL.md` §6.2 names the same
+  mechanism for a future arena-attach: repointing the shared screen
+  surface at a newly-attached arena's own `CHAR` bank and redrawing
+  from it is exactly one `redraw_all()` call, not a new mechanism.
 
 ### 3.3 Required HAL surface (Type A)
 
@@ -692,6 +719,16 @@ no assigned extension in the table above. A target implementing classic
 `BLOCK`/block-editor words MUST choose and document an `SCRS` extension
 consistent with §6.3's convention when it does.
 
+A screen/block editor built on `SCRS` will very likely display a
+screen's contents by copying its bytes into `CHAR` in bulk (e.g. one
+`SCRS` screen's worth of text `CMOVE`'d into the visible grid for
+editing) rather than one character at a time through `emit`/
+`write_char` — exactly the case §3.2's `redraw_all()` exists for.
+Nothing new needs designing here when that editor is actually built:
+copy the screen's bytes into `CHAR`, then call `redraw_all()` (or its
+Forth-level `REDRAW`) once to resynchronize the framebuffer, the same
+pattern the storage module already uses for a project restore.
+
 ### 6.6 Sysvar contract — `STORAGE` group
 
 | Field | Meaning |
@@ -830,6 +867,7 @@ somewhere, not before:
 | `keyboard_has_event` / `keyboard_read_event` | portable | n/a — never reimplement | Keyboard §4.3 |
 | `keyboard_has_translated_event` / `keyboard_read_translated_char` | portable | n/a — never reimplement | Keyboard §4.3 |
 | `channel_has_data` / `channel_read_byte` | portable | n/a — never reimplement | Channel §5.3 |
+| `redraw_all` | portable | n/a — never reimplement; storage MUST call it after any direct `CHAR` overwrite | Screen §3.2 |
 | `hal_ensure_dir` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_list_files` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_read_file` | A | **REQUIRED** if storage-capable | Storage §6.2 |
