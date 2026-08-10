@@ -82,6 +82,7 @@ const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
 const DOES_TOKEN = opcodes.primitives.find((p) => p.name === '(DOES>)')!.id;
 const SLIT_TOKEN = opcodes.primitives.find((p) => p.name === '(SLIT)')!.id;
 const EXECUTE_TOKEN = opcodes.primitives.find((p) => p.name === 'EXECUTE')!.id;
+const COLD_TOKEN = opcodes.primitives.find((p) => p.name === 'COLD')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
@@ -92,7 +93,7 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked' | 'breakpoint';
+export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold';
 
 export class Inner {
   /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
@@ -263,6 +264,17 @@ export class Inner {
    * `ACCEPT` (M7a) suspends potentially many times within one dispatch —
    * handled entirely by its own method rather than `executePrimitive`. */
   private *dispatch(token: number): Generator<StepSignal, void, void> {
+    if (token === COLD_TOKEN) {
+      // COLD (rebel-opcodes.json 132): a full reset needs a brand new
+      // Machine (repl.ts's memory-holding fields are readonly, built
+      // once in the constructor) — nothing this dispatcher or
+      // executePrimitive could do in place. Yield a signal up through
+      // step() instead and let the host (packages/app's tick()) do the
+      // actual reconstruction; this token never reaches executePrimitive,
+      // same shape as ACCEPT/EXECUTE below.
+      yield 'cold';
+      return;
+    }
     if (token === ACCEPT_TOKEN) {
       yield* this.accept();
       return;

@@ -313,6 +313,31 @@ pace. Reproducing that shape in a browser has a few real gotchas:
   way `KeyboardChannel` does, no interpreter changes), independent of
   the threading decision. See `PLAN.md`'s M7 section for the
   implementation plan.
+- **[Decided, COLD/WARM]** `COLD` (`FORTH-ARCHITECTURE.md` §9 item 16)
+  needed a fourth value alongside `'progress'`/`'blocked'`/`'breakpoint'`
+  in this same generator-based `StepSignal`/`StepStatus` yield path:
+  `'cold'`. `Machine`'s memory-holding fields (`arena`/`banks`/`stack`/
+  ...) are `readonly`, built once in its constructor (repl.ts) — there's
+  no way for the engine to rebuild itself in place, so `inner.ts`'s
+  `dispatch()` special-cases the `COLD` token before it ever reaches
+  `executePrimitive` (the same shape `ACCEPT`/`EXECUTE` already get) and
+  yields `'cold'` instead of doing anything. `Machine.step()` surfaces
+  that as `StepStatus`'s `'cold'`, same as it already does for
+  `'breakpoint'`. The host — `packages/app/src/app/app.ts`'s `tick()` —
+  is the only thing that actually reacts: on seeing `'cold'`, it resets
+  every polled UI snapshot (`lastStackSnapshot`, `lastLatestAddr`, ...)
+  and calls `performBoot()`, the same construct-`Machine`-then-
+  load-`system.fth`-then-`startRepl()` sequence `ngAfterViewInit` runs
+  once for the page's real first boot — swapping `this.machine` for a
+  brand new one. `WARM`, by contrast, needed none of this: it only
+  touches bytes already inside existing banks (the stacks, `STATE`), so
+  it's a plain primitive (`primitives.ts` case 131) that does its reset
+  in place, no host involvement at all. One easy-to-miss consequence:
+  `registerWebMcpTools()` used to capture `const machine = this.machine`
+  once at registration time — harmless when `this.machine` was assigned
+  exactly once, ever, but a real staleness bug once `COLD` can replace
+  it later. Every WebMCP tool closure there now reads `this.machine`
+  fresh on each call instead.
 
 ## 7. PWA: instant-on is the point, not a checkbox
 

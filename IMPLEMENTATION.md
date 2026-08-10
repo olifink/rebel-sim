@@ -1844,6 +1844,96 @@ a real, documented gotcha of the same shape as M24's `HEX 255 .` one:
 already moved the live pointer — two stack-pointer words in sequence
 genuinely see different moments, not a bug.
 
+### 1.50 `WARM` and `COLD` (M35, `DEVELOPING.md` §27)
+
+Note: this jumps from M28 straight to M35 — M29-M34 shipped and are
+documented in `PLAN.md`/`DEVELOPING.md` but were never backfilled into
+this file's own numbered subsections; flagged here the same way M35's
+own note in `PLAN.md` flags an earlier gap, so this isn't mistaken for
+an oversight specific to this entry.
+
+Split by how much state each word actually touches, rather than trying
+to make `Machine` rebuildable in place (the "focused pass" an earlier
+milestone assumed would eventually be needed, per `DEVELOPING.md` §22's
+own deferral note).
+
+`WARM ( -- )` (token 131) only touches bytes already inside existing
+banks — the data/return stacks and `STATE` — so it's an ordinary
+`primitives.ts` case: `ctx.stack.clear(); ctx.rstack.clear();`.
+`DICT`/`MMAP` survive untouched. No mid-definition guard, unlike
+`replLoop`'s own catch block (§1.38): `WARM` isn't `IMMEDIATE`, so it
+compiles rather than executes while `STATE` is `-1` — `executePrimitive`
+can never dispatch it with a half-finished definition still open.
+
+`COLD ( -- )` (token 132) means a full reset — `DICT`/`MMAP` included,
+equivalent to a fresh boot. Genuinely impossible in place: `Machine`'s
+memory-holding fields (`arena`, `banks`, `stack`, `rstack`, `sysvars`,
+`dictBank`, ...) are `readonly`, built once in the constructor. Rather
+than refactor that, `COLD` is a pure Forth-to-host signal riding the
+same generator-based `StepSignal`/`StepStatus` path §1.31's breakpoints
+established: `inner.ts`'s `dispatch()` special-cases the `COLD` token
+*before* it ever reaches `executePrimitive` (the same shape
+`ACCEPT`/`EXECUTE` already get, §1.36) and yields a new `StepSignal`,
+`'cold'`, doing nothing else — `COLD` has no case in `primitives.ts`'s
+switch at all. `Machine.step()` surfaces this as a matching new
+`StepStatus` value, same as it already does for `'breakpoint'`.
+
+The host (`packages/app/src/app/app.ts`) is the only thing that reacts.
+`tick()` checks `status === 'cold'` right after its existing
+`'breakpoint'` check: resets every polled UI snapshot
+(`lastStackSnapshot`/`lastRStackSnapshot`/`lastLatestAddr`/
+`lastBankCount`/`lastBreakpointWords`/`lastProjectNames`, so the fresh
+machine's state is picked up on its own first tick rather than being
+masked by a stale comparison), clears `pausedWord`, and calls
+`performBoot()`. `ngAfterViewInit`'s original boot sequence — construct
+`Machine`, load `system.fth`, `startRepl()`/`startPump()` — is now
+split into `constructMachine()` (synchronous) and
+`loadVocabularyAndStartRepl()` (async), with `performBoot()` simply
+running both back to back; `tick()`'s `'cold'` branch calls
+`performBoot()` directly. Deliberately skips the storage self-test and
+`navigator.storage.persist()` — page-load-only hardware checks, not
+part of a Forth-level reset. The old `Machine`/session is just dropped;
+it holds no listeners or timers of its own, so nothing needs explicit
+teardown.
+
+**A real bug, found by a flaky test, not assumed:** the first version
+of this ran `await this.performBoot()` as `ngAfterViewInit`'s very
+first statement, before keyboard-listener registration. `app.spec.ts`'s
+*existing* keyboard-input test started failing intermittently.
+Instrumented `handleKeyEvent`/`onKeyDown` directly rather than
+guessing: `whenStable()` is a zone-stability signal, and
+`performBoot()`'s tail (`startRepl()`/`startPump()`) runs inside
+`zone.runOutsideAngular()` — invisible to that tracking by design. With
+listener registration moved after the `await`, `whenStable()` could
+resolve before the listeners were actually attached. The original code
+never hit this because every synchronous step through listener
+registration ran before `ngAfterViewInit`'s *first* `await` — an
+implicit ordering invariant the reorder broke without touching a line
+that looked responsible. Fixed by the `constructMachine()`/
+`loadVocabularyAndStartRepl()` split above: `ngAfterViewInit` runs
+`constructMachine()`, focus, WebMCP registration, the storage
+self-test, and keyboard listeners all synchronously — the original
+order — before awaiting the vocabulary/REPL-start half.
+
+**A second bug, same root cause:** `registerWebMcpTools()` (§1.30)
+captured `const machine = this.machine` once, at registration time —
+harmless while `this.machine` was assigned exactly once, ever, but a
+real staleness bug once `COLD` can replace it later. Seven tool
+closures would otherwise have kept operating on the abandoned
+`Machine`. Fixed by reading `this.machine` fresh inside each closure
+instead of closing over a local; `remoteChannel` stays captured, since
+it's host-level and genuinely outlives any one `Machine`.
+
+*Implementation:* `rebel-opcodes.json` (tokens 131-132), `primitives.ts`
+(case 131), `inner.ts` (`StepSignal` gains `'cold'`, `dispatch()`'s
+`COLD_TOKEN` special case), `repl.ts` (`StepStatus` gains `'cold'`,
+`Machine.step()`'s handling), `app.ts` (`constructMachine()`/
+`loadVocabularyAndStartRepl()`/`performBoot()`, `tick()`'s `'cold'`
+branch, `registerWebMcpTools()`'s closures). New tests: `warm.test.ts`,
+`cold.test.ts`, two `app.spec.ts` tests. Full engine suite: 305 passed
+(300 before this milestone, 5 new). App suite: 18 passed (16 before, 2
+new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -1982,5 +2072,6 @@ exactly as it would be on the bare-metal target.
 | **M32** | `FORGET` (`DEVELOPING.md` §8.6), picked back up after being left as an open question since M13: one new primitive, `HERE-ADDR` (token 125), exposing `FORTH.HERE`'s own cell address the same `fieldOffset()` pattern `LATEST-ADDR` (M13) established for `LATEST` — the half of the gap M13 deferred, since reclaiming a forgotten word's `DICT` space needs to roll `HERE` back too, not just relink `LATEST`. `FORGET` itself is pure Forth in `system.fth`, reusing `HIDE`'s reverse chain-walk with a different found-branch: `LATEST`/`HERE` roll back to the forgotten entry's own link/address, the same rollback `dictionary.ts`'s `abortDefinition` already does for a half-built definition, just reachable for any named word. Known limitation, unaddressed: forgetting a word a `VOCABULARY` branch point depends on corrupts that vocabulary's chain — not designed, no concrete joint use case yet. | `rebel-opcodes.json`, `primitives.ts`, `system.fth` |
 | **M33** | Storage becomes synchronous, `localStorage` not OPFS (§1.22, `DEVELOPING.md` §25), plus `BSAVE`/`BLOAD`. Asked for `BSAVE`/`BLOAD`; investigating surfaced that `PROJECT`/`SAVE`/`RESTORE` (M29) were outer-loop-only special syntax purely because OPFS's Promise-based API had forced a dedicated `'storage'` `StepStatus`/`StepSignal` onto the core interpreter — checked against `FORTH-ARCHITECTURE.md`'s own porting note, real hardware's storage access has no async concept at all, so this was a browser-platform artifact in the shared engine contract, not a genuine requirement. Rejected: a Web Worker (reverses M7's settled main-thread decision) and `lightning-fs` (Promise/callback-only, same IndexedDB main-thread limitation as OPFS, checked directly against its docs). Fixed by swapping to `localStorage` (genuinely synchronous, smaller quota, base64-encoded payloads, `local-storage-storage-hal.ts` replacing `opfs-storage-hal.ts`): `StorageHal`/`Storage` dropped every `Promise`; `repl.ts`'s `'storage'` `StepStatus` and its suspend/resume fields/methods deleted outright; `PROJECT`/`SAVE`/`RESTORE` moved into `primitives.ts` as ordinary dispatch cases (tokens 126-128) — genuine dictionary entries, `SAVE` fully usable compiled/`EXECUTE`d. Two new primitives, `BSAVE`/`BLOAD` (tokens 129-130, `( "tag" -- )`), resolve a bank via `BankTable.requireBank` and call `saveAsset`/a new `Storage.loadAsset()`. Known, inherited limitation: `PROJECT`/`RESTORE`/`BSAVE`/`BLOAD` still parse their argument via `nextInputToken()`, the same shape `BANK@`/`CREATE-BANK`/`'` already have — only resolves correctly interpreted directly, not compiled with a following literal. | `storage.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `local-storage-storage-hal.ts`, `app.ts` |
 | **M34** | `MMAP` conforms to the size-class rule, no more exception (`DEVELOPING.md` §26). Suggested directly, following on from M33: bump `MMAP`'s size to the XS class (4096 bytes) instead of its exact computed 1552, for consistency — a real, accepted breaking change for anything already saved (no real project data exists yet). Traced through the bump allocator's actual rounding math before touching anything: `(1552+4095)&~4095` and `(4096+4095)&~4095` both equal `4096`, so this is layout-neutral for every other bank — confirmed empirically, the full engine suite passed unmodified except one stale comment. `mmap.ts`'s `MMAP_SIZE` is now a literal `4096` (matching `BankSizeXS`, not imported, same reason `NAME_SIZE` isn't); the raw `16 + MAX_SLOTS × 24` computation is kept internally only to assert it never exceeds 4096. `spec/02-MEMORY-MODEL.md` §5.3 rewritten (`MMAP` no longer exempt from §4.3, now rounds up like any other carved bank) and §5.4's worked example updated. `rebel-rom` needs no matching change — its bank table is still a plain host-side array, not yet an arena-resident `MMAP`. | `mmap.ts`, `spec/02-MEMORY-MODEL.md` |
+| **M35** | `WARM`/`COLD` (§1.50, `DEVELOPING.md` §27), picked back up after M29 deferred both citing `Machine`'s `readonly` fields as the blocker. Split by how much state each touches instead of making `Machine` rebuildable: `WARM` (token 131) is a plain primitive clearing both stacks, `DICT`/`MMAP` untouched. `COLD` (token 132) is a pure Forth-to-host signal — a fourth `StepSignal`/`StepStatus` value, `'cold'`, riding M10's breakpoint-yield mechanism — since a full reset genuinely can't happen in place; the host (`app.ts`) reacts by constructing a brand new `Machine`. Two real bugs found and fixed along the way: an `ngAfterViewInit` reordering that broke keyboard-listener registration's implicit "before the first `await`" invariant (caught by an existing test going flaky, not assumed), and `registerWebMcpTools()` capturing a now-stale `Machine` reference at registration time. | `rebel-opcodes.json`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

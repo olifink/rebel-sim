@@ -124,8 +124,12 @@ export interface MachineOptions {
  * here, back when an OPFS-backed `StorageHal` was Promise-based — now
  * that storage is synchronous (`local-storage-storage-hal.ts`), those
  * are ordinary `primitives.ts` dispatch cases that run to completion
- * inside a single `step()` call, same as any other word. */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint';
+ * inside a single `step()` call, same as any other word. `'cold'`
+ * (rebel-opcodes.json 132): `COLD` was just executed — the engine itself
+ * makes no state change for this (see inner.ts's `dispatch()`); the host
+ * is expected to discard this `Machine` and construct a fresh one
+ * (PORTING-WEB.md). */
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -305,6 +309,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         }
         if (value === 'breakpoint') {
           return 'breakpoint';
+        }
+        if (value === 'cold') {
+          return 'cold';
         }
       }
       return 'more-to-run';

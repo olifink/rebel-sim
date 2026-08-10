@@ -132,16 +132,15 @@ export class App implements AfterViewInit, OnDestroy {
     this.applyPresentationSize();
     window.addEventListener('resize', this.onResize);
 
-    const storageHal = createLocalStorageHalIfSupported();
-    this.machine = new Machine({
-      screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
-      storageHal,
-      remoteChannel: this.remoteChannel,
-    });
+    // constructMachine() is synchronous and deliberately runs before this
+    // method's first `await` — everything through the keyboard-listener
+    // registration below needs to happen in that same synchronous
+    // prefix, or a caller awaiting whenStable() (real app bootstrap
+    // included) could observe a view whose keyboard isn't wired up yet:
+    // most of what follows an `await` runs via zone.runOutsideAngular,
+    // which is invisible to NgZone's stability tracking by design.
+    this.constructMachine();
     this.screenRef.nativeElement.focus();
-    this.bankTable.set(this.machine.banks.getAllBanks());
-    this.arenaSizeBytes.set(this.machine.arena.sizeBytes);
-    this.lastBankCount = this.machine.banks.getAllBanks().length;
     this.registerWebMcpTools();
 
     // M5's end-to-end proof, mirroring CKernel::RunStorageSelfTest
@@ -149,7 +148,9 @@ export class App implements AfterViewInit, OnDestroy {
     // save/open path once at startup and surface PASS/FAIL, rather than
     // only ever finding out storage is broken the first time a real
     // project tries to use it. Synchronous now (localStorage, not OPFS)
-    // — a plain try/catch, no .then()/.catch() needed.
+    // — a plain try/catch, no .then()/.catch() needed. Page-load-only —
+    // a storage hardware check, not part of a Forth-level COLD.
+    const storageHal = createLocalStorageHalIfSupported();
     if (storageHal) {
       // PORTING-WEB.md §7: ask the browser not to casually evict a
       // user's project data the way ordinary origin storage can be
@@ -183,11 +184,44 @@ export class App implements AfterViewInit, OnDestroy {
       window.addEventListener('keyup', this.onKeyUp);
     });
 
-    // DEVELOPING.md §6: the system vocabulary (WORDS, SEE, ...) is
-    // plain Forth source, not native primitives — loaded once here,
-    // before the REPL starts accepting input, so it's available from
-    // the very first prompt. An interim host-text-file step, not the
-    // eventual portable-screens answer (§4).
+    await this.loadVocabularyAndStartRepl();
+  }
+
+  /** Constructs a fresh `Machine` and publishes its initial bank/arena
+   * signals — the synchronous half of booting. Split out from
+   * `performBoot()` so `ngAfterViewInit` can run this (and everything
+   * else that doesn't need the system vocabulary yet) before its own
+   * first `await`; see that method's comment for why the ordering
+   * matters. */
+  private constructMachine(): void {
+    const storageHal = createLocalStorageHalIfSupported();
+    this.machine = new Machine({
+      screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
+      storageHal,
+      remoteChannel: this.remoteChannel,
+    });
+    // Zone-wrapped (unlike the original inline ngAfterViewInit code) since
+    // this also runs from tick()'s 'cold' branch, which is already
+    // outside the Angular zone — signals set from there need an explicit
+    // zone.run() to actually schedule change detection, the same
+    // reasoning every other tick()-driven signal update already follows.
+    this.zone.run(() => {
+      this.bankTable.set(this.machine.banks.getAllBanks());
+      this.arenaSizeBytes.set(this.machine.arena.sizeBytes);
+    });
+    this.lastBankCount = this.machine.banks.getAllBanks().length;
+  }
+
+  /** Loads the system vocabulary into the current `this.machine` and
+   * starts its on-screen REPL. The async half of booting, shared between
+   * `ngAfterViewInit` (after its synchronous prefix, see
+   * `constructMachine()`'s comment) and `performBoot()` below. */
+  private async loadVocabularyAndStartRepl(): Promise<void> {
+    // DEVELOPING.md §6: the system vocabulary (WORDS, SEE, ...) is plain
+    // Forth source, not native primitives — loaded once here, before the
+    // REPL starts accepting input, so it's available from the very first
+    // prompt. An interim host-text-file step, not the eventual
+    // portable-screens answer (§4).
     await this.loadSystemVocabulary();
 
     // M7a: the outer loop lives entirely in the engine now — prompt,
@@ -197,6 +231,23 @@ export class App implements AfterViewInit, OnDestroy {
       this.machine.startRepl();
       this.startPump();
     });
+  }
+
+  /** The entire boot sequence a `Machine` needs before it can usefully
+   * run: construct it, load the system vocabulary, start the REPL.
+   * Called from `tick()` whenever `step()` reports the `'cold'` status
+   * (`COLD`, rebel-opcodes.json 132) — the Forth-to-host signal the
+   * engine sends because a full reset can't happen in place (`Machine`'s
+   * memory-holding fields are readonly, repl.ts). The old `Machine`/
+   * session, if any, is simply dropped — it holds no listeners or timers
+   * of its own, so plain GC is enough; nothing here needs to explicitly
+   * tear it down. Unlike `ngAfterViewInit`, this has no
+   * whenStable()-observing caller to worry about, so `constructMachine()`
+   * and the async half don't need to be kept either side of any
+   * particular `await`. */
+  private async performBoot(): Promise<void> {
+    this.constructMachine();
+    await this.loadVocabularyAndStartRepl();
   }
 
   // Fetched relative to <base href> — public/system.fth is copied to
@@ -310,7 +361,12 @@ export class App implements AfterViewInit, OnDestroy {
   // as of this writing) — must degrade silently on browsers without it,
   // same as localStorage support above.
   private registerWebMcpTools(): void {
-    const machine = this.machine;
+    // Deliberately NOT `const machine = this.machine` — COLD (§ tick())
+    // can replace this.machine after tools are registered (registration
+    // happens once, in ngAfterViewInit), so every closure below reads
+    // `this.machine` fresh on each call instead of closing over whichever
+    // Machine existed at registration time. remoteChannel is fine to
+    // capture: it's host-level and outlives any one Machine.
     const remoteChannel = this.remoteChannel;
     const noArgsSchema = { type: 'object', properties: {}, required: [] } as const;
 
@@ -349,8 +405,8 @@ export class App implements AfterViewInit, OnDestroy {
           inputSchema: noArgsSchema,
           execute: () => {
             const rows: string[] = [];
-            for (let r = 0; r < machine.screen.rows; r++) {
-              rows.push(machine.screen.readRowText(r));
+            for (let r = 0; r < this.machine.screen.rows; r++) {
+              rows.push(this.machine.screen.readRowText(r));
             }
             return rows.join('\n');
           },
@@ -365,7 +421,7 @@ export class App implements AfterViewInit, OnDestroy {
           name: 'read_stack',
           description: 'Read the data stack, top to bottom, space-separated.',
           inputSchema: noArgsSchema,
-          execute: () => machine.stack.toArray().join(' ') || '(empty)',
+          execute: () => this.machine.stack.toArray().join(' ') || '(empty)',
         },
         this.injector,
       ),
@@ -377,7 +433,7 @@ export class App implements AfterViewInit, OnDestroy {
           name: 'read_return_stack',
           description: 'Read the return stack, top to bottom, space-separated.',
           inputSchema: noArgsSchema,
-          execute: () => machine.rstack.toArray().join(' ') || '(empty)',
+          execute: () => this.machine.rstack.toArray().join(' ') || '(empty)',
         },
         this.injector,
       ),
@@ -389,7 +445,7 @@ export class App implements AfterViewInit, OnDestroy {
           name: 'read_dictionary',
           description: 'List all defined word names, most-recently-defined first.',
           inputSchema: noArgsSchema,
-          execute: () => listDictionaryEntries(machine).map((e) => e.name).join(' ') || '(empty)',
+          execute: () => listDictionaryEntries(this.machine).map((e) => e.name).join(' ') || '(empty)',
         },
         this.injector,
       ),
@@ -402,7 +458,7 @@ export class App implements AfterViewInit, OnDestroy {
           description: 'List memory banks (tag, name, base offset, size in bytes), one per line.',
           inputSchema: noArgsSchema,
           execute: () =>
-            machine.banks
+            this.machine.banks
               .getAllBanks()
               .map((b) => `${b.tag} ${b.name} ${b.base} ${b.size}`)
               .join('\n'),
@@ -430,7 +486,7 @@ export class App implements AfterViewInit, OnDestroy {
             required: ['word'],
           },
           execute: ({ word }) => {
-            machine.setBreakpoint(word);
+            this.machine.setBreakpoint(word);
             this.wake();
             return `breakpoint set on ${word.toUpperCase()}`;
           },
@@ -450,7 +506,7 @@ export class App implements AfterViewInit, OnDestroy {
             required: ['word'],
           },
           execute: ({ word }) => {
-            machine.clearBreakpoint(word);
+            this.machine.clearBreakpoint(word);
             this.wake();
             return `breakpoint cleared on ${word.toUpperCase()}`;
           },
@@ -465,7 +521,7 @@ export class App implements AfterViewInit, OnDestroy {
           name: 'debug_list_breakpoints',
           description: 'List all currently-armed breakpoints.',
           inputSchema: noArgsSchema,
-          execute: () => machine.listBreakpoints().join(' ') || '(none)',
+          execute: () => this.machine.listBreakpoints().join(' ') || '(none)',
         },
         this.injector,
       ),
@@ -687,6 +743,27 @@ export class App implements AfterViewInit, OnDestroy {
       // mistake. Nothing left to drive the page with; surface it loudly.
       this.pumping = false;
       console.error('Rebel-Sim REPL loop crashed', e);
+      return;
+    }
+    if (status === 'cold') {
+      // COLD (rebel-opcodes.json 132): the engine itself made no state
+      // change (inner.ts's dispatch() special-cases this token before
+      // executePrimitive ever runs) — reconstructing the Machine is
+      // entirely this host's job. The old Machine/session is abandoned
+      // here, not resumed; performBoot() replaces this.machine and
+      // restarts the pump once the fresh one is ready. Every polled
+      // "last*" snapshot below is reset first, so the fresh machine's
+      // state is picked up on its own first tick instead of being masked
+      // by a stale comparison against the machine that just got replaced.
+      this.pumping = false;
+      this.lastStackSnapshot = [];
+      this.lastRStackSnapshot = [];
+      this.lastLatestAddr = -1;
+      this.lastBankCount = 0;
+      this.lastBreakpointWords = new Set();
+      this.lastProjectNames = [];
+      this.zone.run(() => this.pausedWord.set(undefined));
+      void this.performBoot();
       return;
     }
     if (this.presentCtx) {

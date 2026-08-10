@@ -929,6 +929,25 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    case 131: // WARM ( -- ) — soft reset: same stack-clearing recovery
+      // replLoop's own catch block performs after any uncaught error
+      // (ABORT's effect, case 98), done directly rather than via throw,
+      // and without touching DICT/MMAP — the running dictionary and bank
+      // layout survive a WARM. No mid-definition guard is needed the way
+      // replLoop's own catch block has one: WARM isn't IMMEDIATE, so a
+      // non-immediate token typed while STATE is -1 gets compiled, not
+      // executed — this case can never run with a half-finished
+      // definition still open.
+      ctx.stack.clear();
+      ctx.rstack.clear();
+      break;
+
+    // COLD (132) never reaches here — inner.ts's dispatch() special-cases
+    // it before executePrimitive is ever called, the same shape as
+    // ACCEPT/EXECUTE, since a full reset needs host-level Machine
+    // reconstruction (repl.ts's readonly fields), not anything this
+    // switch can do in place.
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

@@ -662,6 +662,31 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     ( -- addr )` fixed the other read-only half of this same gap
     (`HERE`, not `LATEST`), unblocking `FORGET` the same way. See
     `DEVELOPING.md` §8.6.
+16. **[NEW]** `COLD`/`WARM` reset semantics — named twice in earlier
+    milestone logs (`PLAN.md`/`DEVELOPING.md` M29) as deliberately
+    deferred, but never actually listed as an open decision here until
+    now. **Done for Rebel-Sim.** The cross-target contract: `COLD`
+    ( -- ) is a full reset, equivalent to a fresh boot — dictionary
+    (`DICT`), bank layout (`MMAP`), stacks, and sysvars are all
+    reinitialized exactly as they would be at power-on. `WARM` ( -- ) is
+    a soft reset — only the data/return stacks and interpreter state
+    (`STATE`) are cleared; `DICT` and `MMAP` (and everything else) survive
+    untouched. Where the two targets genuinely differ is *how* `COLD` is
+    achieved, not what it does: Rebel-Sim's `Machine` (repl.ts) builds its
+    memory-holding fields (`arena`/`banks`/`stack`/`rstack`/`sysvars`/
+    `dictBank`/...) once, as `readonly`, in its constructor, so `COLD`
+    can't rebuild them in place — the primitive is instead a pure
+    Forth-to-host signal (a fourth `StepSignal`/`StepStatus` value,
+    `'cold'`, riding the same generator-based yield path M10's
+    breakpoints already established), and the host
+    (`packages/app/src/app/app.ts`) reacts by constructing a brand new
+    `Machine` and swapping it in — see `PORTING-WEB.md` for the
+    mechanism. A bare-metal target has no such constraint and can just
+    re-run its own boot routine in place against the same resident RAM,
+    the same way a real power-on reset works; nothing about the
+    `COLD`/`WARM` *contract* above requires the host-signal indirection,
+    that's a Rebel-Sim implementation detail forced by its host language,
+    not a cross-target requirement.
 
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 

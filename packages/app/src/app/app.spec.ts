@@ -159,4 +159,52 @@ describe('App', () => {
     expect(breakpointsSection?.textContent ?? '').toContain('breakpoints (1)');
     expect(breakpointsSection?.textContent ?? '').toContain('SQUARE');
   });
+
+  it('WARM clears the stack but leaves the dictionary untouched', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+    };
+
+    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
+
+    app.remoteChannel.push('1 2 3 WARM\n');
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('(empty)'));
+    fixture.detectChanges();
+
+    expect(compiled.querySelector('.stack-values')?.textContent).toContain('(empty)');
+    expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('SQUARE');
+  });
+
+  // COLD (rebel-opcodes.json 132): the engine only signals — this proves
+  // the *host* side actually reacts, reconstructing this.machine from
+  // scratch (app.ts's tick()/performBoot()), the same way a real page
+  // reload would. Defining SQUARE and then confirming it's gone (rather
+  // than just checking the stack) is the part that specifically proves a
+  // whole new Machine replaced the old one, not just a stack clear.
+  it('COLD reconstructs the Machine — the dictionary resets to boot + system.fth vocabulary', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+    };
+
+    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
+
+    app.remoteChannel.push('COLD\n');
+    await waitFor(() => !(compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'), 5000);
+    fixture.detectChanges();
+
+    expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').not.toContain('SQUARE');
+    // The fresh boot's own vocabulary (system.fth defines WORDS) is
+    // present — confirms a real reboot happened, not just a wipe.
+    expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('WORDS');
+  });
 });

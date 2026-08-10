@@ -2670,6 +2670,10 @@ convention for one anywhere in this suite or `rebel-rom`.
   (`arena`, `banks`, `stack`, ...) are `readonly`, built once in the
   constructor — a true in-place cold reset needs its own focused pass,
   not a side effect of this one. Nothing here blocks that follow-up.
+  **Follow-up shipped, M35 — see §27.** The eventual design didn't need
+  the constructor refactor this note assumed: `COLD` sidesteps the
+  `readonly`-fields blocker entirely by never trying to rebuild
+  `Machine` in place at all.
 
 ### What shipped
 
@@ -3068,3 +3072,146 @@ change — every existing assertion was already parameterized through
 the `MMAP_SIZE` constant, not a hardcoded byte count, confirming the
 layout-neutrality claim above empirically, not just by derivation.
 Full engine suite: 294 passed (293 before this milestone, 1 new).
+
+## 27. `WARM` and `COLD` — done, M35
+
+### Motivation
+
+§22's own note above flagged `WARM`/`COLD` as deferred because
+`Machine`'s memory-holding fields (`arena`, `banks`, `stack`, `rstack`,
+`sysvars`, `dictBank`, ...) are `readonly`, built once in the
+constructor, and assumed a real cold-reset would need "its own focused
+pass" — implicitly, a constructor refactor to make those fields
+rebuildable in place. Picked back up once a design that doesn't need
+that refactor at all was worked out: split the two words by how much
+state each actually touches, rather than by how to rebuild `Machine`.
+
+### Mechanism
+
+**`WARM`** (`primitives.ts` case 131, token 131) only ever touches
+bytes *inside* already-existing banks — the data/return stacks and
+`STATE` — so `DICT`/`MMAP` genuinely survive it untouched. Plain
+primitive:
+
+```ts
+case 131: // WARM ( -- )
+  ctx.stack.clear();
+  ctx.rstack.clear();
+  break;
+```
+
+Symmetric with `ABORT` (case 98) and `replLoop`'s own uncaught-error
+recovery (§9) — same stack-clearing effect, just invoked directly
+instead of via a thrown error, so control returns normally to whatever
+follows `WARM` on the same line rather than unwinding it. No
+mid-definition guard is needed the way `replLoop`'s catch block has
+one: `WARM` isn't `IMMEDIATE`, so a non-immediate token typed while
+`STATE` is `-1` gets *compiled*, not executed — `executePrimitive` can
+never actually dispatch case 131 with a half-finished definition still
+open, so there's no reachable scenario to guard against.
+
+**`COLD`** (token 132) means "fully reset all banks, `MMAP` and `DICT`
+included" — reproducing fresh-boot state exactly, which is genuinely
+impossible in place given `Machine`'s `readonly` fields. Rather than
+relitigate that constraint, `COLD` sidesteps it: it's a pure
+Forth-to-host signal, riding the exact same generator-based yield path
+§17/M25's `StepSignal`/`StepStatus` mechanism (and DEBUGGING.md's
+`'breakpoint'`, M10) already established.
+
+- `inner.ts`'s `StepSignal` gains a fourth value, `'cold'`.
+  `dispatch()` special-cases the `COLD` token *before* it ever reaches
+  `executePrimitive` — the same shape `ACCEPT`/`EXECUTE` already get
+  (`COLD_TOKEN` resolved from `rebel-opcodes.json` the same way
+  `ACCEPT_TOKEN`/`EXECUTE_TOKEN`/`KEY_TOKEN` already are) — and yields
+  `'cold'` instead of executing anything:
+  ```ts
+  if (token === COLD_TOKEN) {
+    yield 'cold';
+    return;
+  }
+  ```
+  `COLD` therefore never has a case in `primitives.ts`'s switch at all.
+- `repl.ts`'s `StepStatus` gains the matching `'cold'` value;
+  `Machine.step()` returns it the instant the session yields it, same
+  as it already does for `'breakpoint'`.
+- The host (`packages/app/src/app/app.ts`) is the only thing that
+  actually reacts. `tick()` checks `status === 'cold'` right after its
+  existing `'breakpoint'` check: resets every polled UI snapshot
+  (`lastStackSnapshot`, `lastRStackSnapshot`, `lastLatestAddr`,
+  `lastBankCount`, `lastBreakpointWords`, `lastProjectNames`) so the
+  fresh machine's state is picked up on its own first tick instead of
+  being masked by a stale comparison against the machine that just got
+  replaced, clears `pausedWord`, and calls `performBoot()`.
+  `performBoot()` — `constructMachine()` (new `Machine`, publish
+  `bankTable`/`arenaSizeBytes`) followed by
+  `loadVocabularyAndStartRepl()` (fetch+interpret `system.fth`, then
+  `startRepl()`/`startPump()`) — is the exact sequence
+  `ngAfterViewInit` runs once for the page's real first boot, now
+  factored out so both call sites share it. It deliberately does
+  **not** re-run the storage self-test or `navigator.storage.persist()`
+  — page-load-only storage-hardware checks, not part of a Forth-level
+  reset. The old `Machine`/session is simply dropped, not explicitly
+  torn down — it holds no listeners or timers of its own, so plain GC
+  is enough.
+
+### A real bug, found by a flaky test, not assumed
+
+The first working version of `performBoot()` ran `await
+this.performBoot()` as literally the first statement in
+`ngAfterViewInit`, before keyboard-listener registration. `app.spec.ts`
+started failing intermittently — not on the new `COLD`/`WARM` tests,
+but on the *existing* "typing a line on the keyboard" test, which
+presses keys immediately after `await fixture.whenStable()` resolves.
+Root cause, confirmed by instrumenting `handleKeyEvent`/`onKeyDown`
+directly rather than guessed at: `whenStable()` is a *zone*-stability
+signal, and the tail of `performBoot()`'s async chain
+(`startRepl()`/`startPump()`) runs inside `zone.runOutsideAngular()` —
+invisible to that tracking by design. Moving keyboard-listener
+registration to *after* `await this.performBoot()` meant `whenStable()`
+could resolve before the listeners were actually attached, since most
+of the chain between them was zone-invisible. The original code never
+had this problem only because every synchronous step through listener
+registration ran before `ngAfterViewInit`'s *first* `await` at all —
+an implicit invariant the reorder broke without touching a single line
+that looked responsible.
+
+Fixed by splitting `performBoot()` into `constructMachine()`
+(synchronous: `new Machine(...)`, publish `bankTable`/`arenaSizeBytes`)
+and `loadVocabularyAndStartRepl()` (async: `system.fth` +
+`startRepl()`/`startPump()`). `ngAfterViewInit` now runs
+`constructMachine()`, focus, `registerWebMcpTools()`, the storage
+self-test, and keyboard-listener registration all synchronously —
+exactly the original ordering — before awaiting the vocabulary/REPL-
+start half. `performBoot()` (§ `COLD`, above, called from `tick()`,
+already outside the zone with no `whenStable()` caller to satisfy) just
+calls both halves back to back, no ordering constraint of its own.
+
+### A second bug, same root cause
+
+`registerWebMcpTools()` captured `const machine = this.machine` once,
+at registration time — harmless when `this.machine` was assigned
+exactly once, ever (true for every milestone through M34), but a real
+staleness bug the instant `COLD` can replace it later. Seven tool
+closures (`read_screen`, `read_stack`, `read_return_stack`,
+`read_dictionary`, `read_banks`, `debug_set_breakpoint`,
+`debug_clear_breakpoint`, `debug_list_breakpoints`) would otherwise
+have kept silently operating on the abandoned `Machine` after a `COLD`.
+Fixed by reading `this.machine` fresh inside each closure instead of
+closing over a local — `remoteChannel` stays captured, since it's
+host-level and genuinely outlives any one `Machine`.
+
+### Tests
+
+Two new engine files: `warm.test.ts` (stack-clearing + DICT/MMAP
+survival, non-throwing control flow) and `cold.test.ts` (the `'cold'`
+`StepStatus`, zero engine-side state change, session left alive rather
+than cleared — same contract `'breakpoint'` already has). Two new
+`app.spec.ts` tests, same style as the existing breakpoint test
+(driving input via `remoteChannel.push`, polling `.dictionary-list`/
+`.stack-values`): `WARM` clears the stack while a defined word stays
+in the dictionary; `COLD` makes a defined word disappear from the
+dictionary entirely, replaced by a fresh boot's `system.fth` vocabulary
+(`WORDS` present) — the part that actually proves a whole new `Machine`
+replaced the old one, not just a stack clear. Full engine suite: 305
+passed (300 before this milestone, 5 new). App suite: 18 passed (16
+before, 2 new).
