@@ -114,10 +114,34 @@ structured-control-flow compiler layer**
 `+LOOP`/`RECURSE`/`I`/`J`), **`VARIABLE`/`CONSTANT`**, and — once a
 target already has `SP0`/`SP!`/`RP0`/`RP!` for `DEPTH`/`PICK`/`I`/`J`
 anyway (§6.10) — **`WARM`** itself, all fully expressible from lower
-primitives that already exist. That leaves a **79-word required native
-kernel** — see §6 for the full, word-by-word table, §6.5/§6.6 for the
-two highest-value derivations, and §6.12/§4.6 for why `COLD`, unlike
-`WARM`, has no such shortcut.
+primitives that already exist. That leaves a 79-word native kernel
+before §6.13's addendum — see §6 for the full, word-by-word table,
+§6.5/§6.6 for the two highest-value derivations, and §6.12/§4.6 for why
+`COLD`, unlike `WARM`, has no such shortcut.
+
+### 2.5 The outer interpreter itself is not exempt
+
+§2.1–§2.4 reduce the compiler layer built *on top of* dispatch and
+number-parsing. They do not touch dispatch and number-parsing
+themselves — as first drafted, this catalog's outer interpreter
+(tokenizing, dictionary search, number conversion) is engine-internal
+behavior with no dictionary presence at all, the one part of a classic
+fig-Forth/Forth-79 system this document had not yet reduced. §6.13
+closes that gap: `WORD`, `FIND`, `NUMBER`, and `INTERPRET` itself
+**MUST** be ordinary dictionary words — three of them BOOTSTRAP — built
+from primitives §6 already establishes, and `:`, `;`, `IMMEDIATE`
+**MUST** carry genuine dictionary entries rather than being invisible
+outer-interpreter syntax (§5.2, revised). This is not optional polish:
+it is what makes the interpreter itself inspectable, redefinable, and
+traceable through the same mechanisms (`WORDS`, `SEE`, `'`,
+breakpoints, §4.5) that already apply to every other word in the
+system — matching the self-hosting property classic fig-Forth/Forth-79
+actually had for this specific layer, which this document's first pass
+did not.
+
+Folding §6.13 in: the reference vocabulary is **143 words**, of which
+**83 are required-native KERNEL** and **60 are BOOTSTRAP** (`'` moves
+from KERNEL to BOOTSTRAP as part of this addendum — §6.10, §6.13).
 
 ---
 
@@ -356,27 +380,45 @@ definition currently under construction (`STATE ≠ 0`, compiling) — the
 classic Forth text-interpreter loop, driven entirely by the `FORTH`
 sysvar group's `STATE` field (`03-SYSVARS.md` §11).
 
-### 5.2 `:`, `;`, `IMMEDIATE` are interpreter syntax, not dictionary words
+### 5.2 `:`, `;`, `IMMEDIATE` are ordinary dictionary words
 
-These three need direct access to compiler state (`HERE`/`LATEST`/
-`STATE`) in a shape no ordinary primitive's ""pop arguments, push
-results" interface can express — defining a word, closing it, or
-flagging the most recent one immediate are outer-interpreter actions,
-not stack-effect operations. A conformant implementation special-cases
-these three token spellings in the outer interpreter itself, not as
-primitive token IDs.
+**`:`, `;`, and `IMMEDIATE` MUST be native KERNEL primitives with
+genuine dictionary entries** — findable via `FIND`/`'` (§6.13), listed
+by `WORDS` (§7.2), subject to the same `HIDDEN`-skipping chain walk as
+any other entry (§3). They are KERNEL, not BOOTSTRAP, for the same
+reason `CREATE` and `DOES>` are (§6.6 rule 1/3): they need direct
+access to compiler state (`HERE`/`LATEST`/`STATE`) and raw-token
+consumption (§5.3) in a shape no ordinary primitive's stack-effect
+interface expresses. What changes from a prior draft of this
+specification is *not* their classification — it is that they **MUST
+NOT** be special-cased by string comparison inside `INTERPRET` (§5.6,
+§6.13). `INTERPRET` dispatches them through the exact same
+`FIND`-then-execute-or-compile path as every other word, distinguished
+only by ordinary dictionary properties (the `IMMEDIATE` flag, and each
+word's own internal `STATE` precondition check) — never by matching
+their spelling as a special token before `FIND` is consulted.
 
-- `:` — **only valid while interpreting.** Reads the next raw token as
-  the new word's name, writes its dictionary header immediately (linked
-  in right away, so `HERE`/`LATEST` reflect it at once), marked
-  `HIDDEN` (so it can't be found/called mid-compilation — this is
-  exactly the gap `RECURSE`, §6.5, exists to work around), and switches
-  to compiling.
-- `;` — **only valid while compiling.** Compiles a trailing `EXIT`
-  call, clears the `HIDDEN` flag, switches to interpreting.
-- `IMMEDIATE` — **only valid while interpreting**, and only meaningful
-  immediately after a `:`...`;` pair — sets the `IMMEDIATE` flag (§3)
-  on `LATEST`.
+- `:` — **only valid while interpreting**; a conformant definition
+  MUST check `STATE` itself and error if invoked while compiling, since
+  nothing external gates this once dispatch is uniform. Reads the next
+  raw token as the new word's name, writes its dictionary header
+  immediately (linked in right away, so `HERE`/`LATEST` reflect it at
+  once), marks it `HIDDEN` (so it can't be found/called
+  mid-compilation — this is exactly the gap `RECURSE`, §6.5, exists to
+  work around), and switches to compiling. `:` itself is **not**
+  `IMMEDIATE` — it runs at ordinary interpret time, the same as any
+  other word `INTERPRET` looks up while `STATE = 0`.
+- `;` — **only valid while compiling**; MUST check `STATE` itself and
+  error otherwise. Compiles a trailing `EXIT` call, clears the `HIDDEN`
+  flag, switches to interpreting. `;` **MUST** carry the `IMMEDIATE`
+  flag — `INTERPRET`'s compiling-mode dispatch rule (§5.4) is what
+  causes it to run rather than compile as a call, and that rule has no
+  special case for `;`'s spelling; the flag is the only thing that
+  makes it work.
+- `IMMEDIATE` — **only valid immediately after a `:`...`;` pair
+  completes**, while interpreting; sets the `IMMEDIATE` flag (§3) on
+  `LATEST`. Not itself `IMMEDIATE` — it is always typed and executed
+  directly at the prompt, never compiled into another definition.
 
 ### 5.3 The shared input cursor
 
@@ -386,6 +428,15 @@ to consume the *next raw token* directly from whatever line is
 currently being interpreted — not through dictionary lookup, a literal
 piece of text (a name, a quoted string) that has no business being
 looked up as a word at all.
+
+**This consumption mechanism MUST itself be exposed as an ordinary
+KERNEL word, `WORD`** (§6.13) — not merely used internally by the
+native words listed above. `INTERPRET` (§5.6, §6.13) is itself a
+consumer of `WORD`, and every other raw-token-consuming word in this
+document MAY be understood as a thin wrapper around `WORD` plus its own
+subsequent handling of the returned text (a header write for `CREATE`,
+a delimiter-matched multi-token read for `S"`/`(`, a dictionary search
+for `'`).
 
 **This MUST be a cursor shared across the whole current line, not a
 value local to whichever word's own execution is consuming it** — a
@@ -414,6 +465,16 @@ no-op.
   XT compiled as a call; a valid number is compiled as `LIT` followed
   by its literal cell value.
 
+**This entire section is a behavioral contract, not a description of
+bespoke engine logic.** §5.6 and §6.13 specify `WORD`, `FIND`, and
+`NUMBER` as the ordinary dictionary words that realize it, and
+`INTERPRET` as the ordinary (BOOTSTRAP) dictionary word whose body
+implements the interpreting/compiling branch above. A conformant target
+MUST satisfy this section's contract by providing those words with
+these exact observable behaviors — not by keeping the tokenize/dispatch
+logic native and un-exposed, which was this document's own prior
+draft and is superseded by §6.13.
+
 ### 5.5 Error recovery mid-compilation
 
 An error thrown while a definition is under construction (`STATE ≠ 0`)
@@ -427,6 +488,39 @@ route through this rollback before the outer interpreter is ready for
 its next line. A target that skips this leaves a `HIDDEN`,
 un-rollbacked partial entry sitting in `DICT` forever, corrupting
 `HERE`/`LATEST` bookkeeping for everything defined afterward.
+
+### 5.6 `INTERPRET` is a BOOTSTRAP dictionary word
+
+**§5.1–§5.4's outer-interpreter contract MUST be realized as an
+ordinary BOOTSTRAP word named `INTERPRET`**, built from `WORD`, `FIND`,
+`NUMBER`, `STATE`, `EXECUTE`, and `,` (§6.13 gives the full
+derivation). A conformant target's actual driving loop — the
+native-level equivalent of classic Forth's `QUIT` — is reduced to:
+read a line into the input buffer, reset the shared cursor (§5.3), call
+`INTERPRET`, repeat. `INTERPRET` itself contains none of that outer
+housekeeping and no target-specific I/O; it is portable Forth source
+loaded like every other BOOTSTRAP word (§7.1), identical across
+Rebel-Sim, Rebel-ROM, and Rebel-Board.
+
+**This changes *where*, not *whether*, §5.5's rollback obligation is
+discharged.** Once `INTERPRET` is Forth-threaded rather than the native
+driving loop itself, an error raised inside it (via `ABORT`, §8) MUST
+unwind out through the threading mechanism §4.4 already specifies for
+suspension — not through a native-language stack unwind — before the
+still-native `QUIT`-equivalent performs the `DICT`/`HERE`/`LATEST`
+rollback. §8's `ABORT` contract already commits to this ("whatever that
+mechanism is, it MUST route through this rollback"); this section
+records the specific new case that contract now has to cover, the same
+way §4.6 records `COLD`'s analogous obligation. No new mechanism is
+introduced — `INTERPRET` becoming BOOTSTRAP composes with mechanisms
+this document already requires elsewhere.
+
+**Load-order requirement**: `INTERPRET` MUST be the last BOOTSTRAP word
+loaded in §7.1's sequence, since it is the first point at which the
+bootstrap loader's own line-by-line reading MAY switch from whatever
+native fallback mechanism loads the bootstrap file itself to `INTERPRET`
+proper. §6.13 gives the full ordering constraint across `WORD`, `FIND`,
+`STATE`, `[`, `]`, `'`, `NUMBER`, and `INTERPRET`.
 
 ---
 
@@ -691,28 +785,29 @@ that would otherwise seem to need one.
 
 ### 6.10 Dictionary/interpreter-state access primitives
 
-| Word | Effect | |
-|---|---|---|
-| `'` | `( "name" -- xt )`, tick — look up a name, push its Code Field address | **KERNEL** — raw name consumption + dictionary lookup. |
-| `EXECUTE` | `( xt -- )`, run the word at `xt` | **KERNEL** — re-enters §4.2's threading loop at an arbitrary address; not expressible as a primitive that doesn't itself touch `ip`. |
-| `LATEST-ADDR` | `( -- addr )`, the `FORTH.LATEST` sysvar's own address | **KERNEL** — direct sysvar-address exposure. |
-| `HERE-ADDR` | `( -- addr )`, the `FORTH.HERE` sysvar's own address | **KERNEL** — same pattern; this is the exact precedent §6.9 recommends extending to `CURSOR-X`/`CURSOR-Y`. |
-| `SP0` | `( -- addr )`, the data stack's constant empty-state address | **KERNEL** — set once at boot (`03-SYSVARS.md` §11's `FORTH.SP0`), never mutated again; direct sysvar-address exposure, same shape as `HERE-ADDR`/`LATEST-ADDR`. |
-| `SP@` | `( -- addr )`, the data stack's *live* pointer | **KERNEL** — the foundation `DEPTH`/`PICK` (§6.1) and `.S` (§6.8) all build on; nothing lower to derive it from. |
-| `SP!` | `( addr -- )`, set the data stack's live pointer | **KERNEL** — direct stack-pointer mutation; what `WARM` (§6.12) resets with. |
-| `RP0` | `( -- addr )`, the return stack's constant empty-state address | **KERNEL** — same pattern as `SP0`, for `RSTK`. |
-| `RP@` | `( -- addr )`, the return stack's *live* pointer | **KERNEL** — what `I`/`J` (§6.5) read loop control through. |
-| `RP!` | `( addr -- )`, set the return stack's live pointer | **KERNEL** — direct stack-pointer mutation; the other half of what `WARM` resets. |
+| Word | Effect | | Definition (if BOOTSTRAP) |
+|---|---|---|---|
+| `'` | `( "name" -- xt )`, tick — look up a name, push its Code Field address, error if not found | BOOTSTRAP | `: ' WORD FIND 0= IF ." ?" ABORT THEN >CFA ;` — §6.13's addendum. `'` no longer needs its own raw-name-consumption logic once `WORD`/`FIND` exist as independent primitives; it is nothing but their composition plus the error case §6.10 always required. **MUST be loaded after `WORD`, `FIND`, and `>CFA` in the bootstrap sequence** (§6.13, §7.1). |
+| `EXECUTE` | `( xt -- )`, run the word at `xt` | **KERNEL** | Re-enters §4.2's threading loop at an arbitrary address; not expressible as a primitive that doesn't itself touch `ip`. |
+| `STATE` | `( -- addr )`, the `FORTH.STATE` sysvar's own address | **KERNEL** | Direct sysvar-address exposure, same pattern as `HERE-ADDR`/`LATEST-ADDR`/`BASE` (§6.8). The foundation `[`, `]`, and `INTERPRET` itself (§6.13) build on — without it, `STATE`'s interpret/compile distinction is readable only from native code, which is exactly the gap that kept `INTERPRET` from being self-hosted (§2.5). |
+| `LATEST-ADDR` | `( -- addr )`, the `FORTH.LATEST` sysvar's own address | **KERNEL** | Direct sysvar-address exposure. |
+| `HERE-ADDR` | `( -- addr )`, the `FORTH.HERE` sysvar's own address | **KERNEL** | Same pattern; this is the exact precedent §6.9 recommends extending to `CURSOR-X`/`CURSOR-Y`. |
+| `SP0` | `( -- addr )`, the data stack's constant empty-state address | **KERNEL** | Set once at boot (`03-SYSVARS.md` §11's `FORTH.SP0`), never mutated again; direct sysvar-address exposure, same shape as `HERE-ADDR`/`LATEST-ADDR`. |
+| `SP@` | `( -- addr )`, the data stack's *live* pointer | **KERNEL** | The foundation `DEPTH`/`PICK` (§6.1) and `.S` (§6.8) all build on; nothing lower to derive it from. |
+| `SP!` | `( addr -- )`, set the data stack's live pointer | **KERNEL** | Direct stack-pointer mutation; what `WARM` (§6.12) resets with. |
+| `RP0` | `( -- addr )`, the return stack's constant empty-state address | **KERNEL** | Same pattern as `SP0`, for `RSTK`. |
+| `RP@` | `( -- addr )`, the return stack's *live* pointer | **KERNEL** | What `I`/`J` (§6.5) read loop control through. |
+| `RP!` | `( addr -- )`, set the return stack's live pointer | **KERNEL** | Direct stack-pointer mutation; the other half of what `WARM` resets. |
 
 `WORDS`, `SEE`, `HIDE`, `FORGET`, `VOCABULARY`, `USE` are **not** in
 this catalog at all — they are bootstrap-layer library words (§7),
-built entirely from the KERNEL words above (principally `LATEST`, `'`,
-`,`, `@`, `C@`, `!`, `LATEST-ADDR`, `HERE-ADDR`) with zero additional
-native support, already proven as working Forth source. This
-specification records their *existence and contract* (§7.2) as part of
-a conformant target's expected bootstrap layer, not their
-implementation — the working reference definitions are the reference
-to build against.
+built entirely from the KERNEL words above (principally `LATEST`, `,`,
+`@`, `C@`, `!`, `LATEST-ADDR`, `HERE-ADDR`, and now `'`/`FIND`, §6.13)
+with zero additional native support, already proven as working Forth
+source. This specification records their *existence and contract*
+(§7.2) as part of a conformant target's expected bootstrap layer, not
+their implementation — the working reference definitions are the
+reference to build against.
 
 ### 6.11 Storage / project
 
@@ -755,6 +850,100 @@ foundation `DEPTH`/`PICK`/`I`/`J`/`.S` already build on (§6.1, §6.5,
 found the derivation yet, it's that no primitive dispatch — Forth-
 defined or native — can rebuild the environment it's currently
 executing inside of (§4.6).
+
+### 6.13 The outer interpreter, self-hosted
+
+This section closes the gap §2.5 identifies: `WORD`, `FIND`, `NUMBER`,
+and `INTERPRET` **MUST** exist as ordinary dictionary words realizing
+§5.1–§5.4's contract exactly, not as engine-internal logic with no
+dictionary presence. `[` and `]` **MUST** exist as the ordinary
+mode-switch words classic Forth systems use to leave and enter
+compilation from within a colon-definition. Together with `:`/`;`/
+`IMMEDIATE` (§5.2, now KERNEL-with-a-real-entry) and `'` (now
+BOOTSTRAP, §6.10), this is the complete self-hosted outer-interpreter
+layer.
+
+| Word | Effect | | Definition (if BOOTSTRAP) |
+|---|---|---|---|
+| `WORD` | `( char "<chars>ccc<char>" -- addr len )` — skip leading occurrences of `char` (typically the space returned by `BL`), then read characters up to the next occurrence of `char` or end of line, advancing the shared input cursor (§5.3) past what was read | **KERNEL** | Raw-input-parsing access, same basis as `S"`/`(`/`'`'s prior classification (§2.2 rule 3). Returns a view into the live input line — **not** a copy into a scratch buffer, unlike classic fig-Forth's counted-string convention. Callers that need the text to outlive the current line (`CREATE` writing a dictionary header, `S"` compiling inline data) MUST copy it themselves; this specification does not add a scratch-buffer concept solely to preserve a convention nothing here still depends on. |
+| `FIND` | `( addr len -- entry-addr flag )` — chain-walk from `LATEST` (§3) toward `0`, skipping `HIDDEN` entries, comparing each candidate's stored name (already uppercased at definition time, §3) against `addr len` case-insensitively; `flag = 0` if no match, non-zero if found | BOOTSTRAP | Built from `LATEST`, `@`, `C@`, and a per-character comparison loop over `addr len` against each candidate's name bytes (`entry-addr + 5 .. entry-addr + 5 + namelen`, `namelen` read the same way `>CFA` does, §7.2). **This specification fixes the contract and required composition; the exact comparison loop MUST be verified against a working reference implementation before being treated as canonical source**, the same standard §6.1 applies to `2SWAP`/`2OVER`/`ROLL`. Returns `entry-addr`, not `xt` — callers needing `xt` apply `>CFA` themselves; `entry-addr` is what a caller needs to read the flags byte (`entry-addr + 4`) for the `IMMEDIATE`/`COMPILE-ONLY` checks `INTERPRET` performs. |
+| `[` | `( -- )`, switch to interpreting | BOOTSTRAP, `IMMEDIATE` | `: [ 0 STATE ! ; IMMEDIATE` — must be `IMMEDIATE` so it takes effect while compiling, matching `03-SYSVARS.md`'s `FORTH.STATE` encoding for "interpreting" exactly (verify the literal value against `03-SYSVARS.md` §11 rather than assuming `0` here). |
+| `]` | `( -- )`, switch to compiling | BOOTSTRAP | `: ] -1 STATE ! ;` (or whichever value `03-SYSVARS.md` §11 defines as "compiling" — this specification's own body has used `STATE ≠ 0` as the compiling test throughout §5, so any non-zero encoding is conformant; verify the exact constant against that document rather than this one). |
+| `NUMBER` | `( addr len -- n )` — convert `addr len` to a signed single-cell integer in the current `BASE`, per §5.4's contract | BOOTSTRAP | See reference definition below. Single-cell only, matching §5.4's own singular phrasing ("a valid number is pushed") — this specification does not include classic Forth's double-number (`DPL`) machinery, and `NUMBER` should not grow it without a corresponding update to §5.4. |
+| `INTERPRET` | `( -- )` — tokenize and dispatch one line per §5.1–§5.4's contract | BOOTSTRAP | See §5.6 for its role in the driving loop and its interaction with §5.5/§8's error-rollback contract. Reference definition below. **MUST be the last word loaded in §7.1's bootstrap sequence.** |
+
+**`NUMBER`'s reference definition** (verified against the dispatch
+semantics in §4.2 and hand-traced stack effects, in the same spirit as
+§6.5's control-flow block):
+
+```forth
+: NUMBER  ( addr len -- n )
+  DUP 0= IF 2DROP 0 EXIT THEN
+  OVER C@ 45 = >R                 ( addr len )            ( R: neg? )
+  R@ IF 1 - SWAP 1 + SWAP THEN    ( addr' len', '-' skipped if present )
+  0 -ROT                          ( accum addr' len' )
+  OVER + SWAP                     ( accum limit addr' )
+  DO
+    I C@                           ( accum char )
+    DUP 57 > IF 55 - ELSE 48 - THEN  ( accum digit )
+    SWAP BASE @ * +                ( accum' )
+  LOOP
+  R> IF NEGATE THEN
+;
+```
+
+The digit-value step (`57` is ASCII `'9'`; `55`/`48` map `'A'..'Z'`/
+`'0'..'9'` to `10..35`/`0..9`) does not validate that every character
+in range is a legal digit — a token like `NUMBER`'s own worst input,
+something containing `:` or `;` (ASCII 58/59) past a digit, is silently
+accepted as if it were a digit one or two past `9`. This is a
+documented limitation, not a bug: §5.4's contract is "a token that
+fails both dictionary lookup and number parsing is an error," and
+`FIND` failing first is the normal path for genuinely malformed input;
+this only matters for tokens crafted to look number-*ish* while
+containing punctuation, which `WORD`'s delimiter (space) already
+excludes for anything but the small ASCII range immediately after
+digits and letters. Tightening this is a valid future revision, not a
+blocker to shipping `NUMBER` as specified here.
+
+**`INTERPRET`'s required behavior**, stated precisely enough to
+implement and verify independent of any one literal listing:
+
+1. Call `WORD` with `BL` as the delimiter. If the returned length is
+   `0`, the line is exhausted — return.
+2. Call `FIND` on the returned `addr len`.
+3. **If found** (`flag ≠ 0`): read the entry's flags byte
+   (`entry-addr + 4`) and compute its `xt` via `>CFA`.
+   - **Interpreting** (`STATE @ = 0`): if the `COMPILE-ONLY` bit (§3)
+     is set, this is an error (§3's own rule — "using one outside
+     `:`...`;` is a compile-time-only construct with no sensible
+     interpret-time meaning"); otherwise `EXECUTE` the `xt`.
+   - **Compiling** (`STATE @ ≠ 0`): if the `IMMEDIATE` bit is set,
+     `EXECUTE` the `xt` regardless of `STATE` (§5.4's own rule, the
+     mechanism every §6.5 control-flow word depends on); otherwise
+     compile a call by appending the `xt` via `,`.
+4. **If not found** (`flag = 0`): call `NUMBER` on the same `addr len`.
+   - **Interpreting**: push the result.
+   - **Compiling**: compile `LIT` followed by the literal value (two
+     `,` appends — the `xt` of `LIT` itself, then the value).
+   - `NUMBER`'s own failure path (§6.13's documented limitation above,
+     or any other malformed token) is an `unrecognized word` error
+     (§5.4) — signaled via `ABORT` (§8), which routes through §5.5/
+     §5.6's rollback contract exactly as any other mid-compilation
+     error does.
+5. Repeat from step 1 until the line is exhausted (step 1's `len = 0`
+   exit).
+
+**Load-order requirement, binding across §5.6, §6.10, and this
+section**: `WORD` and `STATE` have no dependencies within this
+addendum and MAY load in either order relative to each other, but both
+**MUST** precede `FIND`; `FIND` **MUST** precede `'`, `NUMBER`, and
+`INTERPRET`; `[`/`]` **MUST** follow `STATE`; `INTERPRET` **MUST** be
+loaded last of all six. A target's bootstrap file that violates this
+ordering fails to load, the same class of failure §6.5's note on
+`>CFA`-before-`RECURSE` and §7.2's note on `SEE`-before-its-`HIDE`-ing
+already document for this specification's other load-order
+constraints.
 
 ---
 
@@ -816,6 +1005,17 @@ happens **after** `SEE` is fully defined, not inline immediately after
 each helper. This is a real load-order constraint on the bootstrap
 file, not an arbitrary style choice — get the order wrong and `SEE`
 fails to compile.
+
+**This table's `'` dependency now bottoms out in §6.13's own ordering
+requirement**, not a native primitive: `'` is BOOTSTRAP as of §6.10's
+revision, itself requiring `WORD` and `FIND` to already be loaded. The
+full bootstrap sequence, combining both sections' constraints, is:
+`WORD`, `STATE` (either order) → `FIND` → `'`, `>CFA` (either order) →
+`XT-NAME`, `WORDS` → `SEE` → `HIDE`, `FORGET`, `VOCABULARY`/`USE` →
+`[`, `]` → `NUMBER` → `INTERPRET` last of all. A target's bootstrap
+loader MUST follow this ordering; it is the union of every per-word
+constraint stated across §6.5, §6.13, and this section, not a new
+requirement invented here.
 
 ---
 
@@ -901,9 +1101,12 @@ today:
 | `DOCOL`/`DODOES` thread through an explicit `ip` + return-stack loop, never native-language recursion | §4.2, §4.4 |
 | `LIT`/`EXIT`/`BRANCH`/`0BRANCH`/`(SLIT)`/`(DOES>)` are unreachable outside the threading loop | §4.2 |
 | Interpreter can suspend at a blocking `KEY` dispatch and resume using only `ip` + stack contents | §4.4 |
-| `:`/`;`/`IMMEDIATE` are outer-interpreter syntax, not dictionary words | §5.2 |
-| The raw-token input cursor is shared across a whole line, not local to one word's call | §5.3 |
+| `:`/`;`/`IMMEDIATE` are native KERNEL words with genuine dictionary entries, dispatched by `INTERPRET` uniformly via `FIND` — never special-cased by spelling | §5.2 |
+| The raw-token input cursor is shared across a whole line, not local to one word's call, and is itself exposed as the KERNEL word `WORD` | §5.3, §6.13 |
 | A mid-compilation error rolls back the half-built entry before the next line runs | §5.5 |
+| `INTERPRET`, `NUMBER`, `FIND`, `[`, `]` are ordinary BOOTSTRAP dictionary words realizing §5.1–§5.4's contract exactly — not engine-internal-only logic | §5.6, §6.13 |
+| The bootstrap sequence follows §7.2's combined ordering (`WORD`/`STATE` → `FIND` → `'`/`>CFA` → `XT-NAME`/`WORDS` → `SEE` → `HIDE`/`FORGET`/`VOCABULARY`/`USE` → `[`/`]` → `NUMBER` → `INTERPRET` last) | §6.5, §6.13, §7.2 |
+| An error raised inside `INTERPRET` unwinds through §4.4's threading mechanism, not a native stack unwind, before §5.5's rollback runs | §5.6, §8 |
 | Every §6 KERNEL-marked word is implemented natively | §6 |
 | Every §6 BOOTSTRAP-marked word, plus §7.2's library words, is defined and loaded before the first interactive prompt | §7.1 |
 | `COLD` reinitializes `DICT`/`MMAP`/both stacks/every sysvar to fresh-boot state before the next line runs, by whatever target-appropriate mechanism | §4.6, §6.12 |
