@@ -84,7 +84,14 @@ It does not specify:
   holds even on a 64-bit host, where the temptation to shortcut through
   a native pointer is strongest. This is what makes a fixed 32-bit cell
   work cleanly regardless of a target's native word size or address
-  space.
+  space. On a target where an arena *is* real, directly-addressable
+  memory, this conversion is typically the identity function end to
+  end, including for `EXTERNAL` banks (§4.5) — a GPIO register range or
+  a hardware framebuffer is just another real address a load/store
+  instruction reaches directly. On a hosted/managed target where the
+  arena is a synthetic buffer, this same dispatch point carries more
+  weight: see §4.5's resolution requirement for offsets landing inside
+  a registered `EXTERNAL` bank.
 - **Fetch/store operations are unbounded: full read/write, no
   bounds-checking safety net.** This is deliberate, not a missing
   feature — Forth code is meant to feel like it genuinely owns real,
@@ -226,8 +233,10 @@ offset-relative bank placement.
 ### 4.5 External (unmanaged) banks
 
 Some banks describe memory the arena's own allocator neither owns nor
-sizes — most notably a singular hardware or host-owned framebuffer
-(`SCRN`). These are *registered* rather than *carved*:
+sizes — a singular hardware or host-owned framebuffer (`SCRN`), a
+GPIO/peripheral register range, or any other hardware-owned memory a
+target wants Forth to reach directly. These are *registered* rather
+than *carved*:
 
 - Recorded in the bank table with the same descriptor shape as any
   other bank (tag, name, base, size, `EXTERNAL` flag set) — so any
@@ -246,6 +255,40 @@ sizes — most notably a singular hardware or host-owned framebuffer
   `@`/`!` — omitting its bank-table entry entirely is conformant. Only
   register an external bank when something genuinely needs to address
   it via the bank-table/`BANK@` mechanism.
+- **This is the mechanism for unmediated, direct `@`/`!`/`C@`/`C!`
+  access to hardware — it does not cross `01-HAL.md`'s HAL boundary.**
+  §2.4 of that document defines the HAL boundary as a *function-call*
+  relationship (the portable layer calling a target function, or
+  target code calling into a portable entry point). A fetch/store
+  against an address that happens to fall inside a registered
+  `EXTERNAL` bank's range is neither — it's ordinary memory access, not
+  a call, and no per-target code runs on the access path. A GPIO bank
+  reached this way needs no `hal_*` function at all; it needs a bank
+  registration and nothing else.
+- **Address resolution MUST reach the bank's real backing store, not
+  just compute an in-arena offset.** §3's `real_address = arena_base +
+  offset` is written for the common case where every address lands
+  inside the arena's own single allocation. An `EXTERNAL` bank's `base`
+  denotes memory *outside* that allocation by definition (§4.2's
+  `EXTERNAL` flag), so a conformant `@`/`!` implementation MUST resolve
+  an offset landing inside a registered `EXTERNAL` bank's range to that
+  bank's own real memory, not to the arena's own buffer.
+  - On a target where the arena is real address space (typical bare
+    metal), this is free: an `EXTERNAL` bank's `base` is already a real
+    address, and ordinary load/store instructions reach it with no
+    extra indirection.
+  - On a hosted/managed target where the arena is a synthetic buffer
+    (e.g. one `ArrayBuffer`/`DataView` pair, as in a browser-hosted
+    simulator), this is a genuine, required dispatch step: the `@`/`!`
+    implementation MUST consult the bank table to determine whether a
+    given offset falls inside an `EXTERNAL` bank's registered range
+    and, if so, redirect the access to that bank's actual backing
+    store (a separate buffer, a mapped device object, whatever the
+    host provides) instead of indexing into the arena's own buffer.
+    This is bank-range dispatch within one arena's own address space,
+    decided from data the bank table already holds — **not** the
+    mutable "current arena" register §6.1 prohibits, which is a
+    different axis (which arena a task belongs to) entirely.
 
 ### 4.6 Known bank tags
 
@@ -614,6 +657,7 @@ one becomes real and load-bearing somewhere, not before:
 | Every carved bank, including `MMAP` itself, occupies exactly one size class (XS–XXL); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
 | Bump allocator 4 KiB-aligns every carved bank's base, including absolute-address alignment if the arena's own allocation might not already be page-aligned | §4.4 |
 | External banks are registered, don't consume the free cursor, and don't need a size class | §4.5 |
+| `@`/`!` resolution reaches an `EXTERNAL` bank's real backing store (not just the arena's own buffer) on any target where the two aren't automatically the same memory | §4.5 |
 | Bank table (`MMAP`) is arena-resident, not a host-side-only structure | §5 |
 | Bank `name` uniqueness is global across every arena, not per-arena | §4.7, §6.5 |
 | Auto-generated bank names share one counter (`MMAP`'s own header), regardless of creation path | §4.7, §5.1 |
