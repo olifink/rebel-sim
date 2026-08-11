@@ -234,4 +234,25 @@ describe('App', () => {
     // present — confirms a real reboot happened, not just a wipe.
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('WORDS');
   });
+
+  it('the left-side sysvars panel lists live FORTH.STATE/.BASE values and updates as they change', async () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+    };
+
+    await waitFor(() => (compiled.querySelector('.sysvar-table')?.textContent ?? '').includes('BASE'));
+    expect(compiled.querySelector('.sysvar-table')?.textContent ?? '').toContain('STATE');
+
+    app.remoteChannel.push('16 BASE !\n');
+    await waitFor(() => {
+      const row = Array.from(compiled.querySelectorAll('.sysvar-table tr')).find((tr) =>
+        tr.textContent?.includes('BASE'),
+      );
+      return row?.textContent?.trim().endsWith('16') ?? false;
+    });
+  });
 });

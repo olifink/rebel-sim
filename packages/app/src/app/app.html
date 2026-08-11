@@ -69,6 +69,19 @@
     </div>
 
     <div class="inspector-section">
+      <div class="inspector-label">sysvars:</div>
+      <table class="bank-table sysvar-table">
+        @for (v of sysvarsTable(); track v.group + '.' + v.field) {
+          <tr>
+            <td>{{ v.group }}</td>
+            <td [title]="v.note">{{ v.field }}</td>
+            <td>{{ v.value }}</td>
+          </tr>
+        }
+      </table>
+    </div>
+
+    <div class="inspector-section">
       <div class="inspector-label">storage:</div>
       <div class="inspector-values">{{ storageStatus() }}</div>
     </div>

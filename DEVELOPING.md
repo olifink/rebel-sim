@@ -3292,3 +3292,48 @@ the byte with zero `blitGlyph` calls; `REDRAW` then calls it
 browser first (poke leaves the old glyph on screen; `REDRAW` repaints
 it), same discipline as M35/M36. Full engine suite: 311 passed (310
 before, 1 new). App suite unaffected — no `app.ts`/`app.html` change.
+
+## 30. Sysvars section in the left-side monitor overlay — done, M38
+
+Requested directly: show a sysvars section in the left-side monitor
+overlay (`.storage-panel` — banks/storage, per `app.css`'s own
+left/right comment — as opposed to `.inspector` on the right:
+breakpoints/dictionary/stacks). Web-only UI, same scope as §28's
+dictionary tooltip, not a cross-target concern.
+
+New engine export, `listSysvars(sysvars: Sysvars): SysvarEntry[]`
+(`sysvars.ts`) — same pattern `getPrimitiveNote` established for §28:
+let the host read `rebel-opcodes.json` metadata through a dedicated
+accessor rather than hand-maintaining its own copy of the group/field
+layout. Walks `opcodes.sysvarGroups` (the same JSON `Sysvars.get`/
+`fieldOffset` already reads), skips groups with no fields defined yet
+(`FONT`/`SPRITE` — reserved, no target has a Forth-addressable bank
+for either), and for every real field reads its live value with
+`sysvars.get()` plus carries the JSON `note` through for a tooltip.
+
+`app.html`'s `.storage-panel` gained a `sysvars:` section (between
+`banks` and `storage`) — a `<table class="bank-table sysvar-table">`
+(the extra class is only a test/selector hook, styling is the existing
+bank-table CSS) with one row per `SysvarEntry`: group, field (hover
+title = the note), value. `app.ts` gained a `sysvarsTable` signal, set
+once in `constructMachine()` alongside `bankTable`, and polled/diffed
+every `tick()` frame. Unlike `bankTable`/`dictionaryWords` (gated
+behind a cheap proxy — bank count, `LATEST`'s address — because the
+real check is comparatively expensive), sysvars move on nearly every
+executed word (`SP`/`RP`/`CURSOR-X`/`CURSOR-Y` especially) and there's
+no cheaper proxy worth gating on, so `tick()` just re-reads all ~15
+fields every frame and diffs the flat value array directly.
+`lastSysvarsSnapshot` resets to `[]` in the `'cold'` branch, same
+reasoning as every other polled "last*" field there.
+
+**Tests:** `sysvars.test.ts` gained a `listSysvars` block — skips
+`FONT`/`SPRITE`, reads a field's live (not cached) value via
+`setBase(16)`, carries the note through. `app.spec.ts` gained one
+test: `.sysvar-table` lists `STATE`/`BASE` after boot, and `16 BASE !`
+typed through the remote channel updates the rendered row. Live-
+verified in a real browser: `Ctrl+\`` shows the panel populated;
+`16 BASE !` typed via the app's own WebMCP `type` tool moves `BASE`
+from `10` to `16` and `CURSOR-Y` updates; hovering `STATE`'s field
+cell shows its JSON note (`element.title`, read directly). Full
+engine suite: 314 passed (311 before, 3 new). App suite: 20 passed
+(19 before, 1 new).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
 import { BankTable } from './banks.js';
-import { Sysvars } from './sysvars.js';
+import { Sysvars, listSysvars } from './sysvars.js';
 
 function makeSysvars() {
   const arena = new Arena(1 << 16);
@@ -52,5 +52,36 @@ describe('Sysvars project name (spec/03-SYSVARS.md §10)', () => {
     expect(sysvars.getUnsigned('STORAGE', 'PROJECT-NAME-1')).toBe(
       ('E'.charCodeAt(0) | ('F'.charCodeAt(0) << 8) | ('G'.charCodeAt(0) << 16) | ('H'.charCodeAt(0) << 24)) >>> 0,
     );
+  });
+});
+
+describe('listSysvars (web-only monitor-panel support)', () => {
+  it('lists only fields opcodes.json actually defines, skipping reserved/empty groups', () => {
+    const sysvars = makeSysvars();
+    const entries = listSysvars(sysvars);
+
+    // FORTH.STATE is a real, populated field.
+    expect(entries.some((e) => e.group === 'FORTH' && e.field === 'STATE')).toBe(true);
+    // FONT and SPRITE are reserved with no fields yet (rebel-opcodes.json).
+    expect(entries.some((e) => e.group === 'FONT')).toBe(false);
+    expect(entries.some((e) => e.group === 'SPRITE')).toBe(false);
+  });
+
+  it('reads each field\'s live current value, not a cached snapshot', () => {
+    const sysvars = makeSysvars();
+    sysvars.setBase(16);
+
+    const entries = listSysvars(sysvars);
+
+    const base = entries.find((e) => e.group === 'FORTH' && e.field === 'BASE');
+    expect(base?.value).toBe(16);
+  });
+
+  it('carries each field\'s rebel-opcodes.json note through for a tooltip', () => {
+    const sysvars = makeSysvars();
+    const entries = listSysvars(sysvars);
+
+    const state = entries.find((e) => e.group === 'FORTH' && e.field === 'STATE');
+    expect(state?.note).toContain('compiling');
   });
 });

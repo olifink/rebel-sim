@@ -137,3 +137,38 @@ export class Sysvars {
     this.setUnsigned('STORAGE', 'PROJECT-NAME-1', cells[1] >>> 0);
   }
 }
+
+export interface SysvarEntry {
+  readonly group: string;
+  readonly field: string;
+  readonly value: number;
+  readonly note?: string;
+}
+
+/** Web-only monitor-panel support (companion to dictionary.ts's
+ * getPrimitiveNote) — walks every sysvar field opcodes.json actually
+ * defines (skipping groups like FONT/SPRITE that are reserved with no
+ * fields yet) and reads its live current value straight out of the
+ * SYSV bank. Exists so a host UI can list "every sysvar and its
+ * current value" without hand-maintaining its own copy of the group/
+ * field layout opcodes.json already owns — same reasoning as
+ * PRIMITIVE_NOTES in dictionary.ts. Not a DictionaryEntry-shaped
+ * mechanism and not portable runtime state: plain signed cell reads,
+ * same as Sysvars.get() itself. */
+export function listSysvars(sysvars: Sysvars): SysvarEntry[] {
+  const out: SysvarEntry[] = [];
+  for (const groupName of Object.keys(opcodes.sysvarGroups) as GroupName[]) {
+    const group = opcodes.sysvarGroups[groupName] as {
+      fields: Record<string, { note?: string }>;
+    };
+    for (const [fieldName, field] of Object.entries(group.fields)) {
+      out.push({
+        group: groupName,
+        field: fieldName,
+        value: sysvars.get(groupName, fieldName),
+        note: field.note,
+      });
+    }
+  }
+  return out;
+}

@@ -1981,6 +1981,38 @@ more targeted.
 uncalled, `REDRAW` then repaints every cell). Full engine suite: 311
 passed (310 before, 1 new). App suite unaffected.
 
+### 1.53 Sysvars section in the left-side monitor overlay (M38, `DEVELOPING.md` §30)
+
+Web-only UI, same scope as §1.51's tooltip. New engine export
+`listSysvars(sysvars: Sysvars): SysvarEntry[]` (`sysvars.ts`) walks
+`opcodes.sysvarGroups`, skips groups with no fields defined yet
+(`FONT`/`SPRITE`, both reserved), and reads each real field's live
+value via `sysvars.get()`, carrying its JSON `note` through — the same
+"read `rebel-opcodes.json` metadata through a dedicated accessor"
+pattern `getPrimitiveNote` established for §1.51, applied to sysvars
+instead of dictionary entries.
+
+`.storage-panel` (`app.html`) gained a `sysvars:` section: a
+`<table class="bank-table sysvar-table">` with one row per
+`SysvarEntry` (group, field with the note as its hover title, value).
+`app.ts` gained a `sysvarsTable` signal, set once in
+`constructMachine()` and polled/diffed every `tick()` frame — unlike
+`bankTable`/`dictionaryWords`, which gate their re-read behind a cheap
+proxy (bank count, `LATEST`'s address), sysvars change on nearly every
+executed word so `tick()` just re-reads all ~15 fields every frame and
+diffs the flat value list directly; `lastSysvarsSnapshot` resets to
+`[]` in the `'cold'` branch like every other polled "last*" field.
+
+*Implementation:* `sysvars.ts` (`SysvarEntry`, `listSysvars`),
+`index.ts` (both re-exported), `app.ts` (`sysvarsTable` signal, its
+`constructMachine()`/`tick()`/`'cold'`-branch wiring), `app.html`
+(the new section). Three new `sysvars.test.ts` cases (reserved groups
+skipped, live-not-cached value, note carried through) and one new
+`app.spec.ts` case (`.sysvar-table` lists `STATE`/`BASE`, `16 BASE !`
+updates the rendered row). Live-verified in a real browser. Full
+engine suite: 314 passed (311 before, 3 new). App suite: 20 passed
+(19 before, 1 new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2122,5 +2154,6 @@ exactly as it would be on the bare-metal target.
 | **M35** | `WARM`/`COLD` (§1.50, `DEVELOPING.md` §27), picked back up after M29 deferred both citing `Machine`'s `readonly` fields as the blocker. Split by how much state each touches instead of making `Machine` rebuildable: `WARM` (token 131) is a plain primitive clearing both stacks, `DICT`/`MMAP` untouched. `COLD` (token 132) is a pure Forth-to-host signal — a fourth `StepSignal`/`StepStatus` value, `'cold'`, riding M10's breakpoint-yield mechanism — since a full reset genuinely can't happen in place; the host (`app.ts`) reacts by constructing a brand new `Machine`. Two real bugs found and fixed along the way: an `ngAfterViewInit` reordering that broke keyboard-listener registration's implicit "before the first `await`" invariant (caught by an existing test going flaky, not assumed), and `registerWebMcpTools()` capturing a now-stale `Machine` reference at registration time. | `rebel-opcodes.json`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts` |
 | **M36** | Dictionary hover tooltip shows a primitive's note (§1.51, `DEVELOPING.md` §28). Web-only monitor-panel sugar, requested directly, out of scope for `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`. New `dictionary.ts` export `getPrimitiveNote(name)` — a name→note lookup over `opcodes.primitives`, not a `DictionaryEntry` field (a note is documentation, not runtime state). `app.ts`'s `wordTooltip()` shows the note when one exists, falling back to the original breakpoint-hint text for every user-defined word and note-less primitive. Click-to-toggle-breakpoint behavior itself is unchanged. | `dictionary.ts`, `index.ts`, `app.ts`, `app.html` |
 | **M37** | `REDRAW` (§1.52, `DEVELOPING.md` §29): repaints the framebuffer from `CHAR` content, for when Forth source pokes `CHAR` directly (`BANK@ CHAR ... C!`) and bypasses `writeChar()`'s HAL write-through. Exposes the already-existing `Screen.redrawAll()` (M29) as an ordinary word (token 133) — no new mechanism. A real cross-target primitive (checked against `rebel-rom`'s `CScreenModule::Redraw()`, not assumed), unlike M36's web-only tooltip. Deliberately whole-buffer only for now, to find out empirically how expensive a full sweep is before adding a targeted single-cell/rectangle variant. | `rebel-opcodes.json`, `primitives.ts` |
+| **M38** | Sysvars section in the left-side monitor overlay (§1.53, `DEVELOPING.md` §30). Web-only UI, requested directly, same scope as M36's tooltip. New `sysvars.ts` export `listSysvars(sysvars)` walks `opcodes.sysvarGroups`, skips groups with no fields defined yet (`FONT`/`SPRITE`), and reads each real field's live value plus its JSON note — same "read `rebel-opcodes.json` metadata through a dedicated accessor" pattern `getPrimitiveNote` established for M36. `.storage-panel` gained a `sysvars:` table (group/field/value, note as the field's hover title); `app.ts`'s new `sysvarsTable` signal is polled/diffed every `tick()` frame rather than behind a cheap proxy, since sysvars move on nearly every executed word. | `sysvars.ts`, `index.ts`, `app.ts`, `app.html` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -10,8 +10,8 @@ import {
   OnDestroy,
   declareExperimentalWebMcpTool,
 } from '@angular/core';
-import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, RemoteChannel } from '@rebel-sim/engine';
-import type { Bank, DictionaryEntry, StepStatus } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, listSysvars, RemoteChannel } from '@rebel-sim/engine';
+import type { Bank, DictionaryEntry, StepStatus, SysvarEntry } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
@@ -39,6 +39,11 @@ export class App implements AfterViewInit, OnDestroy {
   protected readonly returnStack = signal<number[]>([]);
   protected readonly dictionaryWords = signal<DictionaryEntry[]>([]);
   protected readonly bankTable = signal<readonly Bank[]>([]);
+  // Left-side (.storage-panel) monitor, polled/diffed in tick() exactly
+  // like bankTable — engine's listSysvars() (sysvars.ts) does the actual
+  // group/field walk and live SYSV-bank reads, this is just its display
+  // cache.
+  protected readonly sysvarsTable = signal<SysvarEntry[]>([]);
   // Fixed for the lifetime of a Machine (Arena's size never changes after
   // construction) — set once alongside bankTable's initial value below,
   // not re-polled on every tick like bankTable itself is.
@@ -208,8 +213,10 @@ export class App implements AfterViewInit, OnDestroy {
     this.zone.run(() => {
       this.bankTable.set(this.machine.banks.getAllBanks());
       this.arenaSizeBytes.set(this.machine.arena.sizeBytes);
+      this.sysvarsTable.set(listSysvars(this.machine.sysvars));
     });
     this.lastBankCount = this.machine.banks.getAllBanks().length;
+    this.lastSysvarsSnapshot = listSysvars(this.machine.sysvars).map((e) => e.value);
   }
 
   /** Loads the system vocabulary into the current `this.machine` and
@@ -697,6 +704,7 @@ export class App implements AfterViewInit, OnDestroy {
   private lastBankCount = 0;
   private lastBreakpointWords: ReadonlySet<string> = new Set();
   private lastProjectNames: string[] = [];
+  private lastSysvarsSnapshot: number[] = [];
 
   // Restarts the requestAnimationFrame chain if tick() previously let it
   // die from having nothing to do. Idempotent — safe to call from any
@@ -778,6 +786,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.lastBankCount = 0;
       this.lastBreakpointWords = new Set();
       this.lastProjectNames = [];
+      this.lastSysvarsSnapshot = [];
       this.zone.run(() => this.pausedWord.set(undefined));
       void this.performBoot();
       return;
@@ -817,6 +826,19 @@ export class App implements AfterViewInit, OnDestroy {
       this.lastBankCount = bankCount;
       const banks = this.machine.banks.getAllBanks();
       this.zone.run(() => this.bankTable.set(banks));
+      changed = true;
+    }
+    // Left-side sysvars panel — every field changes constantly during
+    // normal execution (SP/RP/CURSOR-X/Y move on nearly every word), so
+    // this re-reads all of them every tick rather than trying to guard
+    // on some cheaper proxy the way LATEST-address/bankCount do for
+    // their own sections; the diff below is just against the flat value
+    // list so an idle prompt still lets the pump die like everything else.
+    const currentSysvars = listSysvars(this.machine.sysvars);
+    const currentSysvarValues = currentSysvars.map((e) => e.value);
+    if (!arraysEqual(currentSysvarValues, this.lastSysvarsSnapshot)) {
+      this.lastSysvarsSnapshot = currentSysvarValues;
+      this.zone.run(() => this.sysvarsTable.set(currentSysvars));
       changed = true;
     }
     // DEBUGGING.md (M10) UI: one diff-and-set path for breakpointWords

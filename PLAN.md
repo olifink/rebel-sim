@@ -517,6 +517,19 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
     with the simple whole-buffer version specifically to find out how
     expensive it really is in practice before considering anything
     more targeted (a single-cell or rectangle variant). Detailed below.
+38. **M38 — Sysvars section in the left-side monitor overlay** —
+    **done**: web-only UI, same scope as M36's tooltip, not a
+    cross-target concern. New engine export `listSysvars(sysvars)`
+    (`sysvars.ts`) walks every field `rebel-opcodes.json`'s
+    `sysvarGroups` actually defines (skipping reserved/empty groups
+    like `FONT`/`SPRITE`) and reads each one's live current value —
+    the same "let the host UI read opcodes.json metadata through a
+    dedicated accessor" pattern `getPrimitiveNote` established for
+    M36. `.storage-panel`'s new `sysvars:` section lists group/field/
+    value as a table, hover title showing the field's note; polled/
+    diffed in `tick()` every frame like the other panels (sysvars
+    change on nearly every word, so the diff is against the flat value
+    list, not some cheaper proxy). Detailed below.
 
 Each milestone gets its own detailed plan when it starts; only M1 is
 detailed now.
@@ -3229,3 +3242,60 @@ C!` leaves the top-left cell showing its old glyph; `REDRAW` turns it
 into `H`), same discipline as M35/M36. Full engine suite: 311 passed
 (310 before, 1 new). App suite unaffected — no `app.ts`/`app.html`
 change, this is a pure `primitives.ts`/`rebel-opcodes.json` addition.
+
+## M38 — Sysvars section in the left-side monitor overlay — done
+
+Requested directly: show a sysvars section in the web UI's monitor
+overlay, on the left side (`.storage-panel` — banks/storage, as
+opposed to `.inspector` on the right, which holds breakpoints/
+dictionary/stacks; `app.css`'s own comment already names this
+left/right split). Web-only UI, the same scope as M36's dictionary
+tooltip, not a cross-target concern — no `FORTH-ARCHITECTURE.md`/
+`PORTING-WEB.md` change.
+
+New engine export, `listSysvars(sysvars: Sysvars): SysvarEntry[]`
+(`sysvars.ts`), the same "let the host read `rebel-opcodes.json`
+metadata through a dedicated accessor instead of hand-maintaining its
+own copy" pattern `getPrimitiveNote` established for M36. It walks
+`opcodes.sysvarGroups` (the same JSON `Sysvars.get`/`fieldOffset`
+already read from) and, for every group that actually has fields
+defined (`FONT` and `SPRITE` are reserved/empty — no target has a
+Forth-addressable bank for either yet — so they're silently skipped,
+not shown as empty rows), reads that field's live current value with
+`sysvars.get()` and carries its JSON `note` through for a tooltip.
+`SysvarEntry` (`{ group, field, value, note? }`) and `listSysvars` are
+both new `index.ts` exports.
+
+`app.html`'s `.storage-panel` gained a `sysvars:` section between
+`banks` and `storage`, a `<table class="bank-table sysvar-table">`
+(reusing the existing bank-table's column styling, `sysvar-table` only
+added as a test/selector hook) with one row per `SysvarEntry` — group,
+field (hover title = the field's note), value. `app.ts` gained a
+`sysvarsTable` signal, populated once in `constructMachine()`
+alongside `bankTable`/`arenaSizeBytes`, and polled/diffed every
+`tick()` frame like the other panels. Unlike `bankTable`/
+`dictionaryWords` (which gate their re-read behind a cheap proxy —
+bank count, `LATEST`'s address — because the real check is
+comparatively expensive), sysvars change on nearly every executed word
+(`SP`/`RP`/`CURSOR-X`/`CURSOR-Y` move constantly) and there's no
+cheaper proxy worth gating on, so `tick()` just re-reads all ~15
+fields every frame and diffs the flat value array directly — cheap
+enough not to need one. `lastSysvarsSnapshot` (mirroring
+`lastStackSnapshot` et al.) is reset to `[]` in the `'cold'` branch so
+a post-`COLD` machine's first tick is picked up on its own terms
+rather than masked by a stale comparison, same reasoning as every
+other polled signal there.
+
+**Tests:** `sysvars.test.ts` gained a `listSysvars` `describe` block —
+skips reserved/empty groups (`FONT`/`SPRITE` absent from the result),
+reads a field's live value (not a cached one, proven via `setBase(16)`
+then checking the entry), and carries the JSON note through. `app.spec.ts` gained one test: the `.sysvar-table`
+lists `STATE`/`BASE` after boot, and `16 BASE !` typed through the
+remote channel is reflected in the rendered row. Live-verified in a
+real Chromium browser (chrome-devtools MCP): `Ctrl+\`` shows the panel
+with all populated groups/fields; `16 BASE !` typed via the app's own
+WebMCP `type` tool updates the `BASE` row from `10` to `16` and
+`CURSOR-Y` moves as expected; hovering `STATE`'s field cell surfaces
+its JSON note as the tooltip (`element.title` read directly). Full
+engine suite: 314 passed (311 before, 3 new). App suite: 20 passed (19
+before, 1 new).
