@@ -140,8 +140,16 @@ actually had for this specific layer, which this document's first pass
 did not.
 
 Folding §6.13 in: the reference vocabulary is **143 words**, of which
-**83 are required-native KERNEL** and **60 are BOOTSTRAP** (`'` moves
-from KERNEL to BOOTSTRAP as part of this addendum — §6.10, §6.13).
+**84 are required-native KERNEL** and **59 are BOOTSTRAP**. `'` was
+considered for the same KERNEL→BOOTSTRAP move `FIND`/`NUMBER`/
+`INTERPRET` make, but stays KERNEL (§6.10): §6.5's control-flow layer
+needs `'` to resolve `BRANCH`/`0BRANCH`/`(DO)`/`(LOOP)`/`(+LOOP)`'s own
+tokens by name before any Forth-level loop construct exists — and
+`FIND`, the word a BOOTSTRAP `'` would be built from, itself needs a
+loop construct from that same control-flow layer to compile its own
+comparison loop. Moving `'` to BOOTSTRAP would make the first thing
+the bootstrap loader needs depend on the last thing it can build; kept
+native, that cycle never opens.
 
 ---
 
@@ -449,6 +457,22 @@ position over the actual input line will misbehave the moment a
 name-consuming word is used from inside a colon-definition rather than
 typed directly at the prompt.
 
+**Two different consumption patterns follow from this, and conflating
+them is the mistake to avoid.** A defining/utility word invoked
+*interactively* (`CREATE`, `VARIABLE`, `CONSTANT`, `BANK@`,
+`CREATE-BANK`, `PROJECT`, `RESTORE`, `BSAVE`, `BLOAD`, `'` itself, and
+§7.2's `SEE`/`HIDE`/`FORGET`) is correctly **not** `IMMEDIATE` — it's
+meant to consume from whatever line is live *when it runs*, which is
+exactly the caller's own line, whether that word was typed directly or
+reached through any number of ordinary deferred calls (the `CONST`/
+`FIVE` example above). A word whose raw text is meant to be **baked
+into the definition that contains it** (`S"`, `."`, `(`, and the
+`…-XT`-resolving use of `'` in §6.5's control-flow layer) needs the
+opposite: it must run at *that containing definition's own compile
+time*, which requires `IMMEDIATE` — deferred, it would instead consume
+text from whatever line later calls the containing word. §6.5's note
+and §6.7's `S"`/`."`/`(` rows have the worked-through reasoning.
+
 ### 5.4 Number parsing
 
 A token not found in the dictionary is tried as a number in the current
@@ -605,8 +629,9 @@ corrupts its own return address.
 genuinely native control-flow primitives this specification requires.
 **Every compile-time control-flow word — the ones a Forth programmer
 actually types — is fully expressible in Forth source**, using only
-`'` (tick), `,` (comma), `HERE`, `SWAP`, `!`, and calls to the four
-native words below. This is not a novel technique — it's how several
+`'` (tick, to resolve the five native words below into constants once,
+at the top level — see the note below), `CONSTANT`, `,` (comma),
+`HERE`, `SWAP`, and `!`. This is not a novel technique — it's how several
 well-known minimal Forth kernels already structure this layer — but it
 is a real, substantial reduction from a 13-primitive control-flow
 surface to a 5-primitive one, and worth verifying word-by-word rather
@@ -622,26 +647,67 @@ than taking on faith:
 
 Reference bootstrap definitions for everything built on top (verified
 by hand-tracing each against the dispatch semantics in §4.2 and the
-reference primitive behavior they replace — not merely asserted):
+reference primitive behavior they replace — not merely asserted).
+
+**A correction from an earlier pass of this catalog**: these cannot use
+inline `' WORDNAME ,` inside each `IMMEDIATE COMPILE-ONLY` word's own
+body, tempting as that looks. `'` is not, and must not be, `IMMEDIATE`
+itself (§6.10) — the reference bootstrap layer's actual `SEE` depends
+on `'` staying an ordinary, deferred call: `SEE`'s own body opens with
+a bare `'` that resolves *`SEE`'s own caller's* argument (`SEE FOO`
+resolves `FOO`), exactly the shared-input-cursor behavior §5.3 already
+specifies for `CREATE` used inside `CONSTANT`. Marking `'` `IMMEDIATE`
+would fix the trace below but break `SEE`/`HIDE`/`FORGET` the same way,
+since it would stop `'` from working as a deferred reference at all.
+
+The actual requirement is narrower: each native word a control-flow
+word needs to compile a call to must be resolved *once*, at the top
+level (ordinary interpreting, where `'` always executes immediately
+regardless of its own flag — §5.4), into a named `CONSTANT` — exactly
+the pattern the reference bootstrap layer already uses for `LIT`
+itself (`' LIT CONSTANT LIT-XT`, `system.fth`). The control-flow words
+below reference those constants instead of `'` directly:
 
 ```forth
-: IF     ' 0BRANCH , HERE 0 ,               ; IMMEDIATE COMPILE-ONLY
-: ELSE   ' BRANCH , HERE 0 , SWAP HERE SWAP !  ; IMMEDIATE COMPILE-ONLY
-: THEN   HERE SWAP !                        ; IMMEDIATE COMPILE-ONLY
-: BEGIN  HERE                               ; IMMEDIATE COMPILE-ONLY
-: UNTIL  ' 0BRANCH , ,                      ; IMMEDIATE COMPILE-ONLY
-: WHILE  ' 0BRANCH , HERE 0 ,               ; IMMEDIATE COMPILE-ONLY
-: REPEAT ' BRANCH , SWAP , HERE SWAP !      ; IMMEDIATE COMPILE-ONLY
-: DO     ' (DO) , HERE                      ; IMMEDIATE COMPILE-ONLY
-: LOOP   ' (LOOP) , ' 0BRANCH , ,           ; IMMEDIATE COMPILE-ONLY
-: +LOOP  ' (+LOOP) , ' 0BRANCH , ,          ; IMMEDIATE COMPILE-ONLY
-: I      RP@ @                              ;
-: J      RP@ CELL+ CELL+ @                  ;
-: RECURSE LATEST >CFA ,                     ; IMMEDIATE COMPILE-ONLY
+' BRANCH   CONSTANT BRANCH-XT
+' 0BRANCH  CONSTANT 0BRANCH-XT
+' (DO)     CONSTANT (DO)-XT
+' (LOOP)   CONSTANT (LOOP)-XT
+' (+LOOP)  CONSTANT (+LOOP)-XT
+
+: IF     0BRANCH-XT , HERE 0 ,                 ; IMMEDIATE COMPILE-ONLY
+: ELSE   BRANCH-XT , HERE 0 , SWAP HERE SWAP ! ; IMMEDIATE COMPILE-ONLY
+: THEN   HERE SWAP !                           ; IMMEDIATE COMPILE-ONLY
+: BEGIN  HERE                                  ; IMMEDIATE COMPILE-ONLY
+: UNTIL  0BRANCH-XT , ,                        ; IMMEDIATE COMPILE-ONLY
+: WHILE  0BRANCH-XT , HERE 0 ,                 ; IMMEDIATE COMPILE-ONLY
+: REPEAT BRANCH-XT , SWAP , HERE SWAP !        ; IMMEDIATE COMPILE-ONLY
+: DO     (DO)-XT , HERE                        ; IMMEDIATE COMPILE-ONLY
+: LOOP   (LOOP)-XT , 0BRANCH-XT , ,            ; IMMEDIATE COMPILE-ONLY
+: +LOOP  (+LOOP)-XT , 0BRANCH-XT , ,           ; IMMEDIATE COMPILE-ONLY
+: I      RP@ @                                 ;
+: J      RP@ CELL+ CELL+ @                     ;
+: RECURSE LATEST >CFA ,                        ; IMMEDIATE COMPILE-ONLY
 ```
+
+Why this version works where the inline one doesn't: `0BRANCH-XT` is an
+ordinary, non-`IMMEDIATE` word (a `CONSTANT`), so the token `0BRANCH-XT`
+inside `IF`'s own body compiles as a deferred call into `IF`'s *own*
+Parameter Field — same as any other reference. When `IF` later runs
+(because `IF` itself is `IMMEDIATE`, invoked while compiling some
+caller word `FOO`), that deferred call executes *then*: it pushes
+`0BRANCH`'s xt (a value resolved once, at bootstrap load time), and the
+following `,` — also an ordinary deferred call — consumes it and
+appends it into `FOO`'s body, which is exactly what `HERE` correctly
+refers to at that moment. No token in this version is ever looked up
+by name at `FOO`'s compile time; `'` runs only once per primitive,
+at bootstrap load time, entirely at the top level.
 
 Notes on the less-obvious lines:
 
+- The `…-XT` constants **MUST** be loaded before this block, and
+  `CONSTANT` (§6.6) before them — both have no dependency on this
+  block itself, so either can load any time earlier.
 - `IF`'s placeholder cell (written as `0`, patched later by `ELSE`/
   `THEN`) is left on the *data* stack as `HERE`'s value at the moment
   right after it was compiled — exactly the placeholder-patching
@@ -658,11 +724,14 @@ Notes on the less-obvious lines:
   aligning) — **so `>CFA` MUST be defined before `RECURSE` in the
   bootstrap load order** (§7). `LATEST` correctly points at the
   still-`HIDDEN` word being compiled at the moment `RECURSE` runs
-  (§5.2), so this reaches exactly the right entry.
-- Every line above is marked `COMPILE-ONLY` (§3) — using any of them
-  while interpreting is a compile-time-only construct with no
-  interpret-time meaning, matching how the reference primitive
-  implementations already gate them.
+  (§5.2), so this reaches exactly the right entry. `RECURSE` doesn't
+  use `'`/the `…-XT` constants at all, so it's unaffected by the
+  correction above.
+- Every `: WORDNAME ... ;` line above (not the `…-XT` `CONSTANT` lines,
+  which are ordinary, callable-anywhere words) is marked
+  `COMPILE-ONLY` (§3) — using any of them while interpreting is a
+  compile-time-only construct with no interpret-time meaning, matching
+  how the reference primitive implementations already gate them.
 
 ### 6.6 Defining words — the second flagship reduction
 
@@ -692,9 +761,9 @@ carrying it alongside a now-redundant bootstrap definition.
 
 | Word | Effect | | |
 |---|---|---|---|
-| `S"` | `( "string" -- addr len )`, compile-time inline / interpret-time via scratch text | **KERNEL** | Needs raw multi-token text consumption up to a closing delimiter (§5.3) — genuinely a parsing primitive, not a stack-effect one. |
-| `."` | `( "string" -- )`, prints at compile *and* interpret time | **KERNEL** | Same reason as `S"`; sugar for `S" ... TYPE` at compile time, direct emit at interpret time. |
-| `(` | `( -- )`, comment to matching `)` | **KERNEL** | Same raw-consumption mechanism as `S"`; retained (not discarded) while compiling, as inert compiled data, so a decompiler (`SEE`) can still show it. Does not nest — the first closing `)` always ends it, a documented limitation, not a bug. |
+| `S"` | `( "string" -- addr len )`, compile-time inline / interpret-time via scratch text | **KERNEL, IMMEDIATE** | Needs raw multi-token text consumption up to a closing delimiter (§5.3) — genuinely a parsing primitive, not a stack-effect one. **MUST carry `IMMEDIATE`**, for the same reason `'` must *not* (§6.5's note, §6.10): used inside another colon-definition (`: GREET S" HELLO" TYPE ;`), its text lives only in *that* definition's own source. A deferred (non-`IMMEDIATE`) `S"` would instead run at `GREET`'s own call time and consume text from whatever line calls `GREET` — `IMMEDIATE` is what makes it run at `GREET`'s own compile time instead, where "HELLO" actually is. |
+| `."` | `( "string" -- )`, prints at compile *and* interpret time | **KERNEL, IMMEDIATE** | Same reason as `S"` — sugar for `S" ... TYPE` at compile time, direct emit at interpret time — and needs the same `IMMEDIATE` flag for the same reason. |
+| `(` | `( -- )`, comment to matching `)` | **KERNEL, IMMEDIATE** | Same raw-consumption mechanism as `S"`, and the same reason it must carry `IMMEDIATE`: a `(` comment written inside a colon-definition's own source has to be consumed at that definition's own compile time, not deferred to whenever the definition is later called. Retained (not discarded) while compiling, as inert compiled data, so a decompiler (`SEE`) can still show it. Does not nest — the first closing `)` always ends it, a documented limitation, not a bug. |
 | `(SLIT)` | inline string-literal runtime | **KERNEL** | §4.2's IP-mutating dispatch. |
 | `TYPE` | `( addr len -- )` | BOOTSTRAP | `: TYPE OVER + SWAP DO I C@ EMIT LOOP ;` — sets the loop's index to walk `addr..addr+len` directly (so `I` *is* the current address, no extra offset arithmetic needed). **Caveat**: classic `DO`/`LOOP` semantics execute the body at least once even when `index = limit` at entry — so `len = 0` prints one stray character under this definition. Either guard with `DUP 0= IF 2DROP EXIT THEN` up front, or keep `TYPE` native if that edge case matters more than the kernel-size reduction. |
 | `BL` | the space character, `32` | not even a word — a `CONSTANT` | `32 CONSTANT BL` — this doesn't need a colon-definition at all; it's a bare literal with a name, exactly what `CONSTANT` (§6.6) is for. |
@@ -787,7 +856,7 @@ that would otherwise seem to need one.
 
 | Word | Effect | | Definition (if BOOTSTRAP) |
 |---|---|---|---|
-| `'` | `( "name" -- xt )`, tick — look up a name, push its Code Field address, error if not found | BOOTSTRAP | `: ' WORD FIND 0= IF ." ?" ABORT THEN >CFA ;` — §6.13's addendum. `'` no longer needs its own raw-name-consumption logic once `WORD`/`FIND` exist as independent primitives; it is nothing but their composition plus the error case §6.10 always required. **MUST be loaded after `WORD`, `FIND`, and `>CFA` in the bootstrap sequence** (§6.13, §7.1). |
+| `'` | `( "name" -- xt )`, tick — look up a name, push its Code Field address, error if not found | **KERNEL** | Behaviorally equivalent to `WORD FIND 0= IF ." ?" ABORT THEN >CFA` (§6.13) — but **MUST stay native, not become BOOTSTRAP built from those**, for the opposite reason `WORD`/`FIND` themselves were reduced: it's needed the other way round. §6.5's control-flow layer needs `'` to resolve `BRANCH`/`0BRANCH`/`(DO)`/`(LOOP)`/`(+LOOP)`'s own tokens by name (via a `' WORDNAME CONSTANT WORDNAME-XT` pattern, §6.5) before any Forth-level loop construct exists to compile `FIND`'s own comparison loop with. A BOOTSTRAP `'` built from `FIND` would need control-flow already loaded; control-flow needs `'` already available — a genuine cycle, not a preference. Also **MUST NOT** carry the `IMMEDIATE` flag: `'`'s own top-level, non-immediate behavior is exactly what `SEE`/`HIDE`/`FORGET` (§7.2) depend on to resolve *their own caller's* argument (`SEE FOO`) — see §6.5's note for the full reasoning. |
 | `EXECUTE` | `( xt -- )`, run the word at `xt` | **KERNEL** | Re-enters §4.2's threading loop at an arbitrary address; not expressible as a primitive that doesn't itself touch `ip`. |
 | `STATE` | `( -- addr )`, the `FORTH.STATE` sysvar's own address | **KERNEL** | Direct sysvar-address exposure, same pattern as `HERE-ADDR`/`LATEST-ADDR`/`BASE` (§6.8). The foundation `[`, `]`, and `INTERPRET` itself (§6.13) build on — without it, `STATE`'s interpret/compile distinction is readable only from native code, which is exactly the gap that kept `INTERPRET` from being self-hosted (§2.5). |
 | `LATEST-ADDR` | `( -- addr )`, the `FORTH.LATEST` sysvar's own address | **KERNEL** | Direct sysvar-address exposure. |
@@ -859,12 +928,15 @@ and `INTERPRET` **MUST** exist as ordinary dictionary words realizing
 dictionary presence. `[` and `]` **MUST** exist as the ordinary
 mode-switch words classic Forth systems use to leave and enter
 compilation from within a colon-definition. Together with `:`/`;`/
-`IMMEDIATE` (§5.2, now KERNEL-with-a-real-entry) and `'` (now
-BOOTSTRAP, §6.10), this is the complete self-hosted outer-interpreter
-layer.
+`IMMEDIATE` (§5.2, now KERNEL-with-a-real-entry) and `'` (§6.10 —
+staying KERNEL; see that row for why), this is the complete
+self-hosted outer-interpreter layer.
 
 | Word | Effect | | Definition (if BOOTSTRAP) |
 |---|---|---|---|
+| `:` | `( "name" -- )`, begin a definition | **KERNEL** | See §5.2 for full behavior. Not `IMMEDIATE`; dispatched like any other word found while interpreting. |
+| `;` | `( -- )`, end a definition | **KERNEL, IMMEDIATE** | See §5.2. Must carry `IMMEDIATE` — it is `INTERPRET`'s compiling-mode dispatch rule (§5.4), not spelling, that makes it run instead of compile. |
+| `IMMEDIATE` | `( -- )`, flag `LATEST` immediate | **KERNEL** | See §5.2. Not itself `IMMEDIATE` — always typed and executed directly, never compiled into another definition. |
 | `WORD` | `( char "<chars>ccc<char>" -- addr len )` — skip leading occurrences of `char` (typically the space returned by `BL`), then read characters up to the next occurrence of `char` or end of line, advancing the shared input cursor (§5.3) past what was read | **KERNEL** | Raw-input-parsing access, same basis as `S"`/`(`/`'`'s prior classification (§2.2 rule 3). Returns a view into the live input line — **not** a copy into a scratch buffer, unlike classic fig-Forth's counted-string convention. Callers that need the text to outlive the current line (`CREATE` writing a dictionary header, `S"` compiling inline data) MUST copy it themselves; this specification does not add a scratch-buffer concept solely to preserve a convention nothing here still depends on. |
 | `FIND` | `( addr len -- entry-addr flag )` — chain-walk from `LATEST` (§3) toward `0`, skipping `HIDDEN` entries, comparing each candidate's stored name (already uppercased at definition time, §3) against `addr len` case-insensitively; `flag = 0` if no match, non-zero if found | BOOTSTRAP | Built from `LATEST`, `@`, `C@`, and a per-character comparison loop over `addr len` against each candidate's name bytes (`entry-addr + 5 .. entry-addr + 5 + namelen`, `namelen` read the same way `>CFA` does, §7.2). **This specification fixes the contract and required composition; the exact comparison loop MUST be verified against a working reference implementation before being treated as canonical source**, the same standard §6.1 applies to `2SWAP`/`2OVER`/`ROLL`. Returns `entry-addr`, not `xt` — callers needing `xt` apply `>CFA` themselves; `entry-addr` is what a caller needs to read the flags byte (`entry-addr + 4`) for the `IMMEDIATE`/`COMPILE-ONLY` checks `INTERPRET` performs. |
 | `[` | `( -- )`, switch to interpreting | BOOTSTRAP, `IMMEDIATE` | `: [ 0 STATE ! ; IMMEDIATE` — must be `IMMEDIATE` so it takes effect while compiling, matching `03-SYSVARS.md`'s `FORTH.STATE` encoding for "interpreting" exactly (verify the literal value against `03-SYSVARS.md` §11 rather than assuming `0` here). |
@@ -906,6 +978,21 @@ excludes for anything but the small ASCII range immediately after
 digits and letters. Tightening this is a valid future revision, not a
 blocker to shipping `NUMBER` as specified here.
 
+**A second, related limitation, not previously called out**: a token
+consisting of a lone `-` (a minus sign with no digits at all) strips
+the sign, leaving `len' = 0` — and the `DO`/`LOOP` that follows still
+executes its body once even though `index = limit` at entry, exactly
+the same classic `DO`/`LOOP` quirk `TYPE`'s own row (§6.7) already
+documents. That one iteration reads `C@` one byte past the token's own
+bounds (whatever byte follows it in the input line — a delimiter, or
+the start of the next token) and folds it into `accum` as a bogus
+digit, instead of correctly treating `-` alone as not-a-number. Same
+resolution as `TYPE`'s: guard with a `DUP 0= IF ... THEN` check right
+after the sign-stripping step if this matters for a given target, or
+accept it alongside the digit-validation gap above as a documented
+limitation — worth fixing in the same pass if that gap ever gets
+tightened, not a blocker on its own.
+
 **`INTERPRET`'s required behavior**, stated precisely enough to
 implement and verify independent of any one literal listing:
 
@@ -934,16 +1021,33 @@ implement and verify independent of any one literal listing:
 5. Repeat from step 1 until the line is exhausted (step 1's `len = 0`
    exit).
 
-**Load-order requirement, binding across §5.6, §6.10, and this
-section**: `WORD` and `STATE` have no dependencies within this
-addendum and MAY load in either order relative to each other, but both
-**MUST** precede `FIND`; `FIND` **MUST** precede `'`, `NUMBER`, and
-`INTERPRET`; `[`/`]` **MUST** follow `STATE`; `INTERPRET` **MUST** be
-loaded last of all six. A target's bootstrap file that violates this
-ordering fails to load, the same class of failure §6.5's note on
-`>CFA`-before-`RECURSE` and §7.2's note on `SEE`-before-its-`HIDE`-ing
-already document for this specification's other load-order
-constraints.
+**`INTERPRET` obtains `LIT`'s own xt via a pre-resolved `LIT-XT`
+constant** (`' LIT CONSTANT LIT-XT`, loaded once at bootstrap time,
+before `INTERPRET` itself is defined) — the exact same pattern §6.5
+uses for `BRANCH-XT`/`0BRANCH-XT`/etc., and the one the reference
+bootstrap layer already establishes for exactly this purpose
+(`system.fth`). `INTERPRET` does not call `'` itself at every compile
+step; that would work (`'` is native and always available, §6.10) but
+is needless per-call name resolution for a value that never changes
+after boot.
+
+**Load-order requirement, binding across §5.6, §6.10, §6.5, and this
+section**: `WORD` and `STATE` are KERNEL — always available from boot,
+not part of any load ordering. `'` is also KERNEL (§6.10) and likewise
+always available; it is *not* one of the words this addendum loads.
+What genuinely has to load in order: §6.5's control-flow block (using
+only `'`/`,`/`HERE`/`SWAP`/`!`/`CONSTANT`, all already available)
+**MUST** precede `FIND` (its comparison loop needs a control-flow
+construct to compile with) and `NUMBER` (same, for its `IF`/`DO`/
+`LOOP`); `FIND` **MUST** precede `NUMBER` and `INTERPRET` (both call
+it); the `LIT-XT` constant above **MUST** precede `INTERPRET`; `[`/`]`
+need only `STATE` and MAY load anywhere; `INTERPRET` **MUST** be
+loaded last of all — see §7.2 for how this combines with the rest of
+the bootstrap file's own ordering constraints. A target's bootstrap
+file that violates this ordering fails to load, the same class of
+failure §6.5's note on `>CFA`-before-`RECURSE` and §7.2's note on
+`SEE`-before-its-`HIDE`-ing already document for this specification's
+other load-order constraints.
 
 ---
 
@@ -1006,16 +1110,29 @@ each helper. This is a real load-order constraint on the bootstrap
 file, not an arbitrary style choice — get the order wrong and `SEE`
 fails to compile.
 
-**This table's `'` dependency now bottoms out in §6.13's own ordering
-requirement**, not a native primitive: `'` is BOOTSTRAP as of §6.10's
-revision, itself requiring `WORD` and `FIND` to already be loaded. The
-full bootstrap sequence, combining both sections' constraints, is:
-`WORD`, `STATE` (either order) → `FIND` → `'`, `>CFA` (either order) →
-`XT-NAME`, `WORDS` → `SEE` → `HIDE`, `FORGET`, `VOCABULARY`/`USE` →
-`[`, `]` → `NUMBER` → `INTERPRET` last of all. A target's bootstrap
-loader MUST follow this ordering; it is the union of every per-word
-constraint stated across §6.5, §6.13, and this section, not a new
-requirement invented here.
+**This table's `'` dependency stays a native primitive** (§6.10), not a
+BOOTSTRAP one — precisely so this table's own words (`SEE`/`HIDE`/
+`FORGET`, each of which calls `'` as an ordinary deferred reference
+that resolves *its own caller's* argument, e.g. `SEE FOO` — the
+reference bootstrap layer's actual `SEE` does exactly this,
+`system.fth`) and §6.5's control-flow block (which needs `'` to build
+its `BRANCH-XT`/`0BRANCH-XT`/… constants before any Forth-level loop
+exists to compile `FIND`'s own comparison loop with) can both depend
+on it with no circularity.
+
+The combined bootstrap sequence, folding in every per-word constraint
+stated across §6.5, §6.13, and this section: `>CFA` before §6.5's
+control-flow block (which itself needs its `…-XT` constants built
+first); control-flow before `XT-NAME`/`WORDS`/`SEE`/`HIDE`/`FORGET`/
+`VOCABULARY`/`USE` (all use `BEGIN`/`WHILE`/`IF`/`REPEAT` internally)
+and before `FIND`/`NUMBER` (same reason, for their own loops); `FIND`
+and the `LIT-XT` constant (§6.13) before `INTERPRET`, which **MUST**
+load last of all. `'` itself needs nothing beyond native availability
+and imposes no ordering constraint of its own; `[`/`]` need only
+`STATE` (also native) and may load anywhere in this sequence. A
+target's bootstrap loader MUST satisfy these dependencies — the exact
+interleaving beyond them (e.g. `SEE` relative to `FIND`, since neither
+depends on the other) is not fixed by this document.
 
 ---
 
@@ -1105,7 +1222,9 @@ today:
 | The raw-token input cursor is shared across a whole line, not local to one word's call, and is itself exposed as the KERNEL word `WORD` | §5.3, §6.13 |
 | A mid-compilation error rolls back the half-built entry before the next line runs | §5.5 |
 | `INTERPRET`, `NUMBER`, `FIND`, `[`, `]` are ordinary BOOTSTRAP dictionary words realizing §5.1–§5.4's contract exactly — not engine-internal-only logic | §5.6, §6.13 |
-| The bootstrap sequence follows §7.2's combined ordering (`WORD`/`STATE` → `FIND` → `'`/`>CFA` → `XT-NAME`/`WORDS` → `SEE` → `HIDE`/`FORGET`/`VOCABULARY`/`USE` → `[`/`]` → `NUMBER` → `INTERPRET` last) | §6.5, §6.13, §7.2 |
+| The bootstrap sequence follows §7.2's combined ordering (`>CFA` → control-flow block → `XT-NAME`/`WORDS`/`SEE`/`HIDE`/`FORGET`/`VOCABULARY`/`USE` and `FIND`/`NUMBER` → `LIT-XT` → `INTERPRET` last; `'` native/unordered, `[`/`]` anywhere) | §6.5, §6.13, §7.2 |
+| `'` stays a native KERNEL primitive, never BOOTSTRAP, and never carries `IMMEDIATE` | §6.10, §6.5 |
+| `S"`/`."`/`(` carry the `IMMEDIATE` flag so their raw-consumed text is read from their own containing definition, not a later caller | §5.3, §6.7 |
 | An error raised inside `INTERPRET` unwinds through §4.4's threading mechanism, not a native stack unwind, before §5.5's rollback runs | §5.6, §8 |
 | Every §6 KERNEL-marked word is implemented natively | §6 |
 | Every §6 BOOTSTRAP-marked word, plus §7.2's library words, is defined and loaded before the first interactive prompt | §7.1 |
