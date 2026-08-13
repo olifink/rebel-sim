@@ -3381,3 +3381,28 @@ at the time. Reworded to describe the current, correct reasoning.
 **Tests:** none needed — no behavior changed, comment-only fix. Full
 engine suite still 316 passed, unchanged from M39.
 
+## M41 — `spec/03-SYSVARS.md` conformance pass: fully conformant, no changes — done
+
+Third spec in the `follow-specs` pass. Read `spec/03-SYSVARS.md` in
+full and checked every group base offset and every field's
+group-relative offset (`rebel-opcodes.json`'s `sysvarGroups`, read
+through `sysvars.ts`'s `fieldOffset()`) against the spec's tables.
+Exact match, including the group base offsets themselves (`CORE`=16,
+`SCREEN`=64, `KEYBOARD`=128, `FONT`=192, `SPRITE`=256, `STORAGE`=320,
+`FORTH`=384 — the one place the spec fixes a literal numeric value
+rather than just relative order) and every populated field's offset
+within its group, e.g. `STORAGE`'s `PROJECT-NAME-0`/`PROJECT-NAME-1`
+correctly sitting at offsets 12/16 rather than being repacked to 0/4
+now that `MOUNTED`/`LAST-ERROR`/`DEVICE-SEEN` (offsets 0/4/8) are
+omitted — proof §2's "omitting an optional field must not shift
+another field's offset" rule already holds in practice, not just on
+paper. Field-name uniqueness across the full 22-field table verified
+programmatically (no collisions). `sysvars.ts` was already built this
+way — every field a full 4-byte cell, no packed sub-cell layout, `SV`
+header — this document's layout reads as though it was transcribed
+directly from the already-shipped table rather than the other way
+around.
+
+**No code changes.** Full engine suite still 316 passed, unchanged
+from M40.
+
