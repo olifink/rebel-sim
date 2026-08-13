@@ -1,39 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Machine } from './repl.js';
-
-// FORGET is Forth source (packages/app/public/system.fth), not an engine
-// primitive — inlined here rather than read from disk, same choice
-// words-sufficiency.test.ts made for WORDS, so this test has no file-
-// system dependency and stays in sync only by being updated alongside
-// system.fth's own copy if that definition ever changes.
-const CFA_DEFINITION = ': >CFA DUP 4 + C@ 31 AND SWAP 5 + + 3 + -4 AND ;';
-const FORGET_DEFINITION = `
-: FORGET
-  '
-  >R
-  LATEST
-  BEGIN
-    DUP
-  WHILE
-    DUP >CFA R@ =
-    IF
-      DUP @ LATEST-ADDR !
-      HERE-ADDR !
-      R> DROP
-      EXIT
-    THEN
-    @
-  REPEAT
-  DROP R> DROP
-;
-`;
-
-function boot(): Machine {
-  const m = new Machine();
-  m.interpret(CFA_DEFINITION);
-  m.interpret(FORGET_DEFINITION);
-  return m;
-}
+import { bootMachine as boot } from './test-support.js';
 
 describe('FORGET (DEVELOPING.md §8.6)', () => {
   it('removes the forgotten word from lookup', () => {

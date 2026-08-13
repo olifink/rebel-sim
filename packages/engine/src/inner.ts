@@ -31,10 +31,15 @@
  * - `(SLIT)` (§8): LIT generalized from one cell to a length-prefixed
  *   byte run — pushes (ip, length) as a string's addr/len, then skips
  *   `ip` past the bytes (cell-aligned) instead of past one fixed cell.
- * - `dovarTokenId`/`doconTokenId`/`dodoesTokenId` themselves are Code
- *   Field *sentinels* (same tier as `DOCOL`, checked once at the top of
- *   `executeXT`, never inside the slot loop) — what a `CREATE`d,
- *   `CONSTANT`d, or `DOES>`'d word's own entry actually holds.
+ * - `dovarTokenId`/`dodoesTokenId` themselves are Code Field *sentinels*
+ *   (same tier as `DOCOL`, checked once at the top of `executeXT`, never
+ *   inside the slot loop) — what a `CREATE`d or `DOES>`'d word's own
+ *   entry actually holds. (A third such sentinel, `doconTokenId`, existed
+ *   through M41 for `CONSTANT`'s dedicated dispatch — removed per
+ *   spec/04-FORTH-CORE.md §4.1: `CONSTANT` is fully expressible as
+ *   `CREATE , DOES> @`, `system.fth`, so a fourth Code-Field case bought
+ *   nothing this document's own dispatch/breakpoint/decompile mechanisms
+ *   didn't already have to special-case for `DODOES` anyway.)
  *   `DODOES` threads into compiled code exactly like `DOCOL` (shares
  *   `threadFrom()` below), just starting from a stored does-pointer
  *   instead of `xt + CELL`, and pushing a parameter-field address onto
@@ -70,7 +75,6 @@ import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 const DOCOL = opcodes.docolTokenId;
 const DOVAR_TOKEN = opcodes.dovarTokenId;
-const DOCON_TOKEN = opcodes.doconTokenId;
 const DODOES_TOKEN = opcodes.dodoesTokenId;
 
 const EXIT_TOKEN = opcodes.primitives.find((p) => p.name === 'EXIT')!.id;
@@ -163,11 +167,6 @@ export class Inner {
       this.ctx.stack.push(xt + CELL + CELL);
       return;
     }
-    if (codeField === DOCON_TOKEN) {
-      // CONSTANT — push the value stored in the one parameter cell.
-      this.ctx.stack.push(this.arena.readCell(xt + CELL));
-      return;
-    }
     if (codeField === DODOES_TOKEN) {
       // A CREATE...DOES> word: push the address *past* the leading
       // does-pointer cell (the word's own data, e.g. what `,` stored),
@@ -247,9 +246,6 @@ export class Inner {
       } else if (slotCode === DOVAR_TOKEN) {
         this.ctx.stack.push(slotXt + CELL + CELL); // past the reserved does-pointer cell, see executeXT's DOVAR branch
         yield 'progress';
-      } else if (slotCode === DOCON_TOKEN) {
-        this.ctx.stack.push(this.arena.readCell(slotXt + CELL));
-        yield 'progress';
       } else {
         yield* this.dispatch(slotCode);
       }
@@ -281,7 +277,7 @@ export class Inner {
     }
     if (token === EXECUTE_TOKEN) {
       // Recurse into the same top-level entry point a direct call would
-      // use — DOCOL/DOVAR/DOCON/DODOES dispatch, breakpoints, and nested
+      // use — DOCOL/DOVAR/DODOES dispatch, breakpoints, and nested
       // blocking (KEY/ACCEPT) all fall out of this for free, since
       // executeXT's own threadFrom() pushes/pops its own rstack sentinel
       // regardless of whether it was reached via a compiled call or here.

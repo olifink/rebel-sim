@@ -23,20 +23,13 @@ import { Channel } from './channel.js';
 import { BankTable } from './banks.js';
 import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
-import {
-  compileCell,
-  DictionaryContext,
-  findWord,
-  NAME_LEN_MASK,
-  writeHeader,
-} from './dictionary.js';
+import { compileCell, DictionaryContext, findWord, writeHeader } from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 export const TRUE = -1;
 export const FALSE = 0;
 
 const DOVAR_TOKEN = opcodes.dovarTokenId;
-const DOCON_TOKEN = opcodes.doconTokenId;
 
 export interface PrimitiveContext extends DictionaryContext {
   readonly stack: DataStack;
@@ -69,18 +62,6 @@ export interface PrimitiveContext extends DictionaryContext {
 /** Truncate a JS number to a signed 32-bit Forth cell. */
 function toCell(n: number): number {
   return n | 0;
-}
-
-/** Shared by IF/WHILE/UNTIL (§6): compiles a call to `name` (BRANCH or
- * 0BRANCH) followed by a placeholder cell, returning the placeholder's
- * own address for the caller to push onto the data stack (patched later
- * by ELSE/THEN/REPEAT) or use immediately (UNTIL, a known backward
- * target needs no patching). */
-function compileBranch(ctx: PrimitiveContext, name: string): number {
-  compileCell(ctx, findWord(ctx, name)!.cfa);
-  const placeholderAddr = ctx.sysvars.getHere();
-  compileCell(ctx, 0);
-  return placeholderAddr;
 }
 
 /** Shared by S"/./( (§8, DEVELOPING.md §2.4): consumes input tokens via
@@ -336,76 +317,18 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.push(ctx.rstack.peek(0));
       break;
 
-    // --- §6: control flow. BRANCH/0BRANCH are NOT handled here — they're
+    // --- §6.5: control flow. BRANCH/0BRANCH are NOT handled here — they're
     // ip-mutating and special-cased in inner.ts, same as LIT/EXIT. IF
-    // through RECURSE below are the IMMEDIATE compile-time words that
-    // emit calls to them. ---
-    case 42: // IF ( -- ) IMMEDIATE: pushes a backpatch address for ELSE/THEN
-      s.push(compileBranch(ctx, '0BRANCH'));
-      break;
-    case 43: { // ELSE ( -- ) IMMEDIATE
-      const elsePlaceholder = compileBranch(ctx, 'BRANCH');
-      const ifPlaceholder = s.pop();
-      ctx.arena.writeCell(ifPlaceholder, ctx.sysvars.getHere());
-      s.push(elsePlaceholder);
-      break;
-    }
-    case 44: { // THEN ( -- ) IMMEDIATE
-      const placeholder = s.pop();
-      ctx.arena.writeCell(placeholder, ctx.sysvars.getHere());
-      break;
-    }
-    case 45: // BEGIN ( -- ) IMMEDIATE: pushes a backward-branch target
-      s.push(ctx.sysvars.getHere());
-      break;
-    case 46: { // UNTIL ( -- ) IMMEDIATE
-      const beginAddr = s.pop();
-      compileCell(ctx, findWord(ctx, '0BRANCH')!.cfa);
-      compileCell(ctx, beginAddr);
-      break;
-    }
-    case 47: { // WHILE ( -- ) IMMEDIATE: BEGIN's addr stays underneath for REPEAT
-      const beginAddr = s.pop();
-      const whilePlaceholder = compileBranch(ctx, '0BRANCH');
-      s.push(beginAddr);
-      s.push(whilePlaceholder);
-      break;
-    }
-    case 48: { // REPEAT ( -- ) IMMEDIATE
-      const whilePlaceholder = s.pop();
-      const beginAddr = s.pop();
-      compileCell(ctx, findWord(ctx, 'BRANCH')!.cfa);
-      compileCell(ctx, beginAddr);
-      ctx.arena.writeCell(whilePlaceholder, ctx.sysvars.getHere());
-      break;
-    }
-    case 49: { // RECURSE ( -- ) IMMEDIATE: calls LATEST directly, bypassing the HIDDEN skip
-      const latest = ctx.sysvars.getLatest();
-      const flagsByte = ctx.arena.readByte(latest + 4);
-      const nameLen = flagsByte & NAME_LEN_MASK;
-      compileCell(ctx, alignCell(latest + 5 + nameLen));
-      break;
-    }
+    // through +LOOP, RECURSE, I, J (the entire compile-time control-flow
+    // layer spec/04-FORTH-CORE.md §6.5 calls its "flagship reduction") no
+    // longer have cases here at all as of M42 — system.fth now defines
+    // them in Forth source, built from BRANCH/0BRANCH/(DO)/(LOOP)/(+LOOP)
+    // below, the five primitives that stay genuinely native. ---
 
-    // --- §6: DO/LOOP/+LOOP (compile-time words + their runtime helpers) ---
-    case 50: // DO ( -- ) IMMEDIATE
-      compileCell(ctx, findWord(ctx, '(DO)')!.cfa);
-      s.push(ctx.sysvars.getHere());
-      break;
-    case 51: { // LOOP ( -- ) IMMEDIATE
-      compileCell(ctx, findWord(ctx, '(LOOP)')!.cfa);
-      const doTarget = s.pop();
-      compileCell(ctx, findWord(ctx, '0BRANCH')!.cfa);
-      compileCell(ctx, doTarget);
-      break;
-    }
-    case 52: { // +LOOP ( -- ) IMMEDIATE
-      compileCell(ctx, findWord(ctx, '(+LOOP)')!.cfa);
-      const doTarget = s.pop();
-      compileCell(ctx, findWord(ctx, '0BRANCH')!.cfa);
-      compileCell(ctx, doTarget);
-      break;
-    }
+    // --- §6.5: DO/LOOP/+LOOP's native runtime helpers — the compile-time
+    // words that emit calls to them moved to system.fth (M42); these three
+    // stay native (§6.5: "the only genuinely native control-flow
+    // primitives this specification requires"). ---
     case 53: { // (DO) ( limit index -- ) ( R: -- index limit )
       const index = s.pop();
       const limit = s.pop();
@@ -447,16 +370,13 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       }
       break;
     }
-    case 56: // I ( -- n ) innermost loop index
-      s.push(ctx.rstack.peek(0));
-      break;
-    case 57: // J ( -- n ) next-innermost loop index
-      s.push(ctx.rstack.peek(2));
-      break;
 
-    // --- §7: defining words. DOVAR/DOCON/DODOES dispatch (what runs when
+    // --- §7: defining words. DOVAR/DODOES dispatch (what runs when
     // a *created* word is later executed) lives in inner.ts, not here —
-    // these cases are what runs when the defining words themselves fire. ---
+    // these cases are what runs when the defining words themselves fire.
+    // CONSTANT no longer has a case here at all (spec/04-FORTH-CORE.md
+    // §4.1/§6.6: `: CONSTANT CREATE , DOES> @ ;`, system.fth) — its
+    // former case 64 and the doconTokenId sentinel it used are gone. ---
     case 59: // HERE ( -- addr )
       s.push(ctx.sysvars.getHere());
       break;
@@ -469,25 +389,6 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 62: { // ALLOT ( n -- )
       const n = s.pop();
       ctx.sysvars.setHere(ctx.sysvars.getHere() + n);
-      break;
-    }
-    case 63: { // VARIABLE ( "name" -- )
-      // Every DOVAR-coded word reserves a leading does-pointer cell —
-      // see CREATE's case below for why — so VARIABLE's *actual* storage
-      // is the cell after that, not the first one. Same layout CREATE
-      // gets; VARIABLE is just CREATE plus an initialized data cell,
-      // matching how real Forth systems typically define it.
-      const name = ctx.nextInputToken();
-      writeHeader(ctx, name, 0, DOVAR_TOKEN);
-      compileCell(ctx, 0); // does-pointer slot: inert until/unless DOES> is ever applied
-      compileCell(ctx, 0); // the variable's actual value
-      break;
-    }
-    case 64: { // CONSTANT ( x "name" -- )
-      const value = s.pop();
-      const name = ctx.nextInputToken();
-      writeHeader(ctx, name, 0, DOCON_TOKEN);
-      compileCell(ctx, value);
       break;
     }
     case 65: { // CREATE ( "name" -- )

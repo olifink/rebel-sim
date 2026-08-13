@@ -3406,3 +3406,108 @@ around.
 **No code changes.** Full engine suite still 316 passed, unchanged
 from M40.
 
+## M42 — `spec/04-FORTH-CORE.md` §6 KERNEL→BOOTSTRAP reclassification — done
+
+Fourth spec in the `follow-specs` pass, and the big one: confirmed
+Rebel-Sim *is* the reference implementation `04-FORTH-CORE.md` was
+cross-checked against (it shipped exactly the 133 native primitives §2.1
+cites), and the spec's own "minimum native kernel, not maximum"
+principle reclassifies 59 of those words as BOOTSTRAP — must still
+exist and behave identically, but as ordinary `system.fth` Forth-source
+definitions, not native `primitives.ts` dispatch cases. Scoped
+deliberately to *only* this reclassification, not self-hosting the
+outer interpreter (`:`/`;`/`IMMEDIATE`/`WORD`/`FIND`/`NUMBER`/
+`INTERPRET`, §5.2/§6.13) — that's a genuine rewrite of raw-token
+consumption and the driving loop itself, left for a separate follow-up
+plan.
+
+**Moved to `system.fth`** (dependency-ordered batches — see the
+plan's own reasoning, preserved in git history): `VARIABLE`/`CONSTANT`;
+`>CFA`/`CELLS`/`CELL+` (relocated/promoted early since later batches
+need them); the entire control-flow compiler (`IF`/`ELSE`/`THEN`/
+`BEGIN`/`UNTIL`/`WHILE`/`REPEAT`/`DO`/`LOOP`/`+LOOP`/`RECURSE`/`I`/`J`),
+built from five native primitives that stay KERNEL (`BRANCH`/`0BRANCH`/
+`(DO)`/`(LOOP)`/`(+LOOP)`) via the spec's own `'`-resolved-once
+`…-XT CONSTANT` pattern; `OVER`/`ROT`/`-ROT`/`2DUP`/`2DROP`/`2SWAP`/
+`2OVER`/`NIP`/`TUCK`/`DEPTH`/`PICK`/`/MOD`/`<>`/`0<`/`0>`/`1+`/`1-`/
+`2+`/`2-`/`2*`/`NEGATE`/`MIN`/`MAX`/`WITHIN`/`+!`/`BL`/`SPACE`/`HEX`/
+`DECIMAL`/`WARM`; `?DUP`/`ABS`/`FILL`/`CMOVE`/`TYPE`/`.S`. Stayed
+native exactly where the spec says to, not by omission: `ROLL` (spec
+explicitly permits deferring its bootstrap derivation), `XOR`/`U<`/`2/`
+(spec keeps these KERNEL despite being derivable — rule 4), `.`
+(bigger pictured-numeric-output refactor, out of scope), `S"`/`."`/`(`
+(raw-parsing, must stay KERNEL+IMMEDIATE).
+
+**`DOCON` removed entirely** — `CONSTANT` no longer uses a dedicated
+fourth Code-Field sentinel; it's `CREATE , DOES> @` now, threading
+through `DODOES` like any other `DOES>`'d word. Deleted from
+`rebel-opcodes.json`, `inner.ts` (`executeXT`/`threadFrom` branches),
+and `primitives.ts` outright — spec's default design has no `DOCON` at
+all (§4.1: a target *may* keep one as a perf optimization, but nothing
+here needed that). One genuine, expected side effect: a `CONSTANT`-made
+word is now *breakable* (`setBreakpoint`) where it wasn't before, since
+it has a real compiled body under `DODOES` — no test relied on the old
+"not breakable" behavior, and this matches how every other `DOES>`'d
+word already behaves, so it's a correction, not a regression.
+
+**New: `COMPILE-ONLY` bootstrap-marking.** Moving the 11
+`IMMEDIATE COMPILE-ONLY` control-flow words to Forth source needed a
+way to set `FLAG_COMPILE_ONLY` from Forth itself — nothing could
+before. Added the same way `IMMEDIATE` already works: a second
+special-cased outer-loop keyword (`repl.ts`'s `interpretExecuting`)
+calling a new `dictionary.ts` function, `markLatestCompileOnly`, a
+straight copy of `markLatestImmediate` OR-ing the other flag bit.
+Deliberately *not* a new native primitive/dictionary word — that would
+front-run the outer-interpreter self-hosting this phase isn't doing.
+
+**A real bug found and fixed, not just a spec-compliance question**:
+`I`/`J`'s first draft (`RP@ @` / `RP@ CELL+ CELL+ @`) reproduced the
+classic Forth idiom verbatim, but broke — every DO-loop test failed
+with the same garbage value repeated every iteration. Root cause: `I`/
+`J` used to be *primitives*, dispatched with no return-stack frame of
+their own; now they're ordinary colon-definitions, so *calling* them
+pushes their own return address onto the exact same return stack they
+`RP@` into, one cell above the loop-control cells `(DO)` pushed. Fixed
+by skipping that frame explicitly: `: I RP@ CELL+ @ ;` / `: J RP@
+CELL+ CELL+ CELL+ @ ;`. A good concrete instance of §2.3's "BOOTSTRAP
+is a floor, not a ceiling" cutting both ways — a hand-derived
+Forth-source definition needs the same verification rigor as native
+code, not less, and the existing DO-loop/nested-loop/+LOOP test
+coverage caught this immediately rather than shipping silently broken.
+
+**`system.fth`'s own comment style bit back once, too**: the file's
+header explicitly warns comments don't nest (first `)` always closes),
+and four of the new comment lines violated that rule while describing
+parenthesized asides — caught by the same "unrecognized word" failure
+class, fixed by rephrasing without embedded parens.
+
+**Engine-test infrastructure gap**: `packages/engine`'s own tests
+construct a bare `Machine` with no bootstrap loaded — previously fine
+since everything was native, now insufficient for any test touching a
+BOOTSTRAP word. New `test-support.ts` (test-only, excluded from the
+production `tsconfig.json` build — it needs Node's `fs`, which the
+engine's actual shipped code deliberately never depends on) reads
+`system.fth` straight off disk and exposes `bootMachine()`/
+`loadSystemVocabulary()`, the same load `app.ts`'s own
+`loadSystemVocabulary()` performs via `fetch()`. Wired into every test
+file that broke (`control-flow`/`do-loop`/`defining-words`/`debug`/
+`execute`/`forget`/`words-sufficiency`.test.ts). `forget.test.ts` and
+`words-sufficiency.test.ts` had each hand-duplicated a mini bootstrap
+(their own comments already flagged the sync-drift risk) — replaced
+with the real `system.fth` load rather than patched in place.
+`words-sufficiency.test.ts` also lost its original premise: it used to
+prove a *bare* kernel was self-sufficient enough to define `WORDS`
+from scratch, which is no longer true by design now that `WORDS`
+depends on now-BOOTSTRAP `BEGIN`/`WHILE`/`REPEAT` — adapted to test
+`WORDS`'s observable behavior against the real, already-loaded
+`system.fth` copy instead of a hand-typed duplicate, same assertions
+otherwise.
+
+**Tests:** no new test cases — this phase changes *where* behavior
+lives, not what it is, so the existing suite (unmodified assertions,
+mostly rewired to `bootMachine()`) is the actual proof. Engine suite:
+315 passed (316 before — net one fewer, `words-sufficiency.test.ts`
+dropping the now-inapplicable "bare kernel can compile WORDS from
+scratch" test case, not a coverage loss elsewhere). App suite unaffected: 20 passed. Both packages
+typecheck; `system.fth` verified paren-clean via a small standalone
+script before the final run, not just by trial and error.

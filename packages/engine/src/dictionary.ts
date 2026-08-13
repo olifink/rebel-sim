@@ -228,6 +228,20 @@ export function markLatestImmediate(ctx: DictionaryContext): void {
   ctx.arena.writeByte(flagsAddr, ctx.arena.readByte(flagsAddr) | FLAG_IMMEDIATE);
 }
 
+/** spec/04-FORTH-CORE.md §3/§6.5: bootstrap-Forth-source counterpart to
+ * markLatestImmediate above — lets a `system.fth` definition (the
+ * control-flow compiler words, §6.5) set FLAG_COMPILE_ONLY on itself the
+ * same way `; IMMEDIATE` already does for FLAG_IMMEDIATE, since nothing
+ * else at the Forth level can reach this bit. */
+export function markLatestCompileOnly(ctx: DictionaryContext): void {
+  const addr = ctx.sysvars.getLatest();
+  if (addr === 0) {
+    throw new Error('COMPILE-ONLY: no word has been defined yet');
+  }
+  const flagsAddr = addr + 4;
+  ctx.arena.writeByte(flagsAddr, ctx.arena.readByte(flagsAddr) | FLAG_COMPILE_ONLY);
+}
+
 function clearLatestHidden(ctx: DictionaryContext): void {
   const addr = ctx.sysvars.getLatest();
   const flagsAddr = addr + 4;

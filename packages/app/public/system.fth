@@ -8,6 +8,134 @@
 ( closing paren always ends a comment, so never write an embedded )
 ( closing paren inside comment text, even a decorative one. )
 
+( ---------------------------------------------------------------- )
+( spec/04-FORTH-CORE.md section 6 bootstrap layer (M42): every word )
+( below was a native primitives.ts dispatch case through M41 -- )
+( moved here per the spec's own KERNEL/BOOTSTRAP classification: a )
+( word stays native only if it mutates the inner interpreter's IP, )
+( needs raw-token/compiler-state access no stack-effect primitive )
+( exposes, or is a true minimal orthogonal basis nothing smaller )
+( derives it from. Everything else belongs here instead, so its )
+( correctness contract is a portable Forth-source definition every )
+( target can share, not per-target native code to reimplement and )
+( re-verify from scratch. Order below follows real dependencies -- )
+( see PLAN.md's M42 entry for the full batch-by-batch reasoning; a )
+( forward reference here fails loudly at load time, not silently. )
+
+( Batch 1 -- defining words. CREATE/DOES>/,/@ all stay native )
+( (section 6.6): the true irreducible basis these two build on. )
+( CONSTANT no longer uses a dedicated DOCON Code-Field sentinel -- )
+( removed from the engine entirely, M42 -- executing a CONSTANT )
+( now threads through DODOES exactly like any other DOES>'d word, )
+( at the cost of one extra step per read versus a dedicated )
+( sentinel, which section 4.1 judges well worth a smaller kernel. )
+: VARIABLE CREATE 0 , ;
+: CONSTANT CREATE , DOES> @ ;
+
+( Batch 2 -- small zero-dependency words needed by later batches. )
+( >CFA relocated here from further down -- was defined next to WORDS )
+( since section 6.5's RECURSE, below, needs it too -- same )
+( header-layout math WORDS itself walks: the flags byte's low five )
+( bits are the name length, the Code Field sits right after the )
+( name, cell-aligned. CELLS/CELL+ relocated similarly since J, )
+( below, needs CELL+ before section 6's own Batch 4 grouping would )
+( otherwise define it. )
+: >CFA DUP 4 + C@ 31 AND SWAP 5 + + 3 + -4 AND ;
+: CELLS 4 * ;
+: CELL+ 4 + ;
+
+( Batch 3 -- the control-flow compiler, section 6.5's flagship )
+( reduction: BRANCH, 0BRANCH, and the DO/LOOP/+LOOP runtime helpers )
+( below are the only genuinely native control-flow primitives left; )
+( every compile-time control-flow word a Forth programmer actually )
+( types is fully expressible in terms of them. Each native word a )
+( control-flow word needs to compile a call to is resolved once, )
+( here, at the top level, into a named CONSTANT -- not looked up by )
+( name inside each IMMEDIATE word's own body, which would need ' to )
+( be IMMEDIATE itself and break SEE/HIDE/FORGET's own use of ' as a )
+( deferred reference resolving their own caller's argument. )
+' BRANCH   CONSTANT BRANCH-XT
+' 0BRANCH  CONSTANT 0BRANCH-XT
+' (DO)     CONSTANT (DO)-XT
+' (LOOP)   CONSTANT (LOOP)-XT
+' (+LOOP)  CONSTANT (+LOOP)-XT
+
+: IF     0BRANCH-XT , HERE 0 ,                 ; IMMEDIATE COMPILE-ONLY
+: ELSE   BRANCH-XT , HERE 0 , SWAP HERE SWAP ! ; IMMEDIATE COMPILE-ONLY
+: THEN   HERE SWAP !                           ; IMMEDIATE COMPILE-ONLY
+: BEGIN  HERE                                  ; IMMEDIATE COMPILE-ONLY
+: UNTIL  0BRANCH-XT , ,                        ; IMMEDIATE COMPILE-ONLY
+: WHILE  0BRANCH-XT , HERE 0 ,                 ; IMMEDIATE COMPILE-ONLY
+: REPEAT BRANCH-XT , SWAP , HERE SWAP !        ; IMMEDIATE COMPILE-ONLY
+: DO     (DO)-XT , HERE                        ; IMMEDIATE COMPILE-ONLY
+: LOOP   (LOOP)-XT , 0BRANCH-XT , ,            ; IMMEDIATE COMPILE-ONLY
+: +LOOP  (+LOOP)-XT , 0BRANCH-XT , ,           ; IMMEDIATE COMPILE-ONLY
+( I/J call RP@ from inside their own colon-definition body -- unlike )
+( the primitive I/J this replaces, calling I/J at all pushes one more )
+( return address onto RSTK first (DOCOL's own entry, threadFrom), so )
+( the loop-control cells sit one cell deeper than a top-level RP@ )
+( would suggest -- the extra CELL+ skips I/J's own return address. )
+: I      RP@ CELL+ @                           ;
+: J      RP@ CELL+ CELL+ CELL+ @               ;
+: RECURSE LATEST >CFA ,                        ; IMMEDIATE COMPILE-ONLY
+
+( Batch 4 -- words with no control-flow dependency of their own. )
+: OVER >R DUP R> SWAP ;
+: ROT >R SWAP R> SWAP ;
+: -ROT ROT ROT ;
+: 2DUP OVER OVER ;
+: 2DROP DROP DROP ;
+: NIP SWAP DROP ;
+: TUCK SWAP OVER ;
+: 2SWAP ROT >R ROT R> ;
+: DEPTH SP0 SP@ - 4 / ;
+: PICK CELLS SP@ + @ ;
+( 2OVER: same "the stack is memory" technique PICK itself uses -- )
+( 3 PICK reaches the deeper of the two cells 2OVER needs to copy, )
+( twice, once the first copy has shifted everything up by one. )
+: 2OVER 3 PICK 3 PICK ;
+: /MOD 2DUP MOD -ROT / ;
+: <> = INVERT ;
+: 0< 0 < ;
+: 0> 0 > ;
+: 1+ 1 + ;
+: 1- 1 - ;
+: 2+ 2 + ;
+: 2- 2 - ;
+: 2* DUP + ;
+: NEGATE 0 SWAP - ;
+: MIN 2DUP > IF SWAP THEN DROP ;
+: MAX 2DUP < IF SWAP THEN DROP ;
+: WITHIN OVER - >R - R> U< ;
+: +! DUP @ ROT + SWAP ! ;
+32 CONSTANT BL
+: SPACE BL EMIT ;
+: HEX 16 BASE ! ;
+: DECIMAL 10 BASE ! ;
+: WARM SP0 SP! RP0 RP! ;
+
+( Batch 5 -- needs Batch 3/4 already loaded. )
+: ?DUP DUP IF DUP THEN ;
+: ABS DUP 0< IF NEGATE THEN ;
+( FILL/CMOVE: char/addr2 parked on the data stack underneath the )
+( DO loop's own return-stack-resident index/limit, not the return )
+( stack itself -- DO/LOOP never touch the data stack, so whatever )
+( sits there when DO runs is exactly what the loop body sees on )
+( every iteration, undisturbed. )
+: FILL ( addr len char -- ) -ROT OVER + SWAP DO DUP I C! LOOP DROP ;
+: CMOVE ( addr1 addr2 len -- ) 0 DO 2DUP SWAP I + C@ SWAP I + C! LOOP 2DROP ;
+( TYPE: classic DO/LOOP still runs its body once even when )
+( index = limit at entry -- guarded so a zero-length TYPE stays a )
+( true no-op, matching the native behavior this replaces exactly. )
+: TYPE ( addr len -- ) DUP 0= IF 2DROP EXIT THEN OVER + SWAP DO I C@ EMIT LOOP ;
+( .S: reuses the still-native . for formatting, so its output is )
+( guaranteed identical by construction rather than by re-deriving )
+( digit formatting a second time. Bottom-to-top, matching the )
+( print order this replaces. )
+: .S DEPTH 0 DO DEPTH 1- I - PICK . LOOP ;
+
+( ---------------------------------------------------------------- )
+
 ( WORDS -- lists every defined word name, most-recently-defined )
 ( first. CORE-VOCABULARY.md section 12's own worked example, )
 ( ported in verbatim, with one real fix: that doc writes 1F AND, )
@@ -30,17 +158,13 @@
 ( SEE support, DEVELOPING.md section 3: decompiling a definition. )
 ( CORE-VOCABULARY.md section 12 itself flagged SEE as the natural )
 ( next step once WORDS proved the chain-walk mechanics work -- )
-( that precondition was met back in M8. >CFA/XT-NAME/the -XT )
-( constants below are pure internal plumbing for SEE -- HIDden )
-( further down, once nothing later still needs to find them by )
-( name during its own compilation (SEE itself does, right up )
+( that precondition was met back in M8. >CFA -- moved up into the )
+( bootstrap block above (M42), since RECURSE needs it too -- and )
+( XT-NAME/the -XT constants below are pure internal plumbing for SEE, )
+( HIDden further down, once nothing later still needs to find them )
+( by name during its own compilation (SEE itself does, right up )
 ( until its own closing semicolon, so hiding has to wait until )
 ( after that, not happen inline right after each one). )
-
-( >CFA entry-addr -- cfa: same header-layout math WORDS already )
-( walks -- flags-byte low five bits are the name length, the )
-( Code Field sits right after the name, cell-aligned. )
-: >CFA DUP 4 + C@ 31 AND SWAP 5 + + 3 + -4 AND ;
 
 ( XT-NAME xt -- : reverse of what WORDS does -- given a code )
 ( field address, print the dictionary entry whose own >CFA )

@@ -50,6 +50,7 @@ import {
   FLAG_COMPILE_ONLY,
   FLAG_IMMEDIATE,
   listDictionaryEntries,
+  markLatestCompileOnly,
   markLatestImmediate,
   writeHeader,
 } from './dictionary.js';
@@ -529,6 +530,15 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
     if (upper === 'IMMEDIATE') {
       markLatestImmediate(this);
+      yield 'progress';
+      return;
+    }
+    // spec/04-FORTH-CORE.md §6.5: bootstrap-Forth-source counterpart to
+    // IMMEDIATE above — the only way `system.fth`'s own control-flow
+    // words can set FLAG_COMPILE_ONLY on themselves, since nothing else
+    // at the Forth level can reach that bit.
+    if (upper === 'COMPILE-ONLY') {
+      markLatestCompileOnly(this);
       yield 'progress';
       return;
     }
