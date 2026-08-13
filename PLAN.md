@@ -3347,3 +3347,37 @@ that actually varies per host the way Screen/Storage/Timing do.
 App suite unaffected — no `app.html` change, `app.ts` only gained one
 new constructor option value.
 
+## M40 — `spec/02-MEMORY-MODEL.md` conformance pass: already conformant — done
+
+Second spec in the `follow-specs` pass. Read `spec/02-MEMORY-MODEL.md`
+in full and compared it, subsystem by subsystem, against `arena.ts`/
+`banks.ts`/`mmap.ts`. Result: **already fully conformant, no behavior
+change needed.** Cell semantics (32-bit, little-endian, `alignCell`),
+the bank descriptor shape (24-byte slots: `tag`(4)+`name`(8)+`base`/
+`size`/`flags`(1 cell each)), the flag bit assignments, the six size
+classes, the 4 KiB-aligned bump allocator, `MMAP`'s own header/slot
+layout, and the shared auto-naming counter (`mmap.nextBankSerial()`,
+drawn from identically by both host-side bank creation and the
+`CREATE-BANK` primitive) all match the spec exactly — including the
+worked example in §5.4: the engine's actual boot-time bank sequence
+(`MMAP`, `SYSV`, `DSTK`, `RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`)
+reproduces that table's bases and sizes precisely. `EXTERNAL`-flagged
+banks (e.g. a Forth-addressable `SCRN`) remain unimplemented, but
+that's spec-conformant by §4.5's own explicit carve-out: nothing in
+Rebel-Sim ever addresses the framebuffer via `@`/`!`, only through the
+Screen HAL, so omitting a bank-table entry for it is allowed, not a
+gap. Multi-arena isolation (§6) doesn't exist yet either, but nothing
+in §8's conformance checklist requires more than one arena — correctly
+out of scope per the same "not building ahead of a concrete need"
+discipline as everywhere else in this codebase.
+
+One stale comment found and fixed: `banks.ts`'s `createBank()` docstring
+still described the *pre-M34* rule ("`MMAP` itself is the one caller
+that legitimately needs an exact, non-class size") — `mmap.ts` was
+already updated for §5.3's revision (M34, `MMAP_SIZE` is a fixed,
+asserted-correct XS-class constant) but this docstring wasn't touched
+at the time. Reworded to describe the current, correct reasoning.
+
+**Tests:** none needed — no behavior changed, comment-only fix. Full
+engine suite still 316 passed, unchanged from M39.
+

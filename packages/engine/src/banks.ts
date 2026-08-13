@@ -105,10 +105,13 @@ export class BankTable {
    * for every caller (host-side creation here, and the Forth-level
    * `CREATE-BANK` primitive, which routes through this same method —
    * §4.3 names both explicitly: "this rule applies uniformly to every
-   * source of a bank-size request"). `MMAP` itself is the one caller
-   * that legitimately needs an exact, non-class size (§5.3) — it's
-   * never created through this method, only via `mmap.allocate()`
-   * directly (`BankTable`'s own constructor). */
+   * source of a bank-size request"). `MMAP` itself is never created
+   * through this method — only via `mmap.allocate()` directly
+   * (`BankTable`'s own constructor) — but not because it's exempt from
+   * size-class rounding: §5.3 (M34) closed that old exemption, so
+   * `MMAP_SIZE` (mmap.ts) is itself already a fixed, asserted-correct
+   * XS-class constant, computed the same way this method would round
+   * it if it went through here. */
   createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {
     const roundedSize = roundToSizeClass(size);
     if (roundedSize === undefined) {
