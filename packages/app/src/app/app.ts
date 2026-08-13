@@ -15,6 +15,7 @@ import type { Bank, DictionaryEntry, StepStatus, SysvarEntry } from '@rebel-sim/
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
+import { PERFORMANCE_TIMING_HAL } from './performance-timing-hal.js';
 import { computePresentationSize } from './canvas-presenter.js';
 import { buildZip } from './zip-writer.js';
 
@@ -203,6 +204,7 @@ export class App implements AfterViewInit, OnDestroy {
     this.machine = new Machine({
       screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
       storageHal,
+      timingHal: PERFORMANCE_TIMING_HAL,
       remoteChannel: this.remoteChannel,
     });
     // Zone-wrapped (unlike the original inline ngAfterViewInit code) since

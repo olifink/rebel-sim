@@ -38,6 +38,7 @@ import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
 import { Storage, StorageHal } from './storage.js';
+import { NULL_TIMING_HAL, TimingHal } from './timing.js';
 import { Inner, StepSignal } from './inner.js';
 import {
   abortDefinition,
@@ -109,6 +110,11 @@ export interface MachineOptions {
    * `CompositeChannel([KeyboardChannel, remoteChannel])` so a human at
    * the keyboard and a remote/agent caller share the same session. */
   remoteChannel?: RemoteChannel;
+  /** Host-supplied monotonic clock (spec/01-HAL.md §7) — `performance.now()`
+   * in the browser. Defaults to a fixed no-op clock: nothing in the engine
+   * reads elapsed time yet, so this only establishes the HAL contract for
+   * a future consumer (e.g. a `DELAY` word) to build against. */
+  timingHal?: TimingHal;
 }
 
 /** `step()`'s return: `'idle'` — no session in flight, nothing to do.
@@ -142,6 +148,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly keyboard: Keyboard;
   readonly storage: Storage;
   readonly channel: Channel;
+  readonly timingHal: TimingHal;
   private readonly inner: Inner;
   // M31 (spec/02-MEMORY-MODEL.md §4.6): TIB and PAD share one WORK
   // bank, at fixed sub-offsets, rather than each independently
@@ -223,6 +230,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
             : new KeyboardChannel(this.keyboard));
 
     this.storage = new Storage(this.arena, this.banks, options.storageHal);
+    this.timingHal = options.timingHal ?? NULL_TIMING_HAL;
 
     this.stack = new DataStack(this.arena, dstkBank, this.sysvars, 'SP0', 'SP');
     this.rstack = new DataStack(this.arena, rstkBank, this.sysvars, 'RP0', 'RP');
@@ -455,7 +463,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         this.stack.clear();
         this.rstack.clear();
         const message = err instanceof Error ? err.message : String(err);
-        this.emitString(`? ${message}`);
+        this.reportError(message);
       }
       // The trailing CR belongs to the status text (`ok`/`? ...`), not
       // to the next prompt — matches real Forth's `ok\n`, printed once
@@ -469,6 +477,19 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     for (const ch of s) {
       this.screen.emit(ch.charCodeAt(0));
     }
+  }
+
+  /** This target's realization of `hal_report_error` (spec/01-HAL.md
+   * §8.1) — the sink an uncaught error/ABORT path reports through on its
+   * way back to a clean prompt. Rebel-Sim's only reporting surface is the
+   * screen (no serial/UART concept in a browser), so unlike Screen/
+   * Storage/Timing this is a plain internal method, not a host-injectable
+   * HAL: there is exactly one real implementation on this target, nothing
+   * varies per host. Safe to call from a partially-failed interpreter
+   * state and reentrantly — it only ever calls `screen.emit()`, already
+   * true of `emitString()` above with no additional state of its own. */
+  private reportError(message: string): void {
+    this.emitString(`? ${message}`);
   }
 
   private *runLine(line: string): Generator<StepSignal, void, void> {

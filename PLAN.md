@@ -3299,3 +3299,51 @@ WebMCP `type` tool updates the `BASE` row from `10` to `16` and
 its JSON note as the tooltip (`element.title` read directly). Full
 engine suite: 314 passed (311 before, 3 new). App suite: 20 passed (19
 before, 1 new).
+
+## M39 — `spec/01-HAL.md` conformance pass: Timing HAL + named error reporting — done
+
+First milestone of a new spec-by-spec conformance pass against
+`spec/*.md` (the new v1.0, implementation-independent specification
+suite that supersedes `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`/`HAL.md`
+as the authoritative cross-target contract) — started on the
+`follow-specs` branch. `spec/01-HAL.md` was read in full and compared
+subsystem-by-subsystem against `screen.ts`/`keyboard.ts`/`channel.ts`/
+`storage.ts`/`sysvars.ts`. Screen, Keyboard, Channel, and Storage were
+already fully conformant (`storage.ts`'s own comments already cite
+`spec/01-HAL.md §6.3`/`§6.3.1` directly) — only two real gaps against
+§7 (Timing) and §8 (Error Reporting).
+
+**Timing (§7):** `hal_millis()` didn't exist anywhere in the engine.
+New `timing.ts` exports a `TimingHal` interface (`millis(): number`)
+and `NULL_TIMING_HAL` (a fixed clock, matching `NULL_SCREEN_HAL`/
+`NULL_STORAGE_HAL`'s "correct enough for tests that don't exercise the
+subsystem" shape), wired into `Machine`/`MachineOptions` the same way
+as `screenHal`/`storageHal`. `packages/app` supplies a real
+`performance.now()`-backed implementation (`performance-timing-hal.ts`)
+— `performance.now()` over `Date.now()` specifically because the spec
+requires monotonicity for a session's lifetime and only the former
+holds that under a wall-clock adjustment. Deliberately **plumbing
+only**: no Forth-visible word was added, since nothing in the
+vocabulary needs elapsed time yet and the spec itself only requires the
+HAL surface to exist, not a `DELAY`-style word built on top of it — "a
+target building one does so [later], not by adding a second HAL
+primitive for it." Matches the same deferral discipline already used
+for `hal_draw_pixel` (M3) and per-write dirty tracking (`storage.ts`).
+
+**Error Reporting (§8):** the uncaught-error path (`startRepl`'s catch
+block in `repl.ts`) already behaviorally satisfied `hal_report_error` —
+writes a human-readable message to the screen, safe mid-failure, safe
+reentrantly — just inlined at the one catch site rather than named.
+Extracted into a `reportError(message)` private method with a comment
+tying it to spec/01-HAL.md §8.1, deliberately kept as a plain internal
+method rather than a new injectable HAL surface: Rebel-Sim's only
+reporting surface is the screen (no serial/UART concept in a browser),
+so there's exactly one real implementation on this target, nothing
+that actually varies per host the way Screen/Storage/Timing do.
+
+**Tests:** `timing.test.ts` (2 new cases) — `Machine` defaults to
+`NULL_TIMING_HAL`, and stores/uses a host-supplied `TimingHal` from
+`MachineOptions`. Full engine suite: 316 passed (314 before, 2 new).
+App suite unaffected — no `app.html` change, `app.ts` only gained one
+new constructor option value.
+

@@ -30,6 +30,8 @@ export { KeyboardChannel, RemoteChannel, CompositeChannel } from './channel.js';
 export type { Channel } from './channel.js';
 export { Storage, NULL_STORAGE_HAL, runStorageSelfTest } from './storage.js';
 export type { StorageHal } from './storage.js';
+export { NULL_TIMING_HAL } from './timing.js';
+export type { TimingHal } from './timing.js';
 export { Machine } from './repl.js';
 export type { MachineOptions, StepStatus } from './repl.js';
 export { listDictionaryEntries, getPrimitiveNote } from './dictionary.js';
