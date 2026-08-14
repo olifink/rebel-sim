@@ -3,7 +3,7 @@ import { Machine } from './repl.js';
 import { findWord } from './dictionary.js';
 import { CELL_SIZE } from './arena.js';
 
-describe('Comments (DEVELOPING.md §2, M11)', () => {
+describe('Comments (DEVELOPING.md §2, M11; discard reverted M44)', () => {
   it('a comment inside a definition has zero runtime stack effect', () => {
     const m = new Machine();
     m.interpret(': FIVE ( push five ) 5 ;');
@@ -11,20 +11,21 @@ describe('Comments (DEVELOPING.md §2, M11)', () => {
     expect(m.stack.toArray()).toEqual([5]);
   });
 
-  it('retains a comment as compiled inline data — verified by reading the compiled bytes directly, not just that it runs harmlessly', () => {
+  it('discards a comment rather than compiling it as inline data — verified by reading the compiled bytes directly, not just that it runs harmlessly', () => {
+    // M11 originally compiled this as (SLIT)+2DROP so SEE could echo the
+    // comment back; reverted (M44) since SEE printed it indistinguishably
+    // from a genuine discarded string, never as ( ... ) syntax. FOO's body
+    // should now be exactly LIT 5 EXIT — no (SLIT)/2DROP cells between the
+    // Code Field and the literal at all.
     const m = new Machine();
     m.interpret(': FOO ( a note ) 5 ;');
     const entry = findWord(m, 'FOO')!;
-    const slitCfa = m.arena.readCell(entry.cfa + CELL_SIZE);
-    expect(slitCfa).toBe(findWord(m, '(SLIT)')!.cfa);
-    const len = m.arena.readCell(entry.cfa + CELL_SIZE * 2);
-    expect(len).toBe('a note'.length);
-    const textStart = entry.cfa + CELL_SIZE * 3;
-    let text = '';
-    for (let i = 0; i < len; i++) {
-      text += String.fromCharCode(m.arena.readByte(textStart + i));
-    }
-    expect(text).toBe('a note');
+    const litCfa = m.arena.readCell(entry.cfa + CELL_SIZE);
+    expect(litCfa).toBe(findWord(m, 'LIT')!.cfa);
+    const value = m.arena.readCell(entry.cfa + CELL_SIZE * 2);
+    expect(value).toBe(5);
+    const exitCfa = m.arena.readCell(entry.cfa + CELL_SIZE * 3);
+    expect(exitCfa).toBe(findWord(m, 'EXIT')!.cfa);
   });
 
   it('a multi-word comment (spaces preserved via token-rejoin) parses and stores correctly', () => {

@@ -608,22 +608,23 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     until its real source is read for this specifically; not assumed to
     already have an answer.
 13. **[NEW]** Comment storage encoding (`DEVELOPING.md` §2.3-§2.4) —
-    **decided and shipped for Rebel-Sim, M11**: reuse `S"`'s existing
-    `(SLIT)` compile mechanism plus a trailing `2DROP`, via a new
-    `IMMEDIATE` primitive `(` (token 93) — not a dedicated `(COMMENT)`
-    token, since that plus the header's already-fully-packed flags byte
-    both point at "grow the primitive table by one ordinary entry," not
-    "add a new cross-target opcode." Reversible: a decompiler can't
-    unambiguously tell "this is a comment" from "this program discards
-    a string for its own reasons" by pattern alone, so a dedicated
-    token remains the fallback if `SEE` (`DEVELOPING.md` §3) output
-    ever proves genuinely ambiguous in practice — same
-    canonical-source-of-truth treatment (§0) any new token id needs, if
-    it comes to that. **Confirmed, not just predicted, M12**: `SEE`
-    (shipped) on a word containing a comment shows
-    `"comment text" 2DROP`, not `( comment text )` — the predicted
-    ambiguity is real and now directly observable, though not yet
-    judged worth the dedicated-token fallback.
+    **decided and shipped for Rebel-Sim, M11; reverted, M44**: originally
+    reused `S"`'s existing `(SLIT)` compile mechanism plus a trailing
+    `2DROP`, via a new `IMMEDIATE` primitive `(` (token 93) — not a
+    dedicated `(COMMENT)` token, since that plus the header's
+    already-fully-packed flags byte both point at "grow the primitive
+    table by one ordinary entry," not "add a new cross-target opcode."
+    **Confirmed, not just predicted, M12**: `SEE` (shipped) on a word
+    containing a comment showed `"comment text" 2DROP`, not
+    `( comment text )` — the predicted ambiguity was real and directly
+    observable. **M44**: judged not worth keeping after all — the whole
+    point of retaining the text was so `SEE` could show it back to a
+    reader, and it never actually did that; it just showed confusing,
+    decompiled-looking noise instead. Reverted to classic Forth
+    behavior: `(` consumes and discards its text unconditionally,
+    compiling or not, the same as `\` would if this suite ever adds one.
+    No dedicated `(COMMENT)` token was ever built — this closes the
+    question rather than falling through to that fallback.
 14. **[NEW]** `S"`/`."` real interpret-time behavior
     (`DEVELOPING.md` §7) — **done, M16**. `compileOnly: true` had been
     an accidental, engine-specific reason (`compileInlineString`

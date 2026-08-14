@@ -2208,6 +2208,44 @@ to genuinely exercise the guard.
 
 ---
 
+### 1.55 Comment retention reverted (M44, `spec/04-FORTH-CORE.md`'s `(` row, `FORTH-ARCHITECTURE.md` §9 item 13)
+
+M11 (§1.32) made `(` compile its comment text as `(SLIT)`+`2DROP` inline
+data while compiling — a genuine runtime no-op, chosen specifically so a
+future `SEE` could echo the comment back rather than silently losing it.
+M12 (§1.33) built `SEE` and immediately confirmed the risk
+`FORTH-ARCHITECTURE.md` §9 item 13 had flagged when that encoding was
+chosen: `SEE` on a word containing `( a note )` printed `"a note" 2DROP`,
+not `( a note )` — indistinguishable from a program that genuinely
+builds and discards a string on purpose. That ambiguity was never
+resolved (no dedicated `(COMMENT)` token was ever built as the
+documented fallback), and revisiting it now: the entire reason for the
+extra complexity — `SEE` showing something a reader would recognize as a
+comment — never actually happened. Reverted to plain classic Forth
+behavior: `(` (`primitives.ts` case 93) consumes its text via the same
+`consumeQuotedText` loop as before, but no longer branches on `STATE` or
+calls `compileSlit`/`compileCell` at all — it's just discarded, every
+time. `compileSlit` itself is untouched and still used by `S"`/`."`, so
+comment text and genuine string literals no longer share any code path
+that treats them alike.
+
+`comments.test.ts`'s byte-level test (previously verifying `(SLIT)` +
+the comment length + the comment bytes were present at `FOO`'s Code
+Field) now asserts the opposite shape: `: FOO ( a note ) 5 ;`'s compiled
+body is exactly `LIT 5 EXIT`, with nothing between the Code Field and
+the literal at all. `FORTH-ARCHITECTURE.md` §9 item 13 and
+`spec/04-FORTH-CORE.md`'s `(` row (`**[Revised]**`, same convention as
+§1.54's `NUMBER` follow-up) both updated to record the reversal rather
+than leave the shipped-and-then-undone decision looking still-current.
+
+*Implementation:* `primitives.ts` (case 93, simplified), `rebel-opcodes.json`
+(token 93's note). *Tests:* `comments.test.ts` (one test rewritten, six
+unchanged — comment consumption/discarding behavior itself, interpreting
+or compiling, is identical either way; only what gets *compiled* changed).
+Full engine suite: 345 passed, unchanged in count.
+
+---
+
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
 
 This ties every mechanism above together, step by step, at the level of
@@ -2352,6 +2390,7 @@ exactly as it would be on the bare-metal target.
 | **M40** | `spec/02-MEMORY-MODEL.md` conformance: already fully conformant, byte-for-byte, down to the exact worked-example bank sequence. One stale comment fixed (`banks.ts` still described the pre-M34 MMAP size exemption `mmap.ts` itself had already closed). | `banks.ts` |
 | **M41** | `spec/03-SYSVARS.md` conformance: already fully conformant — every group base offset and field offset matches exactly, including the offsets optional/omitted fields leave unshifted. No code changes. | — |
 | **M42** | `spec/04-FORTH-CORE.md` §6 KERNEL→BOOTSTRAP reclassification (§1.26's control-flow block and more): 59 words moved from native primitives into `system.fth` — the entire control-flow compiler, `VARIABLE`/`CONSTANT`, stack shufflers/arithmetic derivatives — built from five primitives that stay native (`BRANCH`/`0BRANCH`/`(DO)`/`(LOOP)`/`(+LOOP)`). The `DOCON` Code-Field sentinel removed entirely (`CONSTANT` is `CREATE , DOES> @` now). New `COMPILE-ONLY` bootstrap-marking keyword. `test-support.ts`'s `bootMachine()` introduced — engine tests exercising any now-BOOTSTRAP word need it, since a bare `Machine` no longer has `IF`/`BEGIN`/`VARIABLE`/etc. defined at all. | `system.fth`, `primitives.ts`, `dictionary.ts`, `inner.ts`, `rebel-opcodes.json`, `test-support.ts` |
-| **M43** | Self-hosting the outer interpreter (§1.54, `spec/04-FORTH-CORE.md` §5.2/§6.13) — the deferred half of M42's own spec. `WORD`/`FIND`/`NUMBER`/`INTERPRET`/`[`/`]` and `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` are all genuine dictionary words now; the old native tokenizer survives only as a fallback (bootstrapping `system.fth` itself, and any `Machine` that never loads a bootstrap layer). Full detail in §1.54. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `app.spec.ts` |
+| **M43** | Self-hosting the outer interpreter (§1.54, `spec/04-FORTH-CORE.md` §5.2/§6.13) — the deferred half of M42's own spec. `WORD`/`FIND`/`NUMBER`/`INTERPRET`/`[`/`]` and `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` are all genuine dictionary words now; the old native tokenizer survives only as a fallback (bootstrapping `system.fth` itself, and any `Machine` that never loads a bootstrap layer). Full detail in §1.54. Followed by two small spec/behavior additions the same day: `NUMBER`'s digit-validation gap folded back into `spec/04-FORTH-CORE.md` §6.13 (a divergence found while implementing it), and `NUMBER` echoing its failing token before `ABORT` (§8's own new RECOMMENDED convention, the classic fig-Forth/Forth-79 `TOKEN ?` idiom — neither predecessor had `THROW`/`CATCH`). | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `app.spec.ts` |
+| **M44** | Comment retention reverted (§1.32, §1.55): `(` (token 93) now discards its text unconditionally, compiling or not — plain classic Forth behavior — instead of M11's `(SLIT)`+`2DROP` compiled-inline-data encoding. The whole point of retaining it was so `SEE` could echo a comment back; it never did (M12 confirmed `SEE` shows `"comment text" 2DROP`, not `( comment text )`, indistinguishable from a genuine discarded string) and the ambiguity was never resolved, so keeping the extra compiled bytes stopped earning its keep. `FORTH-ARCHITECTURE.md` §9 item 13 and `spec/04-FORTH-CORE.md`'s `(` row both updated to record the reversal. | `primitives.ts`, `rebel-opcodes.json`, `comments.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

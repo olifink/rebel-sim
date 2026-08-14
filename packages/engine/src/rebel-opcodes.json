@@ -94,7 +94,7 @@
     { "id": 91, "name": "0>", "note": "( n -- flag )" },
     { "id": 92, "name": "U<", "note": "( a b -- flag ) unsigned comparison." },
 
-    { "id": 93, "name": "(", "immediate": true, "note": "DEVELOPING.md §2: comment. ( -- ) IMMEDIATE, not compile-only — while compiling, consumes input up to the matching ')' and retains it as compiled (SLIT)+2DROP inline data (a genuine no-op at runtime, Jupiter-Ace style, not discarded like classic Forth); while interpreting at the top level, consumes and discards it since there's no HERE to compile into." },
+    { "id": 93, "name": "(", "immediate": true, "note": "DEVELOPING.md §2: comment. ( -- ) IMMEDIATE, not compile-only — consumes input up to the matching ')' and discards it, compiling or not, classic Forth style. M11 originally retained it as compiled (SLIT)+2DROP inline data so SEE could echo it back; reverted M44 once SEE proved unable to tell it apart from a genuine discarded string." },
 
     { "id": 94, "name": "'", "note": "DEVELOPING.md §6 (system vocabulary loading): tick. ( -- xt ) Not IMMEDIATE — runs at execution time like CREATE, so a Forth-defined word that compiles a call to ' (e.g. `: SEE ' ... ;`) correctly consumes its *caller's* next input word when it executes, the same shared-cursor mechanism CREATE already relies on. Parses the next input word, looks it up, errors (`? unrecognized word`) if not found, else pushes its cfa. Added specifically because there was previously no way for Forth-level source to resolve a name to an xt at runtime — a real, necessary primitive addition, not a SEE-specific hack." },
 

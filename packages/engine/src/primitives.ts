@@ -563,19 +563,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    // --- DEVELOPING.md §2.4: comments, retained rather than discarded ---
-    case 93: { // ( ( -- ) IMMEDIATE
-      const text = consumeQuotedText(ctx, ')');
-      if (ctx.sysvars.getState() === -1) {
-        // Compiling: retain as compiled (SLIT)+2DROP inline data — a
-        // genuine runtime no-op (push, then immediately drop).
-        compileSlit(ctx, text);
-        compileCell(ctx, findWord(ctx, '2DROP')!.cfa);
-      }
-      // Interpreting at the top level: consumed and discarded above —
-      // there's no HERE to compile into, matches classic Forth here.
+    case 93: // ( ( -- ) IMMEDIATE
+      // Classic Forth behavior: consumed and discarded, compiling or not.
+      // M11 originally compiled this as (SLIT)+2DROP inline data so SEE
+      // could echo a comment back — reverted (M44) once that turned out
+      // not to earn its keep: SEE printed it indistinguishably from a
+      // genuine discarded string ("comment text" 2DROP, never ( ... )),
+      // exactly the ambiguity FORTH-ARCHITECTURE.md §9 item 13 flagged as
+      // a risk when this encoding was chosen, and it never got resolved.
+      consumeQuotedText(ctx, ')');
       break;
-    }
 
     case 94: { // ' ( -- xt ) — DEVELOPING.md §6, see rebel-opcodes.json's note
       const name = ctx.nextInputToken();

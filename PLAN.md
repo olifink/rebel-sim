@@ -3665,3 +3665,27 @@ runs — the actual error was always a stack underflow from executing
 `-` with nothing on the stack), so that test now calls `NUMBER`
 directly (`S" -" NUMBER`) to genuinely exercise the guard. Full engine
 suite: 345 passed (343 before, +2 new).
+
+## M44 — Comment retention reverted: `(` discards, doesn't compile — done
+
+M11 made `(` compile its comment text as `(SLIT)`+`2DROP` inline data
+while compiling, specifically so a future `SEE` could echo the comment
+back rather than silently losing it (`FORTH-ARCHITECTURE.md` §9 item
+13). M12 built `SEE` and immediately confirmed the exact risk that
+decision flagged: `SEE` on `( a note )` printed `"a note" 2DROP`, not
+`( a note )` — indistinguishable from a program discarding a string on
+purpose. That ambiguity was never resolved (the documented fallback, a
+dedicated `(COMMENT)` token, was never built either), and per today's
+call, it's not worth carrying forward — the entire reason for the
+extra complexity never actually paid off. Reverted to plain classic
+Forth behavior: `(` (`primitives.ts` case 93) now just consumes and
+discards its text unconditionally, compiling or not, no `STATE` branch
+and no compiled bytes at all. `compileSlit` is untouched — `S"`/`."`
+still use it for genuine string literals, now sharing no code path
+with comments at all. `comments.test.ts`'s byte-level test rewritten
+to assert the opposite shape: `: FOO ( a note ) 5 ;` now compiles to
+exactly `LIT 5 EXIT`, nothing in between. `FORTH-ARCHITECTURE.md` §9
+item 13, `spec/04-FORTH-CORE.md`'s `(` row (`**[Revised]**`), and
+`IMPLEMENTATION.md` (§1.55, new; milestone table) all updated to
+record the reversal. Full engine suite: 345 passed, unchanged in
+count (one test rewritten, not added).
