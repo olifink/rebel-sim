@@ -3610,3 +3610,26 @@ before every load-bearing test run, matching M42's own discipline.
 `IMPLEMENTATION.md` §1.10/§1.11 rewritten to describe the real
 architecture (not just noted as stale), new §1.54 added, milestone
 table backfilled through M43.
+
+## M43 follow-up — `NUMBER` validation folded back into the spec — done
+
+M43's `NUMBER` (`system.fth`) diverged from `spec/04-FORTH-CORE.md`
+§6.13's own reference definition on purpose: the spec's version
+doesn't validate digits or guard a lone `-`, and separately documents
+both gaps in prose as "not a bug, a limitation" rather than fixing
+them. Building `NUMBER` against real typed input showed that theory
+doesn't hold — `NUMBER` is the fallback path once `FIND` has already
+failed, so an ordinary typo (a stray punctuation character past a
+digit run, or a digit outside the active `BASE`) was silently
+producing a wrong number instead of the `unrecognized word` error
+§5.4 promises for any other malformed token. Per `00-OVERVIEW.md`'s
+own governing principle — the spec is authoritative, and a divergence
+found during implementation gets folded back into the spec rather
+than left as implementation-only drift — `04-FORTH-CORE.md` §6.13's
+`NUMBER` reference definition, the two "documented limitation"
+paragraphs following it, and `INTERPRET`'s step-4 prose referencing
+them were all rewritten (`**[Revised]**`, matching
+`02-MEMORY-MODEL.md` §5.3/§5.4's precedent) to match `system.fth`'s
+actual, already-shipped definition: three `ABORT` guards (character
+range, BASE range, lone-`-`) folded directly into `NUMBER` itself.
+Doc-only change — engine suite unaffected (343 passed, unchanged).

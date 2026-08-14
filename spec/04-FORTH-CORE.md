@@ -953,45 +953,53 @@ semantics in §4.2 and hand-traced stack effects, in the same spirit as
   DUP 0= IF 2DROP 0 EXIT THEN
   OVER C@ 45 = >R                 ( addr len )            ( R: neg? )
   R@ IF 1 - SWAP 1 + SWAP THEN    ( addr' len', '-' skipped if present )
+  DUP 0= IF ABORT THEN            ( a lone '-' with no digits is an error )
   0 -ROT                          ( accum addr' len' )
   OVER + SWAP                     ( accum limit addr' )
   DO
-    I C@                           ( accum char )
+    I C@                                    ( accum char )
+    DUP 96 > OVER 123 < AND IF 32 - THEN    ( accum char', lowercase folded )
+    DUP 48 58 WITHIN OVER 65 91 WITHIN OR 0= IF ABORT THEN
+                                    ( reject anything outside '0'-'9'/'A'-'Z' )
     DUP 57 > IF 55 - ELSE 48 - THEN  ( accum digit )
+    DUP BASE @ < INVERT IF ABORT THEN  ( reject a digit >= BASE )
     SWAP BASE @ * +                ( accum' )
   LOOP
   R> IF NEGATE THEN
 ;
 ```
 
-The digit-value step (`57` is ASCII `'9'`; `55`/`48` map `'A'..'Z'`/
-`'0'..'9'` to `10..35`/`0..9`) does not validate that every character
-in range is a legal digit — a token like `NUMBER`'s own worst input,
-something containing `:` or `;` (ASCII 58/59) past a digit, is silently
-accepted as if it were a digit one or two past `9`. This is a
-documented limitation, not a bug: §5.4's contract is "a token that
-fails both dictionary lookup and number parsing is an error," and
-`FIND` failing first is the normal path for genuinely malformed input;
-this only matters for tokens crafted to look number-*ish* while
-containing punctuation, which `WORD`'s delimiter (space) already
-excludes for anything but the small ASCII range immediately after
-digits and letters. Tightening this is a valid future revision, not a
-blocker to shipping `NUMBER` as specified here.
-
-**A second, related limitation, not previously called out**: a token
-consisting of a lone `-` (a minus sign with no digits at all) strips
-the sign, leaving `len' = 0` — and the `DO`/`LOOP` that follows still
-executes its body once even though `index = limit` at entry, exactly
-the same classic `DO`/`LOOP` quirk `TYPE`'s own row (§6.7) already
-documents. That one iteration reads `C@` one byte past the token's own
-bounds (whatever byte follows it in the input line — a delimiter, or
-the start of the next token) and folds it into `accum` as a bogus
-digit, instead of correctly treating `-` alone as not-a-number. Same
-resolution as `TYPE`'s: guard with a `DUP 0= IF ... THEN` check right
-after the sign-stripping step if this matters for a given target, or
-accept it alongside the digit-validation gap above as a documented
-limitation — worth fixing in the same pass if that gap ever gets
-tightened, not a blocker on its own.
+**[Revised]** an earlier version of this reference definition omitted
+the three `ABORT` guards above (the lowercase-fold-then-range check,
+the BASE-range check, and the lone-`-` check), and this section
+documented the gap as "not a bug, a limitation" — the theory being
+that `FIND` failing first covers the normal case of malformed input,
+so `NUMBER` accepting garbage past `'9'` (e.g. a token containing `:`
+or `;`, ASCII 58/59, silently read as digit value 3/4) or accepting a
+digit `NUMBER` was never given a definition for in the current `BASE`
+(e.g. a `'9'` in `BASE 8`) only mattered for contrived input. Building
+this against real typed input (`follow-specs` branch, M43) showed
+that theory doesn't hold: `NUMBER` is the *fallback* path once `FIND`
+has already failed on a token — the normal case for a genuinely
+malformed token *is* to reach `NUMBER`, not to be intercepted before
+it — so a validation gap here means an ordinary typo (transposing two
+characters, e.g., or typing a digit outside the active `BASE`) is
+silently accepted as *some* number instead of failing the same way
+any other unrecognized token does, which is a strictly worse outcome
+than the `unrecognized word` error §5.4 promises. The lone-`-` case
+(minus sign with no digits, `len' = 0` after sign-stripping) had the
+same root problem in sharper form: the `DO`/`LOOP` that follows still
+executes its body once even though `index = limit` at entry — the
+same classic `DO`/`LOOP` quirk `TYPE`'s own row (§6.7) documents —
+reading `C@` one byte past the token's own bounds and folding it into
+`accum` as a bogus digit. All three gaps are closed the same way:
+`NUMBER` itself calls `ABORT` (§8) the moment it can prove its input
+isn't cleanly a number in the current `BASE`, rather than continuing
+to accumulate a value nothing asked for. This composes for free with
+the rest of this specification's error handling — an `ABORT` from
+inside `NUMBER` propagates and rolls back exactly like any other
+`ABORT`, including the one `INTERPRET`'s own step below already
+relies on §5.5/§5.6's contract for.
 
 **`INTERPRET`'s required behavior**, stated precisely enough to
 implement and verify independent of any one literal listing:
@@ -1013,11 +1021,12 @@ implement and verify independent of any one literal listing:
    - **Interpreting**: push the result.
    - **Compiling**: compile `LIT` followed by the literal value (two
      `,` appends — the `xt` of `LIT` itself, then the value).
-   - `NUMBER`'s own failure path (§6.13's documented limitation above,
-     or any other malformed token) is an `unrecognized word` error
-     (§5.4) — signaled via `ABORT` (§8), which routes through §5.5/
-     §5.6's rollback contract exactly as any other mid-compilation
-     error does.
+   - `NUMBER`'s own failure path (any token that isn't cleanly a
+     number in the current `BASE`, per its reference definition's
+     `ABORT` guards above) signals via `ABORT` (§8) directly —
+     `INTERPRET` does not need to detect or distinguish this failure
+     itself, since it routes through §5.5/§5.6's rollback contract
+     exactly as any other mid-compilation error does.
 5. Repeat from step 1 until the line is exhausted (step 1's `len = 0`
    exit).
 
