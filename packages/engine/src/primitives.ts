@@ -23,13 +23,23 @@ import { Channel } from './channel.js';
 import { BankTable } from './banks.js';
 import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
-import { compileCell, DictionaryContext, findWord, writeHeader } from './dictionary.js';
+import {
+  beginDefinition,
+  compileCell,
+  DictionaryContext,
+  endDefinition,
+  findWord,
+  markLatestCompileOnly,
+  markLatestImmediate,
+  writeHeader,
+} from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 export const TRUE = -1;
 export const FALSE = 0;
 
 const DOVAR_TOKEN = opcodes.dovarTokenId;
+const DOCOL = opcodes.docolTokenId;
 
 export interface PrimitiveContext extends DictionaryContext {
   readonly stack: DataStack;
@@ -57,6 +67,13 @@ export interface PrimitiveContext extends DictionaryContext {
    * interpreter is currently walking — see repl.ts's header comment on
    * why this needs to be a shared cursor, not a local variable. */
   nextInputToken(): string;
+  /** spec/04-FORTH-CORE.md §6.13: the raw mechanism `WORD` exposes to
+   * Forth source directly — skip leading `delimiterCode` bytes from the
+   * shared cursor, read up to the next `delimiterCode` or end of line,
+   * consume a trailing delimiter if one was actually hit, return a view
+   * into the TIB (`len === 0` means the line is exhausted; never
+   * throws). The same method `nextInputToken()` is itself built on. */
+  wordScan(delimiterCode: number): { addr: number; len: number };
 }
 
 /** Truncate a JS number to a signed 32-bit Forth cell. */
@@ -855,6 +872,61 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // pokes CHAR itself (BANK@ CHAR ... C!) has a way to repaint
       // without needing storage's fix-up path as an excuse to reach it.
       ctx.screen.redrawAll();
+      break;
+
+    // --- spec/04-FORTH-CORE.md §6.13, M43: the self-hosted outer
+    // interpreter's own KERNEL primitives. ---
+    case 134: { // WORD ( char -- addr len ) — raw-input-parsing access,
+      // same basis as S"/(/''s classification (§2.2 rule 3). A view into
+      // the live TIB, never a copy — a caller needing the text to outlive
+      // the current line (CREATE, S") copies it themselves.
+      const char = s.pop();
+      const { addr, len } = ctx.wordScan(char);
+      s.push(addr);
+      s.push(len);
+      break;
+    }
+    case 135: // STATE ( -- addr ) — direct sysvar-address exposure, same
+      // pattern as BASE (114)/HERE-ADDR (125)/LATEST-ADDR (95). The
+      // foundation `[`/`]`/INTERPRET (system.fth, §6.13) build on.
+      s.push(ctx.sysvars.fieldOffset('FORTH', 'STATE'));
+      break;
+
+    case 136: // : ( "name" -- ) — spec/04-FORTH-CORE.md §5.2: begin a
+      // definition. Not IMMEDIATE — dispatched like any other word found
+      // while interpreting; while compiling, a non-immediate word is
+      // just compiled as an ordinary call instead (§5.2's own "nothing
+      // external gates this once dispatch is uniform"). beginDefinition
+      // already self-guards against nesting (STATE === -1 → throw) —
+      // exactly the "MUST check STATE itself" requirement, just reached
+      // through ordinary dispatch now instead of repl.ts's old
+      // special-casing.
+      beginDefinition(ctx, ctx.nextInputToken(), DOCOL);
+      break;
+    case 137: // ; ( -- ) IMMEDIATE — §5.2: end a definition. MUST carry
+      // IMMEDIATE (INTERPRET's compiling-mode dispatch rule is what
+      // makes it run instead of compile, not its spelling) and MUST
+      // self-check STATE, since — once IMMEDIATE — it would otherwise
+      // execute unconditionally whenever found while interpreting too.
+      if (ctx.sysvars.getState() !== -1) {
+        throw new Error('; used outside a definition');
+      }
+      endDefinition(ctx, findWord(ctx, 'EXIT')!.cfa);
+      break;
+    case 138: // IMMEDIATE ( -- ) — §5.2: flags LATEST immediate. Not
+      // itself IMMEDIATE — always typed and executed directly at the
+      // prompt, never compiled into another definition's body.
+      markLatestImmediate(ctx);
+      break;
+    case 139: // COMPILE-ONLY ( -- ) — the same bootstrap-marking
+      // promotion IMMEDIATE (138) gets: `system.fth`'s own control-flow
+      // words (§6.5) need a Forth-reachable way to set FLAG_COMPILE_ONLY
+      // on themselves, and nothing else can. Not part of spec's own
+      // vocabulary (predates M42, which added it as a special-cased
+      // keyword specifically because nothing else could reach the flag
+      // yet) — promoted to an ordinary primitive here for the same
+      // "never special-cased by spelling" reason `:`/`;`/`IMMEDIATE` are.
+      markLatestCompileOnly(ctx);
       break;
 
     default:

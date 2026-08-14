@@ -107,10 +107,21 @@ export class App implements AfterViewInit, OnDestroy {
   private readonly onKeyUp = (e: KeyboardEvent): void => this.handleKeyEvent(e, false);
 
   // Primitives run per animation frame while the REPL loop is active
-  // (M7/M7a). Generous enough that any line expressible today (no loop/
-  // recursion words exist yet) finishes within a single frame, while
-  // still bounding worst-case per-frame work if that ever changes.
-  private static readonly STEP_BUDGET = 2000;
+  // (M7/M7a). M43 (spec/04-FORTH-CORE.md §5.2/§6.13): the outer
+  // interpreter is genuinely self-hosted now — INTERPRET dispatches
+  // every line via Forth-level WORD/FIND/NUMBER, and FIND's own
+  // chain-walk is O(dictionary size) primitive-level steps (~170
+  // entries once system.fth has loaded), not the roughly-one-step-per-
+  // token the old native tokenizer cost — a several-token compiling
+  // line (each token needs its own FIND) can need on the order of
+  // 10^5 steps. Bumped well past that: step() returns the moment a line
+  // actually finishes/blocks/breakpoints regardless of this ceiling
+  // (repl.ts), so a short line costs nothing extra — what this budget
+  // actually buys is a longer line finishing within *one*
+  // requestAnimationFrame round-trip instead of several, which matters
+  // because RAF itself, not raw compute, is the slow part in a
+  // throttled/background-tab-like test environment.
+  private static readonly STEP_BUDGET = 500_000;
 
   // True while a requestAnimationFrame chain is actively running. The
   // chain self-terminates (tick() below) once a frame finds nothing left

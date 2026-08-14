@@ -48,3 +48,14 @@ export function bootMachine(options?: MachineOptions): Machine {
   loadSystemVocabulary(machine);
   return machine;
 }
+
+/** A `Machine.step()` budget generous enough for tests driving a `bootMachine()`
+ * incrementally (breakpoints, mid-line pausing). Once the self-hosted
+ * `INTERPRET` (M43) is what's actually dispatching a line, `FIND`'s own
+ * chain-walk — O(dictionary size), ~170 entries once `system.fth` has
+ * loaded — costs on the order of several thousand primitive-level
+ * `'progress'` yields *per token*, not the roughly-one-token-per-step the
+ * old native tokenizer gave. Still microseconds of real wall-clock time;
+ * just a much finer step granularity than a small hardcoded budget like
+ * `1000` assumes. */
+export const AMPLE_STEP_BUDGET = 50_000;

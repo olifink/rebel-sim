@@ -3,9 +3,22 @@
  * sysvar drives the split): tokenizes a line and, per token, either
  * executes it (interpreting) or compiles a call/literal into the
  * definition under construction (compiling) — the classic Forth
- * text-interpreter loop. `:`/`;`/`IMMEDIATE` are handled as special
- * compiler syntax rather than dictionary words (see dictionary.ts's
- * header comment for why).
+ * text-interpreter loop.
+ *
+ * M43 (spec/04-FORTH-CORE.md §5.2/§6.13): the *real* outer interpreter
+ * is self-hosted Forth source now — `INTERPRET`, `FIND`, `NUMBER`, `[`,
+ * `]` (`system.fth`), built on native `WORD`/`STATE` and the now-
+ * ordinary-dictionary-entry `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY`
+ * primitives (`primitives.ts`) — findable via `FIND`, listed by
+ * `WORDS`, never special-cased by spelling. What lives in *this* file
+ * (`tokenizeAndRun`/`interpretExecuting`/`interpretCompiling`, driven
+ * through `dispatchLine()`) is the **native fallback**: the mechanism
+ * that loads `system.fth` itself (nothing can call `INTERPRET` before
+ * it's defined), and — by design, not just as a bootstrapping
+ * artifact — the ongoing path for any `Machine` that never loads a
+ * bootstrap layer at all, which most engine-level tests deliberately
+ * don't, to exercise a primitive in isolation. `dispatchLine()` is the
+ * one place that decides which of the two actually runs a given line.
  *
  * M7 (FORTH-ARCHITECTURE.md §7a): one line is now a resumable session
  * (`runLine`, a generator), not a single run-to-completion call — the
@@ -42,28 +55,27 @@ import { NULL_TIMING_HAL, TimingHal } from './timing.js';
 import { Inner, StepSignal } from './inner.js';
 import {
   abortDefinition,
-  beginDefinition,
   compileCell,
   DictionaryContext,
-  endDefinition,
   findWord,
   FLAG_COMPILE_ONLY,
   FLAG_IMMEDIATE,
   listDictionaryEntries,
-  markLatestCompileOnly,
-  markLatestImmediate,
   writeHeader,
 } from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
-
-const DOCOL = opcodes.docolTokenId;
 
 const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/SYSVARS.md §1)
 const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
-const TIB_SIZE = 128; // Terminal Input Buffer — generous for a REPL line (M7a)
+// spec/04-FORTH-CORE.md §5.3/§6.13: the TIB now has to physically hold
+// every line fed to the outer interpreter (WORD scans real arena bytes,
+// not a JS string) — bumped from 128 once system.fth's own longest line
+// (XT-NAME's definition, 144 chars) needed to fit inside it.
+const TIB_SIZE = 256; // Terminal Input Buffer — generous for a REPL line (M7a)
+const SPACE_CHAR_CODE = 32; // BL — the delimiter nextInputToken()/the native fallback tokenizer scan on
 const PAD_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch text — sized like TIB, same "generous for one line" reasoning
 // M31: both are logical sub-region sizes within one WORK bank now, not
 // independent bank-size requests — createBank() rounds the *combined*
@@ -165,6 +177,12 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly padBase: number;
   readonly padSize: number;
   private session: Generator<StepSignal, void, void> | undefined;
+  /** spec/04-FORTH-CORE.md §5.6/M43: `INTERPRET`'s own `cfa`, resolved
+   * lazily and cached the first time `dispatchLine()` finds it in the
+   * dictionary — `undefined` for the lifetime of any `Machine` that never
+   * loads a bootstrap layer at all (most engine-level tests), by design
+   * (see `dispatchLine()`'s own comment). */
+  private interpretCfa: number | undefined;
 
   /** DEBUGGING.md (M10): word-level breakpoints, a session-local `Set`
    * of `cfa` addresses — not a dictionary header flag (that byte is
@@ -184,8 +202,15 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   // Sharing one mutable cursor via instance fields (rather than a local
   // variable private to tokenizeAndRun) is what makes that possible —
   // the same role classic Forth's >IN plays over a raw input buffer.
-  private currentTokens: string[] = [];
-  private currentTokenIndex = 0;
+  //
+  // spec/04-FORTH-CORE.md §5.3/§6.13 (M43): this cursor now points into
+  // *real arena memory* (the TIB), not a pre-split JS string array —
+  // WORD (§6.13) has to return an (addr, len) view into the live input
+  // line, which a JS array has no address for at all. `inputPos` is the
+  // current scan position, `inputEnd` one past the current line's last
+  // byte; both absolute arena addresses within [tibBase, tibBase+tibSize).
+  private inputPos = 0;
+  private inputEnd = 0;
 
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
@@ -265,16 +290,67 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     return this.sysvars.getBase();
   }
 
+  /** spec/04-FORTH-CORE.md §6.13's `WORD` contract, and the single real
+   * implementation everything else in this class builds on: skip leading
+   * `delimiterCode` bytes from the shared cursor, read non-delimiter
+   * bytes up to the next `delimiterCode` or end of line, consume the
+   * trailing delimiter too (if one was actually hit, as opposed to
+   * running out of line), and return a *view* into the TIB — never a
+   * copy. `len === 0` means the line is exhausted; never throws. */
+  wordScan(delimiterCode: number): { addr: number; len: number } {
+    while (this.inputPos < this.inputEnd && this.arena.readByte(this.inputPos) === delimiterCode) {
+      this.inputPos++;
+    }
+    const start = this.inputPos;
+    while (this.inputPos < this.inputEnd && this.arena.readByte(this.inputPos) !== delimiterCode) {
+      this.inputPos++;
+    }
+    const len = this.inputPos - start;
+    if (this.inputPos < this.inputEnd) {
+      this.inputPos++; // consume the delimiter that stopped the scan
+    }
+    return { addr: start, len };
+  }
+
+  private decodeBytes(addr: number, len: number): string {
+    let s = '';
+    for (let i = 0; i < len; i++) {
+      s += String.fromCharCode(this.arena.readByte(addr + i));
+    }
+    return s;
+  }
+
   /** Consumes and returns the next word from whatever line is currently
-   * being interpreted (§7's shared-cursor mechanism, above). Throws if
-   * the input is exhausted — matching how `:` already fails loudly
-   * (`beginDefinition`) when a name is missing, rather than silently
-   * returning something meaningless. */
+   * being interpreted (§7's shared-cursor mechanism, above) — a thin
+   * decode wrapper over `wordScan`, kept as the one thing every native
+   * raw-token-consuming primitive (`CREATE`, `BANK@`, `'`, `S"`, ...)
+   * still calls; none of them needed to change when the cursor moved
+   * from a JS array onto real TIB bytes. Throws if the input is
+   * exhausted — matching how `:` already fails loudly (`beginDefinition`)
+   * when a name is missing, rather than silently returning something
+   * meaningless. */
   nextInputToken(): string {
-    if (this.currentTokenIndex >= this.currentTokens.length) {
+    const { addr, len } = this.wordScan(SPACE_CHAR_CODE);
+    if (len === 0) {
       throw new Error('expected a name, but the input ended');
     }
-    return this.currentTokens[this.currentTokenIndex++];
+    return this.decodeBytes(addr, len);
+  }
+
+  /** Writes `line` into the TIB and resets the shared cursor to its
+   * start — the programmatic-caller (`interpret()`/`beginLine()`)
+   * equivalent of what `ACCEPT` already does for the on-screen REPL
+   * (`replLoop`, below), which sets the same two fields directly since
+   * its bytes are already physically in the TIB. */
+  private loadLineIntoTib(line: string): void {
+    if (line.length > this.tibSize) {
+      throw new Error(`line exceeds the TIB's ${this.tibSize}-byte capacity: ${line.length} bytes`);
+    }
+    for (let i = 0; i < line.length; i++) {
+      this.arena.writeByte(this.tibBase + i, line.charCodeAt(i) & 0xff);
+    }
+    this.inputPos = this.tibBase;
+    this.inputEnd = this.tibBase + line.length;
   }
 
   /** Starts a new session for one line of Forth source, without running
@@ -433,10 +509,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       yield* this.inner.executeXT(this.acceptCfa);
       const len = this.stack.pop();
 
-      let line = '';
-      for (let i = 0; i < len; i++) {
-        line += String.fromCharCode(this.arena.readByte(this.tibBase + i));
-      }
+      // ACCEPT's bytes already live in the TIB — just point the shared
+      // cursor at them directly, no JS-string round-trip needed (M43:
+      // tokenizeAndRun reads the cursor now, not a `line` parameter).
+      this.inputPos = this.tibBase;
+      this.inputEnd = this.tibBase + len;
 
       // No CR here: real Forth doesn't print one for <enter> either — a
       // real terminal's own local echo supplies that CR, not the Forth
@@ -447,7 +524,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       yield 'progress';
 
       try {
-        yield* this.tokenizeAndRun(line);
+        yield* this.dispatchLine();
         this.emitString('ok');
       } catch (err) {
         if (this.sysvars.getState() === -1) {
@@ -494,8 +571,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   }
 
   private *runLine(line: string): Generator<StepSignal, void, void> {
+    this.loadLineIntoTib(line);
     try {
-      yield* this.tokenizeAndRun(line);
+      yield* this.dispatchLine();
     } catch (err) {
       if (this.sysvars.getState() === -1) {
         abortDefinition(this);
@@ -504,44 +582,68 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     }
   }
 
-  private *tokenizeAndRun(line: string): Generator<StepSignal, void, void> {
-    this.currentTokens = line.trim().split(/\s+/).filter(Boolean);
-    this.currentTokenIndex = 0;
-    while (this.currentTokenIndex < this.currentTokens.length) {
-      const token = this.nextInputToken();
+  /** spec/04-FORTH-CORE.md §5.6: the actual driving-loop dispatch this
+   * document describes — "read a line into the input buffer, reset the
+   * shared cursor, call INTERPRET, repeat." Threads through the real,
+   * self-hosted `INTERPRET` (`system.fth`) once it exists in the
+   * dictionary — one call per line; `INTERPRET`'s own Forth body loops
+   * internally via repeated `WORD` calls until the line is exhausted.
+   * Falls back to the native tokenizer otherwise, which is what makes
+   * loading `system.fth` itself possible in the first place (nothing
+   * calls `INTERPRET` before it's defined) and, by design (not merely a
+   * bootstrapping artifact), the ongoing path for any `Machine` that
+   * never loads a bootstrap layer at all — most engine-level tests
+   * construct a bare one deliberately, to exercise a primitive in
+   * isolation, and keep working completely unchanged. Production
+   * (`app.ts`, any real REPL session) always boots through `system.fth`
+   * first, so it always runs the genuine self-hosted path. `cfa` is
+   * resolved once and cached (`interpretCfa`) rather than chain-walked
+   * on every single line, since it never goes away once found — `COLD`
+   * aside, which reconstructs an entirely fresh `Machine`, not this
+   * cached field on an existing one. */
+  private *dispatchLine(): Generator<StepSignal, void, void> {
+    if (this.interpretCfa === undefined) {
+      const found = findWord(this, 'INTERPRET');
+      if (found) {
+        this.interpretCfa = found.cfa;
+      }
+    }
+    if (this.interpretCfa !== undefined) {
+      yield* this.inner.executeXT(this.interpretCfa);
+    } else {
+      yield* this.tokenizeAndRun();
+    }
+  }
+
+  /** The native fallback outer-interpreter loop (spec/04-FORTH-CORE.md
+   * §5.1–§5.4) — reads from whatever `[inputPos, inputEnd)` the caller
+   * already set up (`runLine`/`replLoop`), via `wordScan` rather than a
+   * pre-split JS array (M43), so it shares the exact same cursor a
+   * native primitive like `CREATE` (`nextInputToken()`) or a future
+   * Forth-level `WORD` call would also be walking. */
+  private *tokenizeAndRun(): Generator<StepSignal, void, void> {
+    while (true) {
+      const { addr, len } = this.wordScan(SPACE_CHAR_CODE);
+      if (len === 0) {
+        return;
+      }
+      const token = this.decodeBytes(addr, len);
       const upper = token.toUpperCase();
 
       if (this.sysvars.getState() === -1) {
         yield* this.interpretCompiling(upper, token);
       } else {
-        if (upper === ':') {
-          beginDefinition(this, this.nextInputToken(), DOCOL);
-          yield 'progress';
-          continue;
-        }
         yield* this.interpretExecuting(upper, token);
       }
     }
   }
 
+  /** spec/04-FORTH-CORE.md §5.2/M43: `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY`
+   * are ordinary dictionary entries now (`primitives.ts` cases 136–139)
+   * — this dispatcher no longer special-cases any of them by spelling,
+   * only by the same `compileOnly`/`immediate` dictionary properties
+   * every other word is judged by. */
   private *interpretExecuting(upper: string, token: string): Generator<StepSignal, void, void> {
-    if (upper === ';') {
-      throw new Error('; used outside a definition');
-    }
-    if (upper === 'IMMEDIATE') {
-      markLatestImmediate(this);
-      yield 'progress';
-      return;
-    }
-    // spec/04-FORTH-CORE.md §6.5: bootstrap-Forth-source counterpart to
-    // IMMEDIATE above — the only way `system.fth`'s own control-flow
-    // words can set FLAG_COMPILE_ONLY on themselves, since nothing else
-    // at the Forth level can reach that bit.
-    if (upper === 'COMPILE-ONLY') {
-      markLatestCompileOnly(this);
-      yield 'progress';
-      return;
-    }
     const found = findWord(this, upper);
     if (found) {
       if (found.compileOnly) {
@@ -559,14 +661,6 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   }
 
   private *interpretCompiling(upper: string, token: string): Generator<StepSignal, void, void> {
-    if (upper === ':') {
-      throw new Error(': cannot nest definitions');
-    }
-    if (upper === ';') {
-      endDefinition(this, findWord(this, 'EXIT')!.cfa);
-      yield 'progress';
-      return;
-    }
     const found = findWord(this, upper);
     if (found) {
       if (found.immediate) {

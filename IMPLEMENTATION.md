@@ -220,8 +220,26 @@ each whitespace-separated token, it either:
   (interpreting) or compiling it as a literal (compiling, via `LIT`,
   §1.12).
 
-*Implementation:* `Machine.interpret()` in `repl.ts`, splitting into
-`interpretExecuting`/`interpretCompiling` based on `sysvars.getState()`.
+**As of M43 (`spec/04-FORTH-CORE.md` §5.2/§6.13), this is genuinely
+self-hosted Forth source, not engine-internal TypeScript** — see §1.54
+for the full mechanism. `WORD` scans real arena bytes (the `TIB`) for
+the next token, `FIND` chain-walks the dictionary, `NUMBER` parses
+digits, and `INTERPRET` ties them together exactly per the bullets
+above — all ordinary dictionary words (`system.fth`), findable via
+`FIND` and listed by `WORDS` like anything else. What used to be this
+section's whole story — `Machine.tokenizeAndRun()`/`interpretExecuting`/
+`interpretCompiling` in `repl.ts` — still exists, but demoted to the
+**native fallback**: the mechanism that loads `system.fth` itself
+(nothing can call `INTERPRET` before it's defined) and the path any
+`Machine` that never loads a bootstrap layer at all still uses, by
+design — most engine-level tests deliberately construct a bare one, to
+exercise a primitive in isolation without paying for the whole
+vocabulary. `Machine.dispatchLine()` is the one place that decides
+which of the two actually runs a given line.
+
+*Implementation:* `system.fth`'s `INTERPRET`/`FIND`/`NUMBER` (the real
+path); `repl.ts`'s `dispatchLine()`/`tokenizeAndRun()`/
+`interpretExecuting`/`interpretCompiling` (the native fallback).
 
 ### 1.11 Compiling: what `:` and `;` actually do
 
@@ -243,16 +261,26 @@ the half-built definition is rolled back — `HERE`/`LATEST` are restored
 to what they were before the `:` — so a typo at the REPL can't leave the
 dictionary in a broken state.
 
-**Deliberate scope cut:** `:`, `;`, and `IMMEDIATE` are *not* modeled as
-dictionary words in Rebel-Sim — they're handled directly by the outer
-interpreter (`repl.ts`), because they need to mutate compiler state
-(`HERE`/`LATEST`/`STATE`) that an ordinary primitive's interface has no
-access to. Many real Forths do implement `:`/`;` as actual (specially
-flagged) dictionary words; this is a legitimate simplification for a
-from-scratch minimal engine, not an oversight.
+**As of M43, `:`, `;`, `IMMEDIATE` (and `COMPILE-ONLY`) ARE ordinary
+dictionary words** — genuine `primitives.ts` cases, found via `FIND`
+like anything else, never special-cased by spelling
+(`spec/04-FORTH-CORE.md` §5.2's own requirement: "nothing external
+gates this once dispatch is uniform"). They're native KERNEL
+primitives rather than BOOTSTRAP Forth source specifically because they
+need to mutate compiler state (`HERE`/`LATEST`/`STATE`) an ordinary
+primitive's stack-effect-only interface doesn't otherwise reach — that
+was always the real reason, this document's older framing just
+conflated "needs to be native" with "has no dictionary entry," which
+M43 shows aren't the same thing. One real, deliberate behavioral
+consequence: since `:`/`IMMEDIATE`/`COMPILE-ONLY` aren't themselves
+`IMMEDIATE`, typing one *while compiling* now compiles a call to it
+(deferred) rather than erroring immediately — `;` still self-checks
+`STATE` and errors correctly either way, since it stays `IMMEDIATE`.
 
-*Implementation:* `beginDefinition`/`endDefinition`/`abortDefinition` in
-`dictionary.ts`, called from `Machine.interpret()`.
+*Implementation:* `beginDefinition`/`endDefinition`/`markLatestImmediate`/
+`markLatestCompileOnly` in `dictionary.ts` are unchanged; what moved is
+*who calls them* — `primitives.ts` cases 136-139 now, not `repl.ts`'s
+old special-casing.
 
 ### 1.12 Literals — how a plain number ends up in compiled code
 
@@ -2013,6 +2041,145 @@ updates the rendered row). Live-verified in a real browser. Full
 engine suite: 314 passed (311 before, 3 new). App suite: 20 passed
 (19 before, 1 new).
 
+### 1.54 Self-hosting the outer interpreter (M43, `spec/04-FORTH-CORE.md` §5.2/§6.13)
+
+M42 moved 59 words from native primitives into `system.fth` (the
+control-flow compiler, stack shufflers, `VARIABLE`/`CONSTANT`, ...),
+but deliberately left the outer interpreter itself — the mechanism
+§1.10/§1.11 describe — as engine-internal TypeScript, since making it
+genuinely self-hosted meant a real architectural change: `WORD` has to
+return `(addr, len)` pointing into actual arena memory, and the engine's
+tokenizer used to pre-split each line into a plain JS `string[]`, which
+has no arena address to hand back at all.
+
+**A unified, arena-backed cursor.** `Machine`'s old `currentTokens`/
+`currentTokenIndex` fields are gone, replaced by two absolute arena
+addresses, `inputPos`/`inputEnd`, bounding the current line within the
+`TIB` (bumped from 128 to 256 bytes — the longest `system.fth` line is
+144 characters, already over the old limit once every line has to
+physically fit rather than live in a JS string). One method,
+`wordScan(delimiterCode)`, is the single real implementation three
+things build on:
+- `nextInputToken()` — the existing `PrimitiveContext` method every
+  native raw-token-consuming primitive (`CREATE`, `BANK@`, `'`, `S"`,
+  ...) already called — becomes a thin decode wrapper over it. External
+  contract unchanged: none of those primitives needed to change at all.
+- The new `WORD` primitive (token 134, `( char -- addr len )`) — pops a
+  delimiter, calls `wordScan`, pushes the result. `len = 0` means the
+  line is exhausted; `WORD` itself never throws.
+- The native fallback tokenizer (below) — reads via `wordScan(BL)`
+  instead of the old array walk, so it shares the exact cursor `WORD`
+  does (required: a native primitive invoked *from* a compiled call
+  still has to consume from the same live position `WORD`/`INTERPRET`
+  would otherwise be walking).
+
+**`:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` become real primitives** (tokens
+136-139) — see §1.11's rewrite above. `COMPILE-ONLY` itself predates
+M43 (a special-cased keyword M42 added, the only way to reach
+`FLAG_COMPILE_ONLY` from Forth at the time) but gets the same
+promotion here, for the same "never special-cased by spelling" reason.
+
+**The self-hosted layer itself, all in `system.fth`, appended after
+everything else (`INTERPRET` load-order-last per §6.13):**
+- `FIND ( addr len -- entry-addr flag )` — chain-walks `LATEST` toward
+  `0`, skipping `HIDDEN`, comparing each candidate's already-uppercase
+  stored name against `addr len` case-insensitively (folding the
+  *input* bytes to uppercase, since stored names are already
+  uppercase). Uses two scratch `VARIABLE`s (`FIND-ADDR`/`FIND-LEN`,
+  `HIDE`-ed once `FIND` no longer needs to find them by name) rather
+  than juggling `addr`/`len` across the whole walk on the data or
+  return stack — simpler to get right than deep `PICK` arithmetic, and
+  this isn't a hot path.
+- `NUMBER ( addr len -- n )` — spec gives a reference definition with
+  **no digit validation at all**: a token like `:`/`;` (ASCII
+  immediately past `'9'`) would silently parse as digit values 3/4.
+  Extended here with an explicit per-character range check (only
+  `'0'-'9'`/`'A'-'Z'`, after the same uppercase fold `FIND` uses) and a
+  digit-against-`BASE` check, both calling `ABORT` on failure — a
+  genuinely unrecognized token (a typo) still errors instead of
+  silently becoming a meaningless number, which the existing test
+  suite's `unrecognized word` coverage already depended on. Also
+  guards spec's own separately-documented lone-`-`-with-no-digits gap
+  (would otherwise read one byte past the token's own bounds).
+- `LIT-XT` (`' LIT CONSTANT LIT-XT`) — resolved once, the same pattern
+  §1.26's control-flow block uses for `BRANCH-XT`/etc.
+- `[`/`]` — `: [ 0 STATE ! ; IMMEDIATE` / `: ] -1 STATE ! ;`, the
+  ordinary mode-switch words, using `03-SYSVARS.md`'s real `STATE`
+  encoding.
+- `INTERPRET ( -- )` — the whole §1.10 contract, implemented exactly:
+  `WORD BL` until exhausted; `FIND`; if found, `EXECUTE` (interpreting,
+  unless `COMPILE-ONLY` → `ABORT`) or, while compiling, `EXECUTE` if
+  `IMMEDIATE` else compile a call via `,`; if not found, `NUMBER`, then
+  push (interpreting) or compile `LIT-XT` plus the literal (compiling).
+
+**The chicken-and-egg problem, and why the native fallback still
+exists.** `system.fth`'s own source needs *something* native to
+interpret it before the `INTERPRET` it defines exists — and
+`Machine.dispatchLine()` resolves this by design, not just for
+bootstrapping: it resolves and caches `INTERPRET`'s `cfa` the first
+time `findWord` finds it, and dispatches through it (one call per line;
+`INTERPRET`'s own body loops via `WORD` until exhausted) whenever it's
+available, falling back to the native tokenizer otherwise. A bare
+`new Machine()` that never loads `system.fth` keeps using the native
+fallback forever — most engine-level tests deliberately construct one
+this way, to test a primitive in isolation, and none of them needed to
+change. Production (`app.ts`, any real REPL session) always boots
+through `system.fth` first, so it always runs the genuine self-hosted
+path — the fallback never leaks into what actually matters for spec
+conformance. Error rollback (§1.11's mid-compilation-error paragraph)
+needed no new mechanism: a thrown error inside `INTERPRET` propagates
+up through the generator's `yield*` chain exactly like any error from
+compiled Forth code already did, landing in the same `runLine`/
+`replLoop` `catch` blocks that already call `abortDefinition`.
+
+**A real bug, not just a spec-compliance question:** `I`/`J`'s first
+draft ported the classic `RP@ @` idiom verbatim from real Forth
+systems, and broke every `DO`-loop test — the same garbage value
+repeated every iteration. Root cause: `I`/`J` used to be *primitives*,
+dispatched with no return-stack frame of their own; once M42 made them
+ordinary colon-definitions, *calling* them pushes their own return
+address onto the exact same return stack they `RP@` into, one cell
+above the loop-control cells `(DO)` pushed. Fixed by skipping that
+frame explicitly (`RP@ CELL+ @` / `RP@ CELL+ CELL+ CELL+ @`) — caught
+immediately by the existing DO-loop test coverage, not shipped silently
+broken.
+
+**A real, mostly-cosmetic performance shift worth knowing about:**
+`FIND`'s chain-walk is O(dictionary size) — roughly 170 entries once
+`system.fth` has loaded — so a single lookup can cost on the order of
+10^4 primitive-level `'progress'` yields, versus the old native
+tokenizer's roughly-one-step-per-token. Still microseconds of real
+wall-clock time, but it meant `Machine.step()` budgets tuned for the
+old cost model (tests using `step(1000)`, `app.ts`'s `STEP_BUDGET`)
+needed bumping — `step()` returns the moment a line actually
+finishes/blocks/breakpoints regardless of the budget ceiling, so a
+generous budget costs nothing extra for a short line; what it buys is
+a longer line finishing within one `requestAnimationFrame` round-trip
+instead of several.
+
+**A pre-existing app-test bug this surfaced, not caused:** `app.spec.ts`
+tests that called `app.remoteChannel.push(text)` directly (reaching
+into a private field, bypassing the WebMCP `type` tool's own handler)
+never restarted the animation-frame pump the way the real handler does
+(`remoteChannel.push(text); this.wake();`) — a frame that finds
+`step()` blocked with nothing else changed lets the pump die rather
+than polling forever at idle, so a *second* push after the pump had
+already gone idle was silently never processed. Worked by accident
+before (the pump was usually still alive from a previous push);
+larger, less-frequent `tick()` calls under M43's own step-budget needs
+made the gap between pushes wide enough to expose it reliably. Fixed
+with a shared `typeIntoRepl()` test helper that calls both together.
+
+*Implementation:* `repl.ts` (`wordScan`, `loadLineIntoTib`,
+`dispatchLine`, the slimmed `tokenizeAndRun`), `primitives.ts` (`WORD`/
+`STATE`/`:`/`;`/`IMMEDIATE`/`COMPILE-ONLY`, tokens 134-139),
+`rebel-opcodes.json`, `system.fth` (`FIND`/`NUMBER`/`LIT-XT`/`[`/`]`/
+`INTERPRET`), `app.ts` (`STEP_BUDGET`), `app.spec.ts`
+(`typeIntoRepl`). New `word-state.test.ts` and
+`self-hosted-interpreter.test.ts`. Full engine suite: 343 passed (315
+before M43's first step, +28 new across the milestone). App suite: 20
+passed, unchanged in count, one pre-existing bug fixed.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2155,5 +2322,10 @@ exactly as it would be on the bare-metal target.
 | **M36** | Dictionary hover tooltip shows a primitive's note (§1.51, `DEVELOPING.md` §28). Web-only monitor-panel sugar, requested directly, out of scope for `FORTH-ARCHITECTURE.md`/`PORTING-WEB.md`. New `dictionary.ts` export `getPrimitiveNote(name)` — a name→note lookup over `opcodes.primitives`, not a `DictionaryEntry` field (a note is documentation, not runtime state). `app.ts`'s `wordTooltip()` shows the note when one exists, falling back to the original breakpoint-hint text for every user-defined word and note-less primitive. Click-to-toggle-breakpoint behavior itself is unchanged. | `dictionary.ts`, `index.ts`, `app.ts`, `app.html` |
 | **M37** | `REDRAW` (§1.52, `DEVELOPING.md` §29): repaints the framebuffer from `CHAR` content, for when Forth source pokes `CHAR` directly (`BANK@ CHAR ... C!`) and bypasses `writeChar()`'s HAL write-through. Exposes the already-existing `Screen.redrawAll()` (M29) as an ordinary word (token 133) — no new mechanism. A real cross-target primitive (checked against `rebel-rom`'s `CScreenModule::Redraw()`, not assumed), unlike M36's web-only tooltip. Deliberately whole-buffer only for now, to find out empirically how expensive a full sweep is before adding a targeted single-cell/rectangle variant. | `rebel-opcodes.json`, `primitives.ts` |
 | **M38** | Sysvars section in the left-side monitor overlay (§1.53, `DEVELOPING.md` §30). Web-only UI, requested directly, same scope as M36's tooltip. New `sysvars.ts` export `listSysvars(sysvars)` walks `opcodes.sysvarGroups`, skips groups with no fields defined yet (`FONT`/`SPRITE`), and reads each real field's live value plus its JSON note — same "read `rebel-opcodes.json` metadata through a dedicated accessor" pattern `getPrimitiveNote` established for M36. `.storage-panel` gained a `sysvars:` table (group/field/value, note as the field's hover title); `app.ts`'s new `sysvarsTable` signal is polled/diffed every `tick()` frame rather than behind a cheap proxy, since sysvars move on nearly every executed word. | `sysvars.ts`, `index.ts`, `app.ts`, `app.html` |
+| **M39** | The `follow-specs` pass begins: `spec/01-HAL.md` conformance. Screen/Keyboard/Channel/Storage already conformant. Closed the one real gap, Timing (§7): a new `TimingHal` interface (`millis()`), a `performance.now()`-backed browser implementation — deliberately plumbing only, no Forth-visible word yet, nothing needs elapsed time. Named the Error Reporting (§8) sink: extracted the existing uncaught-error screen print into `reportError()`, tying it to `hal_report_error`. | `timing.ts`, `performance-timing-hal.ts`, `repl.ts` |
+| **M40** | `spec/02-MEMORY-MODEL.md` conformance: already fully conformant, byte-for-byte, down to the exact worked-example bank sequence. One stale comment fixed (`banks.ts` still described the pre-M34 MMAP size exemption `mmap.ts` itself had already closed). | `banks.ts` |
+| **M41** | `spec/03-SYSVARS.md` conformance: already fully conformant — every group base offset and field offset matches exactly, including the offsets optional/omitted fields leave unshifted. No code changes. | — |
+| **M42** | `spec/04-FORTH-CORE.md` §6 KERNEL→BOOTSTRAP reclassification (§1.26's control-flow block and more): 59 words moved from native primitives into `system.fth` — the entire control-flow compiler, `VARIABLE`/`CONSTANT`, stack shufflers/arithmetic derivatives — built from five primitives that stay native (`BRANCH`/`0BRANCH`/`(DO)`/`(LOOP)`/`(+LOOP)`). The `DOCON` Code-Field sentinel removed entirely (`CONSTANT` is `CREATE , DOES> @` now). New `COMPILE-ONLY` bootstrap-marking keyword. `test-support.ts`'s `bootMachine()` introduced — engine tests exercising any now-BOOTSTRAP word need it, since a bare `Machine` no longer has `IF`/`BEGIN`/`VARIABLE`/etc. defined at all. | `system.fth`, `primitives.ts`, `dictionary.ts`, `inner.ts`, `rebel-opcodes.json`, `test-support.ts` |
+| **M43** | Self-hosting the outer interpreter (§1.54, `spec/04-FORTH-CORE.md` §5.2/§6.13) — the deferred half of M42's own spec. `WORD`/`FIND`/`NUMBER`/`INTERPRET`/`[`/`]` and `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` are all genuine dictionary words now; the old native tokenizer survives only as a fallback (bootstrapping `system.fth` itself, and any `Machine` that never loads a bootstrap layer). Full detail in §1.54. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `app.spec.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

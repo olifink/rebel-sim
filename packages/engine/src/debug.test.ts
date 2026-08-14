@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bootMachine } from './test-support.js';
+import { AMPLE_STEP_BUDGET, bootMachine } from './test-support.js';
 
 describe('Word-level breakpoints (DEBUGGING.md, M10)', () => {
   it('setBreakpoint/clearBreakpoint throw on an unknown word', () => {
@@ -51,15 +51,19 @@ describe('Word-level breakpoints (DEBUGGING.md, M10)', () => {
     m.setBreakpoint('SQUARE');
 
     m.beginLine('5 SQUARE');
-    expect(m.step(1)).toBe('more-to-run'); // '5' pushed, SQUARE not reached yet
-    expect(m.stack.toArray()).toEqual([5]);
+    // M43: pushing '5' now takes many primitive-level steps of its own
+    // (WORD/FIND/NUMBER, self-hosted INTERPRET) rather than one native
+    // dispatch, so a step budget genuinely too small to finish the line
+    // proves incrementality still works without hardcoding exactly how
+    // many steps '5' alone costs.
+    expect(m.step(10)).toBe('more-to-run');
 
-    const status = m.step(1000);
+    const status = m.step(AMPLE_STEP_BUDGET);
     expect(status).toBe('breakpoint');
     expect(m.pausedAtWord()).toBe('SQUARE');
     expect(m.stack.toArray()).toEqual([5]); // paused before SQUARE's body ran, nothing consumed yet
 
-    expect(m.step(1000)).toBe('idle'); // resumes past the breakpoint, runs SQUARE, finishes the line
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle'); // resumes past the breakpoint, runs SQUARE, finishes the line
     expect(m.stack.toArray()).toEqual([25]);
   });
 
@@ -70,9 +74,9 @@ describe('Word-level breakpoints (DEBUGGING.md, M10)', () => {
     m.setBreakpoint('SQUARE');
 
     m.beginLine('SQUARE');
-    expect(m.step(1000)).toBe('breakpoint');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('breakpoint');
     expect(m.pausedAtWord()).toBe('SQUARE');
-    expect(m.step(1000)).toBe('idle');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
     expect(m.stack.toArray()).toEqual([25]);
   });
 
@@ -104,11 +108,11 @@ describe('Word-level breakpoints (DEBUGGING.md, M10)', () => {
 
     m.beginLine('3 COUNTDOWN');
     let breaks = 0;
-    let status = m.step(1000);
+    let status = m.step(AMPLE_STEP_BUDGET);
     while (status === 'breakpoint') {
       breaks++;
       expect(m.pausedAtWord()).toBe('COUNTDOWN');
-      status = m.step(1000);
+      status = m.step(AMPLE_STEP_BUDGET);
     }
     expect(status).toBe('idle');
     expect(breaks).toBe(4);

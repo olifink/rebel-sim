@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bootMachine } from './test-support.js';
+import { AMPLE_STEP_BUDGET, bootMachine } from './test-support.js';
 
 describe('EXECUTE (DEVELOPING.md, deferred from M13 — nothing in scope needed it until now)', () => {
   it('EXECUTE on a primitive xt runs it exactly like a direct call', () => {
@@ -59,11 +59,11 @@ describe('EXECUTE (DEVELOPING.md, deferred from M13 — nothing in scope needed 
     m.setBreakpoint('SQUARE');
 
     m.beginLine("5 ' SQUARE EXECUTE");
-    expect(m.step(1000)).toBe('breakpoint');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('breakpoint');
     expect(m.pausedAtWord()).toBe('SQUARE');
     expect(m.stack.toArray()).toEqual([5]); // paused before SQUARE's body ran
 
-    expect(m.step(1000)).toBe('idle');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
     expect(m.stack.toArray()).toEqual([25]);
   });
 });

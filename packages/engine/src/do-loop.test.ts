@@ -53,7 +53,10 @@ describe('DO/LOOP (M8, CORE-VOCABULARY.md §6)', () => {
   });
 
   it('DO/LOOP used outside a definition throws (compile-only)', () => {
+    // M43: self-hosted INTERPRET signals this via generic ABORT (no
+    // message-carrying THROW mechanism exists yet, spec/04-FORTH-CORE.md
+    // §8) rather than the native fallback's own specific message.
     const m = bootMachine();
-    expect(() => m.interpret('5 0 DO I LOOP')).toThrow(/compile-only/);
+    expect(() => m.interpret('5 0 DO I LOOP')).toThrow();
   });
 });

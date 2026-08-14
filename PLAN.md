@@ -3511,3 +3511,102 @@ dropping the now-inapplicable "bare kernel can compile WORDS from
 scratch" test case, not a coverage loss elsewhere). App suite unaffected: 20 passed. Both packages
 typecheck; `system.fth` verified paren-clean via a small standalone
 script before the final run, not just by trial and error.
+
+## M43 — Self-hosting the outer interpreter (`spec/04-FORTH-CORE.md` §5.2/§6.13) — done
+
+The deferred half of M42's own spec: `:`, `;`, `IMMEDIATE` become real
+KERNEL dictionary entries — found via the same `FIND`-then-execute-or-
+compile path as any other word, never special-cased by spelling — and
+`WORD`, `FIND`, `NUMBER`, `INTERPRET`, `[`, `]` exist as ordinary
+dictionary words realizing the outer interpreter's tokenize/dispatch
+contract in portable Forth source, not engine-internal TypeScript with
+no dictionary presence.
+
+**The architectural piece M42 didn't need**: `WORD` must return
+`(addr, len)` into real arena memory, but the engine's tokenizer used to
+pre-split each line into a plain JS `string[]`, with no address to hand
+back. Replaced `currentTokens`/`currentTokenIndex` with two absolute
+arena addresses (`inputPos`/`inputEnd`) bounding the current line in the
+`TIB` (bumped 128→256 bytes — `system.fth`'s longest line, 144 chars,
+already exceeded the old limit once every line has to physically fit
+rather than live in a JS string). One method, `wordScan()`, became the
+single real implementation three things build on: `nextInputToken()`
+(existing native primitives' contract unchanged — none needed to
+change), the new `WORD` primitive (token 134), and the native fallback
+tokenizer itself.
+
+**The chicken-and-egg problem, resolved per your own decision**:
+`system.fth`'s own source needs *something* native to interpret it
+before the `INTERPRET` it defines exists. `Machine.dispatchLine()`
+resolves and caches `INTERPRET`'s `cfa` the first time `findWord` finds
+it, threading through it when available and falling back to a slimmed
+native tokenizer (todays's logic, minus all `:`/`;`/`IMMEDIATE`/
+`COMPILE-ONLY` special-casing, which is genuinely simpler than before,
+not more complex) otherwise. A bare `new Machine()` that never loads
+`system.fth` keeps using the fallback forever, by design — most
+engine-level tests deliberately construct one this way and needed zero
+changes. Production always boots through `system.fth`, so it always
+runs the genuine self-hosted path.
+
+**`system.fth` additions, appended at the end (`INTERPRET` load-order-
+last per §6.13)**: `FIND` (chain-walk, built on two scratch `VARIABLE`s
+rather than deep stack juggling — simpler to get right, this isn't a
+hot path), `NUMBER` (spec's own reference has **no digit validation at
+all** — extended with a per-character range check and a digit-vs-BASE
+check, both `ABORT`ing, per your decision, so a genuine typo still
+errors instead of silently becoming a meaningless number, preserving
+the exact behavior dozens of existing tests already depended on),
+`LIT-XT`, `[`/`]`, and `INTERPRET` itself (the full §5.1-5.4 algorithm).
+Error messages from the self-hosted path are deliberately generic
+`ABORT` rather than message-specific — no Forth-level "throw with a
+custom message" mechanism exists yet (spec's own §8 flags this as
+genuinely open, unscoped work), per your decision to accept that rather
+than build one now.
+
+**Two real bugs found, not just spec-compliance questions**:
+1. `I`/`J`'s first draft ported the classic `RP@ @` idiom verbatim,
+   and broke every DO-loop test — same garbage value every iteration.
+   Root cause: `I`/`J` used to be primitives (no return-stack frame of
+   their own); as ordinary M42-era colon-definitions, *calling* them
+   pushes their own return address onto the same return stack they
+   `RP@` into. Fixed by skipping that frame explicitly. Caught
+   immediately by existing test coverage, not shipped silently broken.
+2. A pre-existing `app.spec.ts` bug: tests calling
+   `app.remoteChannel.push(text)` directly never restarted the
+   animation-frame pump the way the real WebMCP `type` handler does
+   (`push(text); this.wake();`) — worked by accident while the pump
+   happened to still be alive from a previous push, and went from
+   "usually fine" to "reliably broken" once M43's own step-budget needs
+   made ticks larger and less frequent, widening the gap between two
+   pushes enough to expose it. Fixed with a shared `typeIntoRepl()` test
+   helper. Chased via direct engine-level reproduction
+   (`startRepl()` + `RemoteChannel`, matching the app's exact usage)
+   before touching the app at all — confirmed the engine itself was
+   correct first, then found the actual gap instead of guessing at
+   timeout numbers.
+
+**A real, mostly-cosmetic performance shift**: `FIND`'s chain-walk is
+O(dictionary size) — ~170 entries once `system.fth` has loaded, so a
+single lookup can cost ~10^4 primitive-level steps, versus the old
+tokenizer's roughly-one-step-per-token. Still microseconds of real
+wall-clock time, but `step()` budgets tuned for the old cost model
+needed bumping (`AMPLE_STEP_BUDGET` in test-support.ts for engine
+tests; `app.ts`'s `STEP_BUDGET` 2000→500,000) — `step()` returns the
+moment a line finishes/blocks/breakpoints regardless of the budget
+ceiling, so this costs nothing extra for a short line.
+
+**Tests**: `word-state.test.ts` (9 cases, `WORD`/`STATE` behavior),
+`self-hosted-interpreter.test.ts` (17 cases, `FIND`/`NUMBER`/`INTERPRET`
+proven correct end-to-end via the `' INTERPRET EXECUTE <text>` idiom —
+running trailing line text through the real self-hosted path even
+before the driving loop preferred it by default), plus updates to
+`dictionary.test.ts`/`debug.test.ts`/`execute.test.ts`/`do-loop.test.ts`/
+`forget.test.ts` for step-budget and generic-`ABORT`-message
+consequences already reasoned through in the plan, not discovered as
+surprises. Full engine suite: 343 passed (315 before M43, 28 new). App
+suite: 20 passed, unchanged in count, one pre-existing bug fixed along
+the way. Both packages typecheck; `system.fth` re-verified paren-clean
+before every load-bearing test run, matching M42's own discipline.
+`IMPLEMENTATION.md` §1.10/§1.11 rewritten to describe the real
+architecture (not just noted as stale), new §1.54 added, milestone
+table backfilled through M43.

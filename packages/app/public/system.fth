@@ -305,7 +305,11 @@
 ( the actual right-sized tool for this specific job -- VOCABULARY )
 ( and USE stay reserved for their own real use case, project and )
 ( cart isolation, once that's a concrete need, not this one. )
-HIDE >CFA
+( >CFA deliberately NOT hidden here (M43, unlike XT-NAME/the -XT )
+( constants below, which really are SEE-only plumbing): INTERPRET, )
+( defined further down, needs to look it up by name on every single )
+( token it dispatches, not just once at some other word's own )
+( compile time the way RECURSE's compiled reference to it does. )
 HIDE XT-NAME
 HIDE LIT-XT
 HIDE EXIT-XT
@@ -348,4 +352,143 @@ VOCABULARY FORTH
   LATEST-ADDR @ CURRENT-VOCAB @ !
   DUP @ LATEST-ADDR !
   CURRENT-VOCAB !
+;
+
+( ---------------------------------------------------------------- )
+( spec/04-FORTH-CORE.md section 6.13 (M43): the self-hosted outer )
+( interpreter itself. WORD/STATE/:/;/IMMEDIATE/COMPILE-ONLY are all )
+( native primitives now -- repl.ts, primitives.ts -- FIND, NUMBER, )
+( the two mode-switch words, and INTERPRET are Forth source, built )
+( from them plus everything above. INTERPRET MUST load last of all -- )
+( it is the first point where the driving loop can switch from the )
+( native fallback tokenizer to this real self-hosted one. )
+
+( FIND uses two scratch variables rather than juggling addr/len on )
+( the data or return stack across the whole chain-walk -- simpler to )
+( get right than deep PICK arithmetic or R-stack parking, and this )
+( isn't a hot path. Hidden below, once FIND itself no longer needs )
+( to find them by name. )
+VARIABLE FIND-ADDR
+VARIABLE FIND-LEN
+
+( FIND addr len -- entry-addr flag : chain-walk from LATEST toward 0, )
+( skipping HIDDEN entries, comparing each candidate's already-uppercase )
+( stored name against addr len case-insensitively. entry-addr is 0 )
+( when flag is 0 -- meaningless either way, per spec's own contract. )
+( The per-character comparison uppercases the *input* byte only, )
+( since a stored name is already uppercase -- written that way at )
+( definition time -- lowercase a-z, ASCII 97-122, shift down by 32. )
+: FIND ( addr len -- entry-addr flag )
+  FIND-LEN ! FIND-ADDR !
+  LATEST
+  BEGIN
+    DUP
+  WHILE
+    DUP 4 + C@
+    DUP 64 AND
+    IF
+      DROP
+    ELSE
+      31 AND FIND-LEN @ =
+      IF
+        DUP 5 +
+        -1
+        FIND-LEN @ 0 DO
+          OVER I + C@
+          FIND-ADDR @ I + C@
+          DUP 96 > OVER 123 < AND IF 32 - THEN
+          =
+          AND
+        LOOP
+        IF
+          DROP -1 EXIT
+        THEN
+        DROP
+      THEN
+    THEN
+    @
+  REPEAT
+  DROP
+  0 0
+;
+HIDE FIND-ADDR
+HIDE FIND-LEN
+
+( NUMBER addr len -- n : converts addr len to a signed cell in the )
+( current BASE. spec/04-FORTH-CORE.md's own reference definition has )
+( no digit validation at all -- ':'/';' (58/59), immediately past )
+( '9', would silently parse as digit values 3/4 -- which would turn )
+( a genuine typo into a silently-wrong number instead of the )
+( "unrecognized word" error this project's whole test suite already )
+( depends on. Extended here with an explicit per-character range )
+( check -- only '0'-'9'/'A'-'Z', after the same uppercase-fold FIND )
+( uses -- and a digit-against-BASE check, both calling ABORT on )
+( failure -- and one more guard spec's own text separately documents )
+( as a related gap: a lone '-' with no digits at all, which the )
+( unguarded version would read one byte past the token's own bounds )
+( trying to process as if it had a digit. )
+: NUMBER ( addr len -- n )
+  DUP 0= IF 2DROP 0 EXIT THEN
+  OVER C@ 45 = >R
+  R@ IF 1 - SWAP 1 + SWAP THEN
+  DUP 0= IF ABORT THEN
+  0 -ROT
+  OVER + SWAP
+  DO
+    I C@
+    DUP 96 > OVER 123 < AND IF 32 - THEN
+    DUP 48 58 WITHIN OVER 65 91 WITHIN OR 0= IF ABORT THEN
+    DUP 57 > IF 55 - ELSE 48 - THEN
+    DUP BASE @ < INVERT IF ABORT THEN
+    SWAP BASE @ * +
+  LOOP
+  R> IF NEGATE THEN
+;
+
+( LIT's own xt, resolved once here rather than by INTERPRET calling )
+( ' at every compile step -- the same pattern section 6.5's )
+( control-flow block already established for BRANCH-XT/etc. )
+' LIT CONSTANT LIT-XT
+
+( [ / ] : the ordinary mode-switch words. [ must be IMMEDIATE so it )
+( takes effect while compiling; the literal STATE values match )
+( 03-SYSVARS.md's encoding, already used throughout this engine: )
+( 0 = interpreting, -1 = compiling. )
+: [ 0 STATE ! ; IMMEDIATE
+: ] -1 STATE ! ;
+
+( INTERPRET -- : tokenizes and dispatches one line, per )
+( spec/04-FORTH-CORE.md section 5.1-5.4's contract exactly. A found )
+( word EXECUTEs -- interpreting, unless COMPILE-ONLY -- ABORT -- or, )
+( while compiling, EXECUTEs if IMMEDIATE else compiles a call via )
+( comma. A token that isn't a defined word falls through to NUMBER; )
+( the result is pushed while interpreting or compiled as LIT plus )
+( its literal cell while compiling. )
+: INTERPRET ( -- )
+  BEGIN
+    BL WORD
+    DUP
+  WHILE
+    2DUP FIND
+    IF
+      NIP NIP
+      DUP >CFA
+      STATE @
+      IF
+        OVER 4 + C@ 128 AND
+        IF NIP EXECUTE ELSE NIP , THEN
+      ELSE
+        OVER 4 + C@ 32 AND
+        IF ABORT ELSE NIP EXECUTE THEN
+      THEN
+    ELSE
+      DROP
+      NUMBER
+      STATE @
+      IF
+        LIT-XT , ,
+      THEN
+    THEN
+  REPEAT
+  2DROP
 ;

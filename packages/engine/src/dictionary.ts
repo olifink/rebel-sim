@@ -8,12 +8,13 @@
  *   Code Field (4 bytes)     — token ID: a primitive (1..N) or DOCOL (0)
  *   Parameter Field (...)    — present only for DOCOL entries: a list of XTs
  *
- * `:`/`;`/`IMMEDIATE` are deliberately NOT modeled as dictionary words
- * here (a legitimate minimal-Forth simplification, not every classic
- * Forth's choice) — they need direct access to compiler state
- * (HERE/LATEST/STATE) that a plain primitive's stack-effect-only
- * interface (primitives.ts) doesn't expose, so the outer interpreter
- * (repl.ts) special-cases them as compiler syntax instead.
+ * `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` ARE ordinary dictionary entries
+ * (M43, spec/04-FORTH-CORE.md §5.2) — genuine `primitives.ts` cases,
+ * found via `FIND` like any other word, never special-cased by
+ * spelling. They need direct access to compiler state (HERE/LATEST/
+ * STATE) a plain stack-effect primitive doesn't otherwise reach, which
+ * is why they're native KERNEL primitives rather than BOOTSTRAP Forth
+ * source — not why they lack a dictionary entry, which they don't.
  */
 
 import { alignCell, Arena, CELL_SIZE } from './arena.js';

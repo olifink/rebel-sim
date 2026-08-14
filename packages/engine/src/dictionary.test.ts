@@ -50,10 +50,47 @@ describe('colon-definitions', () => {
     expect(m.screen.readRowText(0).trimEnd()).toBe('*');
   });
 
-  it('rejects ; outside a definition and : nested inside one', () => {
+  it('rejects ; outside a definition', () => {
     const m = new Machine();
     expect(() => m.interpret(';')).toThrow(/outside a definition/);
-    expect(() => m.interpret(': A : B ; ;')).toThrow(/cannot nest/);
+  });
+
+  it('a : nested inside another definition still fails safely (M43: uniform dispatch)', () => {
+    // spec/04-FORTH-CORE.md §5.2: once `:` is an ordinary non-immediate
+    // primitive rather than special-cased syntax, "nothing external gates
+    // this" — a nested `:` no longer throws immediately (§5.2's own
+    // words). It gets *compiled* as an inert call into A's body instead;
+    // the very next token, B, is then looked up and fails as an
+    // unrecognized word (B was never A's name — the whole point of the
+    // old "cannot nest" check was to catch exactly this kind of malformed
+    // input). What matters is preserved either way: an error is thrown,
+    // and the half-built definition is fully rolled back.
+    const m = new Machine();
+    const latestBefore = m.sysvars.getLatest();
+    const hereBefore = m.sysvars.getHere();
+
+    expect(() => m.interpret(': A : B ; ;')).toThrow(/unrecognized word: B/);
+
+    expect(m.sysvars.getLatest()).toBe(latestBefore);
+    expect(m.sysvars.getHere()).toBe(hereBefore);
+    expect(m.sysvars.getState()).toBe(0);
+    expect(() => m.interpret('A')).toThrow(/unrecognized word/);
+  });
+
+  it(': / ; / IMMEDIATE / COMPILE-ONLY are genuine, findable dictionary entries (M43)', () => {
+    // spec/04-FORTH-CORE.md §5.2: the whole point of this milestone —
+    // these are no longer special-cased strings the outer loop matches
+    // before dictionary lookup ever runs; they're ordinary primitives
+    // like anything else, findable via `findWord` and listed by `WORDS`.
+    const m = new Machine();
+    const names = listDictionaryEntries(m).map((e) => e.name);
+    for (const name of [':', ';', 'IMMEDIATE', 'COMPILE-ONLY']) {
+      expect(names).toContain(name);
+    }
+    const semicolon = listDictionaryEntries(m).find((e) => e.name === ';')!;
+    expect(semicolon.immediate).toBe(true);
+    const colon = listDictionaryEntries(m).find((e) => e.name === ':')!;
+    expect(colon.immediate).toBe(false);
   });
 
   it('rolls back a definition aborted by a compile-time error', () => {

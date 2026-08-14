@@ -34,6 +34,22 @@ function press(code: string): void {
   window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
 }
 
+// Pushes `text` into the app's RemoteChannel *and* restarts the pump —
+// the real WebMCP `type` tool handler always does both together
+// (app.ts: `remoteChannel.push(text); this.wake();`), since a frame
+// that finds step() blocked with nothing else changed lets the
+// requestAnimationFrame chain die rather than polling forever at idle
+// (app.ts's own tick() comment). Calling push() alone, as this file's
+// tests used to, works only by accident — while the pump happens to
+// still be alive from a previous push — and silently does nothing once
+// it's died out in between two pushes. `wake` is private on App, hence
+// the same "reach into private fields via unknown" cast every other
+// helper here already uses.
+function typeIntoRepl(app: { remoteChannel: { push(text: string): void } }, text: string): void {
+  app.remoteChannel.push(text);
+  (app as unknown as { wake(): void }).wake();
+}
+
 describe('App', () => {
   beforeEach(async () => {
     vi.stubGlobal(
@@ -106,13 +122,21 @@ describe('App', () => {
       resumeFromBreakpoint(): void;
     };
 
-    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    typeIntoRepl(app, ': SQUARE DUP * ;\n');
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
 
     app.machine.setBreakpoint('SQUARE');
-    app.remoteChannel.push('5 SQUARE\n');
+    typeIntoRepl(app, '5 SQUARE\n');
 
     await waitFor(() => app.pausedWord() !== undefined);
+    // pausedWord() is a raw signal read, unlike every other waitFor() in
+    // this file (which poll rendered .textContent directly) — it can
+    // resolve before Angular's zone-triggered change detection has
+    // actually flushed the DOM. detectChanges() here makes that explicit
+    // rather than relying on incidental timing (M43: larger, less-frequent
+    // tick() calls under the self-hosted interpreter's own step-budget
+    // needs removed the lucky window that used to paper over this).
+    fixture.detectChanges();
     expect(app.pausedWord()).toBe('SQUARE');
     const stackAtPause = compiled.querySelector('.stack-values')?.textContent ?? '';
     expect(stackAtPause).toContain('5');
@@ -140,7 +164,7 @@ describe('App', () => {
       remoteChannel: { push(text: string): void };
     };
 
-    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    typeIntoRepl(app, ': SQUARE DUP * ;\n');
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
     fixture.detectChanges();
 
@@ -174,7 +198,7 @@ describe('App', () => {
       remoteChannel: { push(text: string): void };
     };
 
-    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    typeIntoRepl(app, ': SQUARE DUP * ;\n');
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
     fixture.detectChanges();
 
@@ -196,10 +220,10 @@ describe('App', () => {
       remoteChannel: { push(text: string): void };
     };
 
-    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    typeIntoRepl(app, ': SQUARE DUP * ;\n');
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
 
-    app.remoteChannel.push('1 2 3 WARM\n');
+    typeIntoRepl(app, '1 2 3 WARM\n');
     await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('(empty)'));
     fixture.detectChanges();
 
@@ -213,6 +237,13 @@ describe('App', () => {
   // reload would. Defining SQUARE and then confirming it's gone (rather
   // than just checking the stack) is the part that specifically proves a
   // whole new Machine replaced the old one, not just a stack clear.
+  //
+  // Explicit 10s test timeout (vitest's own, third `it()` argument, not
+  // waitFor's): the COLD waitFor below already allows up to 4s on its
+  // own, which alone was flush against vitest's 5s *default* test
+  // timeout, no room left for anything else in this test — a pre-existing
+  // near-miss independent of M43, just margin worth widening while
+  // touching this test at all.
   it('COLD reconstructs the Machine — the dictionary resets to boot + system.fth vocabulary', async () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
@@ -222,18 +253,18 @@ describe('App', () => {
       remoteChannel: { push(text: string): void };
     };
 
-    app.remoteChannel.push(': SQUARE DUP * ;\n');
+    typeIntoRepl(app, ': SQUARE DUP * ;\n');
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
 
-    app.remoteChannel.push('COLD\n');
-    await waitFor(() => !(compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'), 5000);
+    typeIntoRepl(app, 'COLD\n');
+    await waitFor(() => !(compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'), 4000);
     fixture.detectChanges();
 
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').not.toContain('SQUARE');
     // The fresh boot's own vocabulary (system.fth defines WORDS) is
     // present — confirms a real reboot happened, not just a wipe.
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('WORDS');
-  });
+  }, 10_000);
 
   it('the left-side sysvars panel lists live FORTH.STATE/.BASE values and updates as they change', async () => {
     const fixture = TestBed.createComponent(App);
@@ -247,7 +278,7 @@ describe('App', () => {
     await waitFor(() => (compiled.querySelector('.sysvar-table')?.textContent ?? '').includes('BASE'));
     expect(compiled.querySelector('.sysvar-table')?.textContent ?? '').toContain('STATE');
 
-    app.remoteChannel.push('16 BASE !\n');
+    typeIntoRepl(app, '16 BASE !\n');
     await waitFor(() => {
       const row = Array.from(compiled.querySelectorAll('.sysvar-table tr')).find((tr) =>
         tr.textContent?.includes('BASE'),
