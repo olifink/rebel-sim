@@ -3633,3 +3633,35 @@ them were all rewritten (`**[Revised]**`, matching
 actual, already-shipped definition: three `ABORT` guards (character
 range, BASE range, lone-`-`) folded directly into `NUMBER` itself.
 Doc-only change — engine suite unaffected (343 passed, unchanged).
+
+## M43 follow-up 2 — `NUMBER` echoes its failing token before `ABORT` — done
+
+Classic fig-Forth/Forth-79 had no `THROW`/`CATCH` (an ANS Forth
+invention) — the whole error-reporting convention was `ABORT` plus
+`TYPE`ing the offending token first, the familiar `TOKEN ?`. Added
+this as a RECOMMENDED (not required) convention: `04-FORTH-CORE.md`
+§8 gets a new bullet describing it generally, and §6.13's `NUMBER`
+section notes that `NUMBER` is the natural place to do it, since it's
+the only word in the failure path still holding the token's original
+`addr len` by the time a guard can fail. `system.fth`'s `NUMBER` now
+stashes `addr len` into two scratch variables (`NUM-ADDR`/`NUM-LEN`,
+`HIDE`n afterward, same pattern as `FIND`'s own `FIND-ADDR`/
+`FIND-LEN`) before its sign-stripping step, and a small `NUM-ABORT`
+helper (`NUM-ADDR @ NUM-LEN @ TYPE SPACE ABORT`) replaces all three of
+`NUMBER`'s bare `ABORT` calls — composing for free with `reportError`'s
+existing generic `? ABORT` tail, so a bad token like `FOOBAR` now
+prints `FOOBAR ? ABORT` instead of a bare `? ABORT`. No new primitive.
+Caught and fixed a genuine embedded-paren bug in the new comment text
+while writing it (same class M43 hit five times — a whitespace-
+delimited token ending in `)` closes the comment early; the loader's
+`(` reads tokens via the same space-delimited scan as `WORD`, not a
+raw character scan, so only a token whose *last* character is `)`
+matters, not any `)` appearing mid-line). Two new
+`self-hosted-interpreter.test.ts` cases assert the actual screen text.
+One existing "lone minus sign" test was corrected alongside this: a
+bare `-` typed at the top level never reaches this guard at all (`-`
+is itself a real dictionary word, so `FIND` matches it before `NUMBER`
+runs — the actual error was always a stack underflow from executing
+`-` with nothing on the stack), so that test now calls `NUMBER`
+directly (`S" -" NUMBER`) to genuinely exercise the guard. Full engine
+suite: 345 passed (343 before, +2 new).

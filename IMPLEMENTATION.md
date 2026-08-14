@@ -2180,6 +2180,32 @@ with a shared `typeIntoRepl()` test helper that calls both together.
 before M43's first step, +28 new across the milestone). App suite: 20
 passed, unchanged in count, one pre-existing bug fixed.
 
+**M43 follow-up: `NUMBER` echoes its failing token before `ABORT`ing**
+(`spec/04-FORTH-CORE.md` §6.13/§8, RECOMMENDED not required). Neither
+fig-Forth nor Forth-79 (this spec's classic ancestors) had `THROW`/
+`CATCH` — their entire error-reporting convention was `ABORT` plus
+`TYPE`ing the offending token first, the familiar `TOKEN ?`. `system.fth`
+now does exactly this: `NUMBER` stashes its original `addr len` into two
+scratch variables (`NUM-ADDR`/`NUM-LEN`) before any in-place
+manipulation (sign-stripping changes them), and a small helper,
+`NUM-ABORT`, replaces all three of `NUMBER`'s bare `ABORT` calls —
+`NUM-ADDR @ NUM-LEN @ TYPE SPACE ABORT`. This composes for free with
+`reportError`'s own generic `? ABORT` tail (§1.10) at the top-level REPL:
+typing a bad token like `FOOBAR` now shows `FOOBAR ? ABORT` rather than
+just `? ABORT`. Both scratch variables and the helper are `HIDE`n
+afterward, same as `FIND`'s own `FIND-ADDR`/`FIND-LEN` pattern just
+above it. No new primitive, no general message-carrying mechanism — a
+word other than `NUMBER` calling `ABORT` for its own reasons still gets
+the plain, unlabeled behavior. Verified via two new
+`self-hosted-interpreter.test.ts` cases asserting the actual screen text
+(not just that an error was thrown); one existing "lone minus sign"
+test was corrected alongside this — a bare `-` typed at the top level
+never reaches this guard at all (`-` is itself a real dictionary word,
+so `FIND` matches it before `NUMBER` runs; the actual error was always
+a stack underflow from executing `-` with nothing on the stack), so
+that test now calls `NUMBER` directly (`S" -" NUMBER`, bypassing `FIND`)
+to genuinely exercise the guard.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`

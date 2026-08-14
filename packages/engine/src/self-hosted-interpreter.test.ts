@@ -98,9 +98,33 @@ describe('NUMBER (spec/04-FORTH-CORE.md §6.13)', () => {
     expect(() => m.interpret(viaInterpret('FOOBAR'))).toThrow();
   });
 
-  it('rejects a lone minus sign instead of reading past the token', () => {
+  it('rejects a lone minus sign passed directly to NUMBER', () => {
+    // A bare "-" typed at the top level never reaches this guard at all —
+    // "-" is itself a real dictionary word (subtraction), so FIND matches
+    // it before NUMBER ever runs; EXECUTE-ing it on an empty stack throws
+    // its own "stack underflow" first. Calling NUMBER directly (bypassing
+    // FIND, the way S"'s addr/len feeds it here) is the only way to reach
+    // this specific guard, since NUMBER is itself a public BOOTSTRAP word
+    // (§6.13) other code can call directly, not merely INTERPRET's helper.
     const m = bootMachine();
-    expect(() => m.interpret(viaInterpret('-'))).toThrow();
+    expect(() => m.interpret(viaInterpret('S" -" NUMBER'))).toThrow();
+  });
+
+  it('echoes the failing token to the screen before aborting (fig-Forth/Forth-79 "TOKEN ?" convention)', () => {
+    // Neither predecessor had THROW/CATCH (an ANS Forth invention) — the
+    // whole error-reporting mechanism was ABORT plus TYPEing the token
+    // that failed. NUMBER does the TYPE itself (system.fth's NUM-ABORT)
+    // since it's the only place holding the token's original addr/len by
+    // the time a validation guard can fail.
+    const m = bootMachine();
+    expect(() => m.interpret(viaInterpret('FOOBAR'))).toThrow();
+    expect(m.screen.readRowText(0).trimEnd()).toBe('FOOBAR');
+  });
+
+  it('echoes a lone minus sign the same way, called directly on NUMBER', () => {
+    const m = bootMachine();
+    expect(() => m.interpret(viaInterpret('S" -" NUMBER'))).toThrow();
+    expect(m.screen.readRowText(0).trimEnd()).toBe('-');
   });
 });
 

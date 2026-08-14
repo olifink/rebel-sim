@@ -414,36 +414,50 @@ VARIABLE FIND-LEN
 HIDE FIND-ADDR
 HIDE FIND-LEN
 
+( NUMBER's own error path echoes the token that failed to parse -- the )
+( classic fig-Forth/Forth-79 "TOKEN ?" convention -- neither had THROW )
+( or CATCH, that's an ANS Forth invention; ABORT plus printing the bad )
+( token was the whole error-reporting mechanism. Composes for free )
+( with reportError's own generic "? ABORT" tail in repl.ts to reproduce )
+( that output cheaply: TYPE the original token, a space, then ABORT -- )
+( no message-carrying THROW needed. Scratch variables hold the )
+( original addr len since NUMBER's own sign-stripping has already )
+( changed them by the time a validation guard can fail. )
+VARIABLE NUM-ADDR
+VARIABLE NUM-LEN
+
+: NUM-ABORT ( -- )
+  NUM-ADDR @ NUM-LEN @ TYPE SPACE ABORT
+;
+
 ( NUMBER addr len -- n : converts addr len to a signed cell in the )
-( current BASE. spec/04-FORTH-CORE.md's own reference definition has )
-( no digit validation at all -- ':'/';' (58/59), immediately past )
-( '9', would silently parse as digit values 3/4 -- which would turn )
-( a genuine typo into a silently-wrong number instead of the )
-( "unrecognized word" error this project's whole test suite already )
-( depends on. Extended here with an explicit per-character range )
-( check -- only '0'-'9'/'A'-'Z', after the same uppercase-fold FIND )
-( uses -- and a digit-against-BASE check, both calling ABORT on )
-( failure -- and one more guard spec's own text separately documents )
-( as a related gap: a lone '-' with no digits at all, which the )
-( unguarded version would read one byte past the token's own bounds )
-( trying to process as if it had a digit. )
+( current BASE. Validates every character against '0'-'9'/'A'-'Z', )
+( after the same uppercase-fold FIND uses, and against the current )
+( BASE, and rejects a lone '-' with no digits at all -- all three )
+( call NUM-ABORT rather than silently accepting a typo as some )
+( number. See 04-FORTH-CORE.md section 6.13's revised reference )
+( definition. )
 : NUMBER ( addr len -- n )
+  2DUP NUM-LEN ! NUM-ADDR !
   DUP 0= IF 2DROP 0 EXIT THEN
   OVER C@ 45 = >R
   R@ IF 1 - SWAP 1 + SWAP THEN
-  DUP 0= IF ABORT THEN
+  DUP 0= IF NUM-ABORT THEN
   0 -ROT
   OVER + SWAP
   DO
     I C@
     DUP 96 > OVER 123 < AND IF 32 - THEN
-    DUP 48 58 WITHIN OVER 65 91 WITHIN OR 0= IF ABORT THEN
+    DUP 48 58 WITHIN OVER 65 91 WITHIN OR 0= IF NUM-ABORT THEN
     DUP 57 > IF 55 - ELSE 48 - THEN
-    DUP BASE @ < INVERT IF ABORT THEN
+    DUP BASE @ < INVERT IF NUM-ABORT THEN
     SWAP BASE @ * +
   LOOP
   R> IF NEGATE THEN
 ;
+HIDE NUM-ADDR
+HIDE NUM-LEN
+HIDE NUM-ABORT
 
 ( LIT's own xt, resolved once here rather than by INTERPRET calling )
 ( ' at every compile step -- the same pattern section 6.5's )

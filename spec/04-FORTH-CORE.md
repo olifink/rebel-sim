@@ -1001,6 +1001,14 @@ inside `NUMBER` propagates and rolls back exactly like any other
 `ABORT`, including the one `INTERPRET`'s own step below already
 relies on §5.5/§5.6's contract for.
 
+**Echoing the token before each `ABORT` above is RECOMMENDED, not
+required** — see §8's own note on this. `NUMBER` is the natural place
+to do it: it already holds the token's original `addr len` (stashed
+before sign-stripping alters them, since a guard can fail after that
+point) at every one of its three failure sites, which is exactly what
+`TYPE`ing it back out before `ABORT`ing needs and what no other word
+in this call chain still has by the time `NUMBER` fails.
+
 **`INTERPRET`'s required behavior**, stated precisely enough to
 implement and verify independent of any one literal listing:
 
@@ -1169,6 +1177,21 @@ today:
   "the process doesn't crash" — it's "the *session* recovers to a
   known-good state," which is what makes an interactive Forth prompt
   usable at all after a typo.
+- **Echoing the failing token before `ABORT`** — RECOMMENDED, not
+  required. Neither of this specification's classic ancestors
+  (fig-Forth, Forth-79) had `THROW`/`CATCH` at all; their entire
+  error-reporting convention was `ABORT` plus `TYPE`ing the offending
+  token first (the familiar `TOKEN ?`, printed by the word that
+  detects the failure, since it's the one still holding that token's
+  `addr len` at the moment it fails — nothing needs to carry a message
+  anywhere for this). §6.13's `NUMBER` reference definition follows
+  this precedent directly, at each of its three validation guards. It
+  costs nothing beyond `TYPE` (already BOOTSTRAP, §6.7) and composes
+  with plain `ABORT` with no new mechanism, but it is not itself a
+  general message-carrying facility — a word other than `NUMBER` that
+  calls `ABORT` for its own reasons is not obligated to echo anything,
+  and nothing here binds a future `THROW`/`CATCH` design to preserve
+  this specific convention.
 
 **Not designed by this document, deliberately** (matching
 `CORE-VOCABULARY.md`'s own explicit scope cut):
