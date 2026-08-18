@@ -45,7 +45,7 @@ here for a Rebel-specific reason:
 **Every word below has to ship as a native primitive for now, regardless
 of which category it would classically belong to.** `PLAN.md`'s M8 entry
 already flags this: there's no `LOAD`/screen-source-interpretation
-subsystem yet (deferred, depends on the `SCRS` bank), so there's no
+subsystem yet (deferred, depends on the `BLKS` bank), so there's no
 bootstrap path that could load a "kernel written in Forth" at boot.
 Rebel-Sim's `Machine` boot-registers every word directly in TypeScript
 today (M2's write-up: "primitives are real dictionary entries too,
@@ -225,7 +225,7 @@ remote surface onto it (`PLAN.md`'s M8/M9 ordering).
 ## 11. Explicitly Out of Scope Here
 
 - **`LOAD`/screen-source interpretation** — a related but distinct
-  subsystem (reading a `SCRS` bank's contents as Forth source,
+  subsystem (reading a `BLKS` bank's contents as Forth source,
   `FORTH-ARCHITECTURE.md` §7's storage-model note). This document is
   what a screen's *contents* would be written in, not the loader that
   reads them in.

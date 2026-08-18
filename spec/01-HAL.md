@@ -702,30 +702,39 @@ plausible-looking layout from content files alone (ignoring a present
 `MMAP` asset) is non-conformant, even if every individual bank's content
 happens to load correctly.
 
-### 6.5 Optional/future: classic Forth screens (blocks)
+### 6.5 Optional/future: generic block storage (`BLKS`)
 
-`hal_block_read(n)`/`hal_block_write(n)` — classic 1024-byte Forth
-"screens" as a source-editing convenience — are **not** a raw
+`hal_block_read(n)`/`hal_block_write(n)` are **not** a raw
 numbered-block device call under this model. They are redefined as
 ordinary reads/writes of 1024 bytes at offset `n * 1024` within a
-resident bank of tag `SCRS` (distinct from `SCRN`, the framebuffer tag
-— do not confuse the two), persisted through the ordinary asset
-pipeline above like any other bank.
+resident bank of tag `BLKS` (**[Renamed, 2026-08-18]** was `SCRS`;
+distinct from `SCRN`, the framebuffer tag — do not confuse the two),
+persisted through the ordinary asset pipeline above like any other
+bank.
+
+`BLKS` is a **generic block buffer**, addressable only at 1024-byte
+granularity — it carries no assumption about what's stored in a given
+block. Classic 1024-byte Forth "screens" (source-editing text, the
+motivating use case this section was originally scoped around, and
+still its first real consumer) are one use of it, but nothing about the
+bank itself is screen- or text-specific; any block-structured data a
+target wants to address this way is equally valid content.
 
 This is **OPTIONAL** and forward-looking: as of this version, no target
-has Forth-level block/editor words that would actually write into such
-a bank, so there is no real write path to exercise yet, and `SCRS` has
-no assigned extension in the table above. A target implementing classic
-`BLOCK`/block-editor words MUST choose and document an `SCRS` extension
-consistent with §6.3's convention when it does.
+has Forth-level block words that would actually write into such a bank,
+so there is no real write path to exercise yet, and `BLKS` has no
+assigned extension in the table above. A target implementing `BLOCK`/
+`BUFFER`/`UPDATE`/`FLUSH` (or any other block-consuming words) MUST
+choose and document a `BLKS` extension consistent with §6.3's
+convention when it does.
 
-A screen/block editor built on `SCRS` will very likely display a
-screen's contents by copying its bytes into `CHAR` in bulk (e.g. one
-`SCRS` screen's worth of text `CMOVE`'d into the visible grid for
+A screen/block editor built on `BLKS` will very likely display a
+block's contents by copying its bytes into `CHAR` in bulk (e.g. one
+`BLKS` block's worth of text `CMOVE`'d into the visible grid for
 editing) rather than one character at a time through `emit`/
 `write_char` — exactly the case §3.2's `redraw_all()` exists for.
 Nothing new needs designing here when that editor is actually built:
-copy the screen's bytes into `CHAR`, then call `redraw_all()` (or its
+copy the block's bytes into `CHAR`, then call `redraw_all()` (or its
 Forth-level `REDRAW`) once to resynchronize the framebuffer, the same
 pattern the storage module already uses for a project restore.
 

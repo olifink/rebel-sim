@@ -142,9 +142,10 @@ choices for a fresh implementation to relitigate:
   raw pixel ops); `hal_key_pressed?`/`hal_get_key` are non-blocking reads
   against a ring buffer, with any blocking `KEY` built as an
   async/Promise-based layer on top, not by making the queue itself block;
-  `hal_block_read`/`hal_block_write` operate on an in-memory "screens"
-  bank (`SCRS`), not a raw device — persistence to browser storage happens
-  at project open/close time, not per block access.
+  `hal_block_read`/`hal_block_write` operate on an in-memory generic
+  block-storage bank (`BLKS`, renamed from `SCRS`), not a raw device —
+  persistence to browser storage happens at project open/close time, not
+  per block access.
 - **A single source-of-truth artifact** (not yet built anywhere) is
   supposed to generate primitive token IDs, sysvar offsets, dictionary
   flag bits, and bank tag/size-class tables into per-target outputs (a TS

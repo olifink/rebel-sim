@@ -377,12 +377,15 @@ Every dictionary entry, identical layout across all languages:
   typed asset files loaded whole into banks sized from the file's own size
   (`docs/STORAGE.md` §5). This is the resolved rule (superseding both v1's
   and `BRIEF.md`'s original raw-block framing): classic 1024-byte Forth
-  screens stay a *source-editing* concept, backed by an ordinary bank
-  (tag `SCRS`, new — add to `docs/MEMORY-MODEL.md` §3.3 when Phase 11
-  starts) loaded/saved through the storage module's existing project-asset
-  pipeline (`LoadAssetFile`/`SaveAsset`), not a second, separately-built
-  raw block-device path. `hal_block_read(n)`/`hal_block_write(n)` become
-  "read/write 1024 bytes at offset `n*1024` within the resident `SCRS`
+  block storage is a generic bank (tag `BLKS` — **[Renamed, 2026-08-18]**
+  was `SCRS`; the block-addressable content isn't inherently
+  screen/text-specific, source-editing screens are just its primary
+  consumer — see the `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` bullet below — add
+  to `docs/MEMORY-MODEL.md` §3.3 when Phase 11 starts) loaded/saved
+  through the storage module's existing project-asset pipeline
+  (`LoadAssetFile`/`SaveAsset`), not a second, separately-built raw
+  block-device path. `hal_block_read(n)`/`hal_block_write(n)` become
+  "read/write 1024 bytes at offset `n*1024` within the resident `BLKS`
   bank" — an ordinary bank access, not a device call — with persistence to
   disk happening at project open/close time, already built and
   byte-exact-verified by `CKernel::RunStorageSelfTest`.
@@ -392,7 +395,7 @@ Every dictionary entry, identical layout across all languages:
     directory/typed-extension shape `docs/STORAGE.md` §3/§4 describes —
     not a single flat blob per project — so a project genuinely round-trips
     between Rebel-Sim and Rebel-ROM asset-for-asset. `hal_block_read/write`
-    operate on the in-memory `SCRS` bank exactly as on Rebel-ROM; only the
+    operate on the in-memory `BLKS` bank exactly as on Rebel-ROM; only the
     load/save-to-disk step differs. **[Revised, M33]** originally
     implemented against OPFS (a closer conceptual match to real
     directories), then switched to `localStorage`: OPFS's Promise-based
@@ -410,6 +413,55 @@ Every dictionary entry, identical layout across all languages:
     unresolved (§9/§10, ties into that board's own boot-from-QSPI story),
     but the *addressing contract* — blocks are bank offsets, not device
     calls — carries over regardless of how the flash layout is finalized.
+
+* **`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` — the classic Forth block-buffer
+  words, spec'd but not yet built anywhere.** [2026-08-18, spec'd with
+  Oliver ahead of the Screen Editor work (`inspiration/Starting-FORTH.pdf`
+  ch. 3, `inspiration/figforth_editor_screens.txt`).] These are ordinary
+  portable Forth words, not primitives, built once over exactly two HAL
+  entry points:
+  - `hal_block_read(n, addr)`/`hal_block_write(n, addr)`: move exactly
+    1024 bytes between block `n`'s backing store and RAM at `addr`. No
+    caching/eviction semantics belong in this contract — every target
+    implements only "move these 1024 bytes," nothing more.
+  - Above that HAL boundary, `BLOCK ( n -- addr )`, `BUFFER ( n -- addr )`,
+    `UPDATE ( -- )`, `FLUSH ( -- )` are identical Forth source on every
+    target — a small, fixed 4-slot buffer pool (round-robin/least-
+    recently-loaded eviction, one dirty flag per slot; evicting a dirty
+    slot calls `hal_block_write` before reuse), the same shape classic
+    fig-FORTH used, sized so a real multi-block word like the reference
+    editor's `COPY` (`figforth_editor_screens.txt` SCR 3 of 6) works
+    without a later redesign.
+  - `BLKS` capacity: 16 blocks (16 KiB, rounds to the `S` bank size
+    class) — a generic block-storage scratch bank, not real storage;
+    trivially resizable later since nothing depends on the count being
+    fixed. `BLKS` itself carries no assumption about what's stored in a
+    given block — the Screen Editor (source text) is its first consumer,
+    but any block-structured content is equally valid.
+  * **Porting to Rebel-Sim (TypeScript):** `hal_block_read`/`write` are a
+    straight `memcpy` against `BLKS-base + n*1024` — the bank is fully
+    arena-resident, so these calls always succeed and never themselves
+    touch browser storage; only `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` (already
+    built, M5/M33) persist `BLKS` to `localStorage`, at project
+    open/close time, same as any other bank — `FLUSH`ing a dirty buffer
+    into the resident `BLKS` bank is a smaller, separate act from
+    persisting the whole project.
+  * **Porting to Rebel-Board (RISC-V):** `hal_block_read`/`write` do real
+    QSPI flash or USB block I/O; the 4-slot buffer pool and `BLOCK`/
+    `BUFFER`/`UPDATE`/`FLUSH` Forth source carry over unmodified — this is
+    the actual mechanism that makes real disk-backed block I/O tolerable
+    there, unlike on Rebel-Sim where it's free.
+  * **New extension needed:** `BLKS` needs its own entry in the
+    tag↔extension table (`storage.ts`'s `TAG_TO_EXTENSION` here;
+    `docs/STORAGE.md` §4 on Rebel-ROM) — `.SCR` is already `SCRN`'s (the
+    pixel framebuffer). Proposed: `.BLK` ("blocks") — **[Renamed,
+    2026-08-18]** was `.SCB`, dropped along with the `SCRS`→`BLKS`
+    rename since it isn't screen-specific either.
+  * **Status:** design only, nothing built yet. Next real step: register
+    the `BLKS` bank tag/size class, add `hal_block_read`/`hal_block_write`
+    as primitives, then `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` in
+    `system.fth`, before any editor command (`L`/`T`/`D`/... per
+    `figforth_editor_screens.txt`) can be written.
 
 * **`hal_millis()`:** monotonic milliseconds, needed for any timing/delay
   word. On Rebel-ROM, wire it to Circle's `CTimer` (already a fixed

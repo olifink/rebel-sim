@@ -356,19 +356,21 @@ minimum-mechanism-first discipline throughout.
 Vision only: `SEE`'s output feeding directly into an editable screen
 buffer — decompile `FOO`, drop the text into a screen, refine it there,
 recompile from the screen. This is explicitly blocked on infrastructure
-this repo hasn't built: `FORTH-ARCHITECTURE.md`'s `SCRS` bank (classic
-1024-byte Forth screens as a *source-editing* concept, distinct from
-the `CART`-tagged distributable-code bank) and the screen editor
+this repo hasn't built: `FORTH-ARCHITECTURE.md`'s `BLKS` bank (generic
+1024-byte block storage, renamed 2026-08-18 from `SCRS`; classic Forth
+screens are its first consumer as a *source-editing* concept, distinct
+from the `CART`-tagged distributable-code bank) and the screen editor
 vocabulary itself don't exist yet — `CORE-VOCABULARY.md` §11 notes the
-loading subsystem is "deferred, depends on the `SCRS` bank." Nothing to
+loading subsystem is "deferred, depends on the `BLKS` bank." Nothing to
 design here until that lands; noted so the connection to §1's original
 motivation isn't lost between now and then.
 
 ## 5. "Baking" a cart and comment stripping (future — genuinely unscoped)
 
 Vision only, using this repo's actual established terms:
-`FORTH-ARCHITECTURE.md` distinguishes editable **screens** (`SCRS`
-bank, source) from a distributable **cart** (`CART` bank,
+`FORTH-ARCHITECTURE.md` distinguishes editable **screens** (`BLKS`
+bank, generic block storage used here as source) from a distributable
+**cart** (`CART` bank,
 `/CARTS/<name>.CRT` on Rebel-Sim per `PORTING-WEB.md`) — "baking"
 would be the step that turns the former into the latter. Once that step
 exists, stripping §2's retained comments during baking (produce a
@@ -2609,7 +2611,7 @@ convention for one anywhere in this suite or `rebel-rom`.
 
 - **`RESTORE`, not `LOAD`.** `CORE-VOCABULARY.md` §11 already reserves
   `LOAD` for a distinct future feature (screen-source interpretation —
-  reading a `SCRS` bank's contents as Forth source). Using it here
+  reading a `BLKS` bank's contents as Forth source). Using it here
   would squat on that name.
 - **Project name lives in two new `STORAGE`-group sysvar fields,**
   `PROJECT-NAME-0`/`PROJECT-NAME-1` (offsets 12/16, appended after the

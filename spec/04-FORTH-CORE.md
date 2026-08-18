@@ -1217,11 +1217,12 @@ today:
 ## 9. Explicitly out of scope
 
 - **`LOAD` / classic screen-source interpretation** — reading a
-  resident `SCRS` bank's contents as Forth source (`01-HAL.md` §6.5).
+  resident `BLKS` bank's contents as Forth source (`01-HAL.md` §6.5,
+  generic block storage — **[Renamed, 2026-08-18]** was `SCRS`).
   Distinct from §7's bootstrap-loading requirement: §7 is how a target
   gets its *own* system vocabulary running before anything else exists;
   `LOAD` would be a *user-facing* word for interpreting arbitrary
-  block-resident source at runtime. Blocked on the same `SCRS`
+  block-resident source at runtime. Blocked on the same `BLKS`
   infrastructure `01-HAL.md` already flags as optional/future.
 - **Comment nesting.** `(` (§6.7) does not nest — the first closing `)`
   always ends it. A `\` (rest-of-line comment) word is not specified

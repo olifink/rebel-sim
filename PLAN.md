@@ -51,7 +51,8 @@ below were made explicitly with Oliver on 2026-07-29 rather than assumed.
    `hal_emit`/`hal_plot_char`/`hal_draw_*` (§7).
 4. **M4 — Keyboard**: raw event capture → non-blocking ring buffer →
    keymap translation, blocking `KEY` word layered on top (§7, `PORTING-WEB.md` §4).
-5. **M5 — Storage**: OPFS-backed projects/carts model, `SCRS` bank,
+5. **M5 — Storage**: OPFS-backed projects/carts model, `BLKS` bank
+   (generic block storage, renamed from `SCRS` 2026-08-18),
    `hal_block_read`/`write` (§7, `PORTING-WEB.md` §5).
 6. **M6 — PWA packaging**: manifest, service worker precache,
    `navigator.storage.persist()` (`PORTING-WEB.md` §7).
@@ -867,8 +868,9 @@ OPFS.
 `src/storagemodule.h/.cpp`, `src/membank.h`) — and this milestone is the
 clearest example yet of why that matters: `FORTH-ARCHITECTURE.md` §7's
 own porting note for `hal_block_read`/`write` originally pointed at a
-classic-Forth raw-numbered-block model (an `SCRS` "screens" bank, still
-referenced in `CLAUDE.md`'s summary). The *actual* Rebel-ROM Phase 9
+classic-Forth raw-numbered-block model (an `SCRS` "screens" bank —
+renamed `BLKS`, generic block storage, on 2026-08-18 — still referenced
+in `CLAUDE.md`'s summary). The *actual* Rebel-ROM Phase 9
 implementation superseded that with something different: a
 **projects/carts** model — named, typed asset files
 (`/PROJECTS/<name>/asset.ext`, `/CARTS/<name>.CRT`) loaded whole into
@@ -1481,7 +1483,7 @@ forcing the remote channel first, and every reason to want a system
 worth talking to before opening a remote surface onto it.
 
 **Deferred out of M8:** `LOAD`/screen-source interpretation itself (a
-related but distinct subsystem — reading a `SCRS` bank's contents as
+related but distinct subsystem — reading a `BLKS` bank's contents as
 Forth source, per `FORTH-ARCHITECTURE.md` §7's storage-model note) is
 not in this milestone's scope; M8 is what a screen's *contents* would be
 written in, not the loader that reads them in. Revisit once M8's
