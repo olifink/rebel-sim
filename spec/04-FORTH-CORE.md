@@ -1115,7 +1115,7 @@ than re-specifying byte-for-byte:
 | `SEE` | `( "name" -- )` — decompiles a `DOCOL`-coded colon-definition back to source-ish form, special-casing `LIT`/`(SLIT)`/`BRANCH`/`0BRANCH` as inline data rather than further calls to decompile. Scoped to `DOCOL`-coded words only — `CONSTANT`/`VARIABLE`/`DOES>`'d words report "not supported" rather than guessing wrong. | `'`, `>CFA`, `XT-NAME`, `@` |
 | `HIDE` | `( "name" -- )` — sets the `HIDDEN` flag (§3) on an already-defined word's entry, found by reverse chain-walk via `>CFA` (the same technique `XT-NAME` uses). Already-compiled callers of a hidden word are unaffected (a compiled call is a raw address, not a name to re-resolve) — only future lookup and `WORDS` listings change. | `'`, `>CFA`, `@`, `C!` |
 | `FORGET` | `( "name" -- )` — removes a word *and everything defined after it*, reclaiming `DICT` space: rolls `LATEST` back to the target word's own Link Pointer and `HERE` back to its own address, the same rollback §5.5 already performs automatically on a compile error, reachable here for any named word rather than only the currently-mid-compilation one. Needs `HERE`'s *address* (`HERE-ADDR`, §6.10), the exact gap that word closed. **Known, deliberately unaddressed limitation**: forgetting a word another `VOCABULARY` branch depends on leaves that vocabulary's chain corrupted — not designed against, since nothing needs it yet. | `'`, `>CFA`, `LATEST-ADDR`, `HERE-ADDR`, `@`, `!` |
-| `VOCABULARY` / `USE` | Branching dictionary chains — a named vocabulary remembers a `LATEST` position; `USE` swaps which chain is currently active for both lookup and new definitions, saving the outgoing chain's position and loading the target's. Deliberately **not** how `HIDE`/decluttering is implemented (visibility and `WORDS`-listing are the same underlying chain-walk; a branching chain only ever lets a *later* vocabulary see an *earlier* one, never the reverse — no way to make something callable-but-unlisted with vocabularies alone). Reserved for their real use case — project/cart namespace isolation — once that's a concrete need. | `LATEST`, `CREATE`, `,`, `LATEST-ADDR` |
+| `VOCABULARY` / `USE` / `DEFINITIONS` | Branching dictionary chains, with the real classic `CONTEXT`/`CURRENT` split — **[Revised, M48 follow-up 2]** this row originally specified a single-pointer `USE` (Rebel-Sim's own M13, before a second target ever existed to disagree with it) that conflated *browsing* a vocabulary with *compiling into* one; that conflation is exactly what let a loaded screen's own words land in whichever vocabulary merely happened to be browsed, not necessarily `FORTH`. `VOCABULARY` is `CREATE`...`DOES>`-based: naming a vocabulary (typed or `EXECUTE`d) sets `CONTEXT`, a `VARIABLE` holding which vocabulary `FIND`/`WORDS` search — the real classic idiom, not a bare `CREATE`d value push. `CURRENT` (`CURRENT-VOCAB` in the reference implementation) is a second, independent `VARIABLE` holding which vocabulary `:`/`CREATE` actually extend. `USE name` is a thin `' EXECUTE` synonym — context-only, since it just runs the named vocabulary's own `DOES>` action. `DEFINITIONS ( -- )` is the explicit second step, promoting whatever `CONTEXT` currently names to also become `CURRENT` — `EDITOR DEFINITIONS` means "look here, and compile here too," not implied by browsing alone. **A real implementation trap, worth specifying explicitly so a second target doesn't rediscover it the hard way:** `FIND`/`WORDS` must **not** simply dereference `CONTEXT`'s own stored vocabulary position — that position is a snapshot, refreshed only when `DEFINITIONS` switches *away* from a vocabulary, not continuously as new words compile into it, so it goes stale the instant you're actively compiling into the very vocabulary you're also browsing (the common case). The correct rule: when `CONTEXT` and `CURRENT` name the *same* vocabulary, search `LATEST` directly (the only thing genuinely live); only when they *differ* — browsing some other, dormant vocabulary — is that vocabulary's own stored position trustworthy, precisely because nothing is compiling into it right now. Any user-facing word that itself compiles multiple, potentially interdependent lines while some other vocabulary might be merely browsed (the reference implementation's own `LOAD`, §9) needs the identical align-`CONTEXT`-with-`CURRENT`-for-the-duration treatment, for the identical reason. Vocabularies still only ever let a *later* one see an *earlier* one, never the reverse (branching, not independent chains plus a search order) — deliberately **not** how `HIDE`/decluttering is implemented, no way to make something callable-but-unlisted with vocabularies alone. Reserved for their real use case — project/cart namespace isolation — once that's a concrete need beyond the reference implementation's own `EDITOR` vocabulary (§9). | `LATEST`, `CREATE`, `DOES>`, `,`, `LATEST-ADDR` |
 
 `>CFA`/`XT-NAME` and the internal constants `SEE` needs (`LIT`'s own
 XT, `EXIT`'s own XT, …) are themselves `HIDE`-able once nothing later
@@ -1141,8 +1141,11 @@ The combined bootstrap sequence, folding in every per-word constraint
 stated across §6.5, §6.13, and this section: `>CFA` before §6.5's
 control-flow block (which itself needs its `…-XT` constants built
 first); control-flow before `XT-NAME`/`WORDS`/`SEE`/`HIDE`/`FORGET`/
-`VOCABULARY`/`USE` (all use `BEGIN`/`WHILE`/`IF`/`REPEAT` internally)
-and before `FIND`/`NUMBER` (same reason, for their own loops); `FIND`
+`VOCABULARY`/`USE` (all use `BEGIN`/`WHILE`/`IF`/`REPEAT` internally —
+`DEFINITIONS` has no loop of its own, but naturally sits right after
+`VOCABULARY`/`USE`, needing only `CREATE`/`,`/`LATEST-ADDR`, already
+available by then) and before `FIND`/`NUMBER` (same reason, for their
+own loops); `FIND`
 and the `LIT-XT` constant (§6.13) before `INTERPRET`, which **MUST**
 load last of all. `'` itself needs nothing beyond native availability
 and imposes no ordering constraint of its own; `[`/`]` need only
@@ -1228,10 +1231,18 @@ today:
   hypothetical: Rebel-Sim built a real, working `LOAD` (M48,
   `system.fth`) once the `BLKS` infrastructure existed — one native
   primitive (`(SET-INPUT)`, redirecting the shared input cursor to a
-  block-resident line) plus a five-line portable Forth definition
-  feeding each line through `INTERPRET`. Worth reading as a concrete
-  reference before this section is ever formalized for real, not a
-  blocker any conformant target still needs to invent from scratch.
+  block-resident line) plus a short portable Forth definition feeding
+  each line through `INTERPRET`, including the `CONTEXT`-alignment step
+  §7.2's revised `VOCABULARY`/`USE`/`DEFINITIONS` entry describes —
+  needed so a screen's own second line can find a word its first line
+  just defined, even while the caller is merely browsing some other
+  vocabulary. `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` (the classic buffer-pool
+  words `LOAD` itself sits on top of, M46) and `EMPTY` (resetting the
+  dictionary to a fresh-boot state without a full `COLD`, M47) are real,
+  working reference definitions too, in the same file. Worth reading as
+  a concrete reference before this section is ever formalized for real,
+  not a blocker any conformant target still needs to invent from
+  scratch.
 - **Comment nesting.** `(` (§6.7) does not nest — the first closing `)`
   always ends it. A `\` (rest-of-line comment) word is not specified
   here either; not scoped by any word table in this document, added
@@ -1263,7 +1274,7 @@ today:
 | The raw-token input cursor is shared across a whole line, not local to one word's call, and is itself exposed as the KERNEL word `WORD` | §5.3, §6.13 |
 | A mid-compilation error rolls back the half-built entry before the next line runs | §5.5 |
 | `INTERPRET`, `NUMBER`, `FIND`, `[`, `]` are ordinary BOOTSTRAP dictionary words realizing §5.1–§5.4's contract exactly — not engine-internal-only logic | §5.6, §6.13 |
-| The bootstrap sequence follows §7.2's combined ordering (`>CFA` → control-flow block → `XT-NAME`/`WORDS`/`SEE`/`HIDE`/`FORGET`/`VOCABULARY`/`USE` and `FIND`/`NUMBER` → `LIT-XT` → `INTERPRET` last; `'` native/unordered, `[`/`]` anywhere) | §6.5, §6.13, §7.2 |
+| The bootstrap sequence follows §7.2's combined ordering (`>CFA` → control-flow block → `XT-NAME`/`WORDS`/`SEE`/`HIDE`/`FORGET`/`VOCABULARY`/`USE`/`DEFINITIONS` and `FIND`/`NUMBER` → `LIT-XT` → `INTERPRET` last; `'` native/unordered, `[`/`]` anywhere) | §6.5, §6.13, §7.2 |
 | `'` stays a native KERNEL primitive, never BOOTSTRAP, and never carries `IMMEDIATE` | §6.10, §6.5 |
 | `S"`/`."`/`(` carry the `IMMEDIATE` flag so their raw-consumed text is read from their own containing definition, not a later caller | §5.3, §6.7 |
 | An error raised inside `INTERPRET` unwinds through §4.4's threading mechanism, not a native stack unwind, before §5.5's rollback runs | §5.6, §8 |
