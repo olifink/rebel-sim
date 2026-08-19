@@ -3755,3 +3755,80 @@ Full engine suite: 353 passed (345 before, +8 new). `spec/01-HAL.md`
 "optional, no extension yet"), `FORTH-ARCHITECTURE.md` §7's block-buffer
 note, and `IMPLEMENTATION.md` (§1.56, new; milestone table) all updated
 to match.
+
+## M46 — `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH`: the portable half of M45's block-buffer mechanism — done
+
+The follow-up M45's own "Status" note staged as the next real step:
+the portable Forth layer over `(BLOCK-READ)`/`(BLOCK-WRITE)`, built
+entirely in `system.fth` — no engine package changes at all. Inserted
+right after the `VOCABULARY`/`USE` section, before the self-hosted
+outer interpreter (which has to stay the file's last section, per its
+own load-order comment).
+
+**What shipped:** a fixed 4-slot buffer pool, matching the size
+decided when this was spec'd. `CREATE`/`ALLOT` reserve three parallel
+arrays — `BUF-BLOCK#` (which block number each slot holds, `-1` for
+empty), `BUF-DIRTY` (a HAL-convention flag per slot), `BUF-DATA` (the
+actual backing RAM for all four slots). `NEXT-SLOT` is the round-robin
+eviction pointer; `CURRENT-SLOT` remembers what `BLOCK`/`BUFFER` most
+recently returned, for `UPDATE` to mark dirty; `REQ-BLOCK#`/
+`SCAN-RESULT`/`SLOT#` are scratch variables threading a value through a
+word, the same convention `FIND-ADDR`/`FIND-LEN` and `NUM-ADDR`/
+`NUM-LEN` already established. `FIND-BUFFER`/`EVICT-SLOT`/`LOAD-SLOT`/
+`CLAIM-SLOT`/`PICK-SLOT` are the internal mechanics; `BLOCK`/`BUFFER`/
+`UPDATE`/`FLUSH` are the four words everything else calls, exactly
+matching classic fig-FORTH's own split (`BUFFER` skips the read, since
+the block is about to be fully overwritten; `FLUSH` is `EVICT-SLOT`
+run unconditionally across every slot). Every array is explicitly
+initialized by a small `INIT-BUFFERS` word, called once right after its
+own definition, rather than trusting a fresh `DICT` bank's zero-filled
+default — a real bug, not a hypothetical one: without it, `BUF-BLOCK#`
+would misread every slot as "already holds block 0" before a single
+real block read ever ran. `INIT-BUFFERS` has to be a real word, not
+bare top-level code, because `DO`/`LOOP` are compile-only and only work
+inside a colon-definition.
+
+**No early exit from any counted loop, anywhere in this section, by
+necessity rather than style.** `LEAVE`/`UNLOOP` don't exist yet
+(`spec/04-FORTH-CORE.md` §9's own explicitly-deferred list), and `EXIT`
+from inside a `DO` loop would corrupt control flow — `(DO)`'s runtime
+pushes loop index/limit onto the return stack, and `I`/`J` already
+depend on that exact layout via a fixed `CELL+` offset, so a bare
+`EXIT` popping one cell expecting a return address would instead pop a
+loop-control cell. `FIND-BUFFER` and every per-slot loop run
+unconditionally to completion, accumulating an answer in a scratch
+variable instead.
+
+**A real bug found and fixed while writing this, in `system.fth`
+itself, not just its comments.** Every early draft mentioning the
+literal names `(BLOCK-READ)`/`(BLOCK-WRITE)` *inside* a `(` comment
+broke `bootMachine()` outright: a comment's closing scan is per-token,
+not per-character, and `(` doesn't nest (this file's own standing
+header warning) — a token ending in `)`, like `(BLOCK-READ)` itself,
+closes the surrounding comment the instant it's read, silently turning
+the rest of that comment line into live code. Caught immediately
+(`unrecognized word: (primitives.ts`, then several more of the same
+shape once the first was fixed) — the exact bug class M43's own
+write-up already flagged as "hit five times." Every comment mention
+was rewritten as plain prose (`native block read`/`native block
+write`) instead of the literal paren-named primitive; the real code
+lines calling `(BLOCK-READ)`/`(BLOCK-WRITE)` directly were never
+affected, since they aren't inside a comment.
+
+`block-words.test.ts` (new, 11 tests, via `bootMachine()` since these
+are Forth-source words, not native primitives): repeated `BLOCK` calls
+for the same block return the same address, distinct blocks get
+distinct addresses, an unflushed write is visible to a later `BLOCK`
+call but not yet in `BLKS` itself, `UPDATE` plus `FLUSH` persists it,
+a genuine miss loads real `BLKS` content, `BUFFER` round-trips
+correctly regardless of stale prior `BLKS` content, an untouched
+`FLUSH` is a safe no-op, round-robin eviction automatically flushes the
+displaced dirty slot, an out-of-range block still throws via the
+underlying native bounds check, and internal plumbing is confirmed
+hidden from `WORDS`/`FIND` while the four public words aren't.
+
+Full engine suite: 364 passed (353 before, +11 new). `packages/app`
+builds clean (no engine changes to this milestone means no build-graph
+risk, but verified anyway). `FORTH-ARCHITECTURE.md` §7's block-buffer
+note and `IMPLEMENTATION.md` (§1.57, new; milestone table) updated to
+record the mechanism as fully built rather than HAL-only.

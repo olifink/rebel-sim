@@ -355,6 +355,204 @@ VOCABULARY FORTH
 ;
 
 ( ---------------------------------------------------------------- )
+( BLOCK/BUFFER/UPDATE/FLUSH -- FORTH-ARCHITECTURE.md section 7, the )
+( portable half of the classic Forth block-buffer mechanism. The )
+( native primitives BLOCK-READ and BLOCK-WRITE, tokens 140/141, are )
+( the only native pieces -- they move exactly 1024 bytes between the )
+( resident BLKS bank and RAM, bounds-checked, no caching. Everything )
+( below is identical Forth source any target shares: a small fixed )
+( 4-slot buffer pool, round-robin eviction -- the oldest-assigned )
+( slot is always the next victim, not a true recency-tracked LRU -- )
+( sized for a real multi-block word like the reference editor's COPY )
+( per the spec note, without needing a more elaborate cache -- and )
+( one dirty flag per slot. )
+
+( No LEAVE/UNLOOP exists yet, per spec/04-FORTH-CORE.md section 9's )
+( own explicitly-cut-for-now list -- EXIT from inside a DO loop would )
+( corrupt control flow, since nothing pops the loop-control cells a )
+( DO left behind and I/J's own CELL+ offset trick only works because )
+( of that. So every loop below runs a full, unconditional scan and )
+( accumulates its answer in a scratch variable instead of exiting )
+( early -- the same no-shortcuts-DO/LOOP-cant-safely-take discipline, )
+( not an oversight. )
+
+4 CONSTANT #BUFFERS
+1024 CONSTANT BLOCK-SIZE
+
+( Parallel arrays, one entry per buffer slot. BUF-BLOCK# holds the )
+( block number resident in that slot, -1 meaning empty or unused -- a )
+( safe sentinel since real block numbers are never negative. )
+( BUF-DIRTY is a HAL-convention flag, TRUE is -1, FALSE is 0. )
+( BUF-DATA is the actual BLOCK-SIZE-byte backing RAM for every slot, )
+( back to back. )
+CREATE BUF-BLOCK# #BUFFERS CELLS ALLOT
+CREATE BUF-DIRTY  #BUFFERS CELLS ALLOT
+CREATE BUF-DATA   #BUFFERS BLOCK-SIZE * ALLOT
+
+( NEXT-SLOT is the round-robin eviction pointer. CURRENT-SLOT is the )
+( slot most recently returned by BLOCK/BUFFER -- what UPDATE marks )
+( dirty. REQ-BLOCK#, SCAN-RESULT, and SLOT# are scratch variables )
+( threading a value through a word instead of deep stack juggling -- )
+( the same convention FIND-ADDR/FIND-LEN and NUM-ADDR/NUM-LEN already )
+( established. )
+VARIABLE NEXT-SLOT
+VARIABLE CURRENT-SLOT
+VARIABLE REQ-BLOCK#
+VARIABLE SCAN-RESULT
+VARIABLE SLOT#
+
+( Every slot starts empty and clean -- BUF-BLOCK#'s bytes would )
+( otherwise default to 0, since a fresh DICT bank reads as all-zero, )
+( which would misread as "slot already holds block 0" the moment )
+( anything asked for block 0, before a single native block read ever )
+( ran. DO/LOOP are compile-only -- section 6.5's control-flow words )
+( only work inside a colon-definition -- so this one-shot setup runs )
+( as a tiny word called immediately, not bare top-level code. )
+: INIT-BUFFERS
+  #BUFFERS 0 DO
+    -1 I CELLS BUF-BLOCK# + !
+     0 I CELLS BUF-DIRTY  + !
+  LOOP
+  0 NEXT-SLOT !
+  -1 CURRENT-SLOT !
+;
+INIT-BUFFERS
+
+: BUF-ADDR ( slot -- addr ) BLOCK-SIZE * BUF-DATA + ;
+
+( FIND-BUFFER, given a block number, reports which slot if any )
+( already holds it. A full unconditional scan, per the no-EXIT-in- )
+( DO-LOOP note above -- at most one slot can ever match, since a )
+( block number is only ever resident in one slot at a time, so scan )
+( order doesn't matter. Reports slot -1 and flag false on a miss. )
+: FIND-BUFFER ( n -- slot flag )
+  -1 SCAN-RESULT !
+  #BUFFERS 0 DO
+    DUP I CELLS BUF-BLOCK# + @ = IF I SCAN-RESULT ! THEN
+  LOOP
+  DROP
+  SCAN-RESULT @ DUP -1 <>
+;
+
+( EVICT-SLOT makes a slot ready for reuse -- writes its content back )
+( via a native block write first if dirty, then clears dirty. A )
+( no-op on an empty or already-clean slot. Also FLUSH's own per-slot )
+( step, called directly on every slot rather than duplicating the )
+( dirty-check-and-write-back logic a second time. )
+: EVICT-SLOT ( slot -- )
+  SLOT# !
+  SLOT# @ CELLS BUF-DIRTY + @
+  IF
+    SLOT# @ BUF-ADDR SLOT# @ CELLS BUF-BLOCK# + @ (BLOCK-WRITE)
+    0 SLOT# @ CELLS BUF-DIRTY + !
+  THEN
+;
+
+( LOAD-SLOT claims a slot for a given block number, evicting whatever )
+( it held first, then reads that block's real content into it via a )
+( native block read -- the BLOCK word's own miss path. )
+: LOAD-SLOT ( n slot -- addr )
+  DUP EVICT-SLOT
+  SLOT# !
+  DUP SLOT# @ CELLS BUF-BLOCK# + !
+  0 SLOT# @ CELLS BUF-DIRTY + !
+  SLOT# @ BUF-ADDR SWAP (BLOCK-READ)
+  SLOT# @ BUF-ADDR
+;
+
+( CLAIM-SLOT is the same as LOAD-SLOT but skips the read -- BUFFER's )
+( own miss path, for a block about to be fully overwritten, where )
+( reading its old content first would be wasted work. Matches )
+( classic fig-FORTH's own BUFFER/BLOCK split. )
+: CLAIM-SLOT ( n slot -- addr )
+  DUP EVICT-SLOT
+  SLOT# !
+  SLOT# @ CELLS BUF-BLOCK# + !
+  0 SLOT# @ CELLS BUF-DIRTY + !
+  SLOT# @ BUF-ADDR
+;
+
+( PICK-SLOT reports the next eviction victim, round-robin -- returns )
+( the current pointer and advances it, wrapping mod #BUFFERS. Only )
+( ever called on a miss, since FIND-BUFFER already found nothing, so )
+( which slot it names doesn't matter beyond it not being one )
+( something else is still using. )
+: PICK-SLOT ( -- slot )
+  NEXT-SLOT @
+  DUP 1+ #BUFFERS MOD NEXT-SLOT !
+;
+
+( BLOCK is the classic word. A hit returns the existing slot's )
+( address with no I/O at all; a miss picks a victim slot and loads )
+( the real content into it. Either way, remembers the slot in )
+( CURRENT-SLOT so a following UPDATE knows what to mark dirty. )
+: BLOCK ( n -- addr )
+  REQ-BLOCK# !
+  REQ-BLOCK# @ FIND-BUFFER
+  IF
+    DUP CURRENT-SLOT ! BUF-ADDR
+  ELSE
+    DROP
+    PICK-SLOT DUP CURRENT-SLOT !
+    REQ-BLOCK# @ SWAP LOAD-SLOT
+  THEN
+;
+
+( BUFFER is BLOCK's counterpart for a block about to be fully )
+( overwritten -- a hit still returns the existing, already correct, )
+( content, but a miss claims a slot without reading, since every )
+( byte is about to be replaced anyway. )
+: BUFFER ( n -- addr )
+  REQ-BLOCK# !
+  REQ-BLOCK# @ FIND-BUFFER
+  IF
+    DUP CURRENT-SLOT ! BUF-ADDR
+  ELSE
+    DROP
+    PICK-SLOT DUP CURRENT-SLOT !
+    REQ-BLOCK# @ SWAP CLAIM-SLOT
+  THEN
+;
+
+( UPDATE marks the buffer BLOCK/BUFFER most recently returned dirty, )
+( so FLUSH or a later eviction writes it back instead of silently )
+( dropping the change. Behavior is undefined, not guarded, if called )
+( before BLOCK/BUFFER ever ran once -- the same caller's- )
+( responsibility footgun PAD's own reentrancy contract already )
+( documents. )
+: UPDATE ( -- ) -1 CURRENT-SLOT @ CELLS BUF-DIRTY + ! ;
+
+( FLUSH writes every dirty slot back via a native block write and )
+( clears its dirty flag -- EVICT-SLOT's own logic, run unconditionally )
+( across all #BUFFERS slots rather than duplicated here. Does not )
+( itself touch disk -- SAVE and BSAVE, already built in M5/M33, )
+( persist the whole BLKS bank separately, at project-save time. )
+: FLUSH ( -- ) #BUFFERS 0 DO I EVICT-SLOT LOOP ;
+
+( Everything above BLOCK/BUFFER/UPDATE/FLUSH themselves is internal )
+( plumbing -- hidden the same way FIND-ADDR/FIND-LEN and NUM-ADDR/ )
+( NUM-LEN/NUM-ABORT already are, now that nothing later needs any of )
+( it by name: FLUSH just above is the last consumer of EVICT-SLOT, )
+( and BLOCK/BUFFER are the last consumers of everything else. Hiding )
+( doesn't affect BLOCK/BUFFER/UPDATE/FLUSH's own already-compiled )
+( calls into them -- only future name lookup and WORDS listings. )
+HIDE INIT-BUFFERS
+HIDE BUF-BLOCK#
+HIDE BUF-DIRTY
+HIDE BUF-DATA
+HIDE NEXT-SLOT
+HIDE CURRENT-SLOT
+HIDE REQ-BLOCK#
+HIDE SCAN-RESULT
+HIDE SLOT#
+HIDE BUF-ADDR
+HIDE FIND-BUFFER
+HIDE EVICT-SLOT
+HIDE LOAD-SLOT
+HIDE CLAIM-SLOT
+HIDE PICK-SLOT
+
+( ---------------------------------------------------------------- )
 ( spec/04-FORTH-CORE.md section 6.13 (M43): the self-hosted outer )
 ( interpreter itself. WORD/STATE/:/;/IMMEDIATE/COMPILE-ONLY are all )
 ( native primitives now -- repl.ts, primitives.ts -- FIND, NUMBER, )

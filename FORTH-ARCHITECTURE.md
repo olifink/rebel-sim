@@ -417,8 +417,8 @@ Every dictionary entry, identical layout across all languages:
 * **`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` — the classic Forth block-buffer
   words, spec'd ahead of the Screen Editor work
   (`inspiration/Starting-FORTH.pdf` ch. 3,
-  `inspiration/figforth_editor_screens.txt`); the HAL half is now built
-  on Rebel-Sim, the portable-Forth half isn't yet.** These are ordinary
+  `inspiration/figforth_editor_screens.txt`); both the HAL half and the
+  portable-Forth half are now built on Rebel-Sim.** These are ordinary
   portable Forth words, not primitives, built once over exactly two HAL
   entry points:
   - `hal_block_read(n, addr)`/`hal_block_write(n, addr)`: move exactly
@@ -437,7 +437,15 @@ Every dictionary entry, identical layout across all languages:
     slot calls `hal_block_write` before reuse), the same shape classic
     fig-FORTH used, sized so a real multi-block word like the reference
     editor's `COPY` (`figforth_editor_screens.txt` SCR 3 of 6) works
-    without a later redesign.
+    without a later redesign. **[Built, 2026-08-19]** in `system.fth`,
+    right after the `VOCABULARY`/`USE` section — `FIND-BUFFER`/
+    `EVICT-SLOT`/`LOAD-SLOT`/`CLAIM-SLOT`/`PICK-SLOT`/`BUF-ADDR` and the
+    backing `BUF-BLOCK#`/`BUF-DIRTY`/`BUF-DATA` arrays are internal
+    plumbing, `HIDE`n the same way `FIND-ADDR`/`NUM-ADDR` already are.
+    No `LEAVE`/`UNLOOP` exists yet (spec/04-FORTH-CORE.md §9), so every
+    loop is a full unconditional scan accumulating into a scratch
+    variable rather than an early `EXIT`, which would corrupt a `DO`
+    loop's return-stack control cells.
   - `BLKS` capacity: 16 blocks (16 KiB, rounds to the `S` bank size
     class) — a generic block-storage scratch bank, not real storage;
     trivially resizable later since nothing depends on the count being
@@ -460,15 +468,17 @@ Every dictionary entry, identical layout across all languages:
   * **Extension:** `.BLK` (`storage.ts`'s `TAG_TO_EXTENSION`,
     `spec/01-HAL.md` §6.3's table) — `.SCR` is already `SCRN`'s (the
     pixel framebuffer), so `BLKS` needed its own.
-  * **Status, 2026-08-18:** the `BLKS` bank (tag, `S`-class 16-block
-    size, `.BLK` extension) and the `(BLOCK-READ)`/`(BLOCK-WRITE)`
-    primitives are built on Rebel-Sim (`banks.ts`'s `BLOCK_SIZE`,
-    `repl.ts`'s boot-created `BLKS` bank, `primitives.ts` tokens
-    140/141) — a `SAVE`d project now round-trips `BLKS` like any other
-    bank, and `.BLK` files load back correctly. Next real step:
-    `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` in `system.fth`, before any editor
-    command (`L`/`T`/`D`/... per `figforth_editor_screens.txt`) can be
-    written.
+  * **Status, 2026-08-19:** fully built on Rebel-Sim. The `BLKS` bank
+    (tag, `S`-class 16-block size, `.BLK` extension) and the
+    `(BLOCK-READ)`/`(BLOCK-WRITE)` primitives (`banks.ts`'s
+    `BLOCK_SIZE`, `repl.ts`'s boot-created `BLKS` bank, `primitives.ts`
+    tokens 140/141) landed 2026-08-18 — a `SAVE`d project round-trips
+    `BLKS` like any other bank, `.BLK` files load back correctly. The
+    portable `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` buffer pool
+    (`system.fth`) landed the next day. Next real step: the Screen
+    Editor commands themselves (`L`/`T`/`D`/... per
+    `figforth_editor_screens.txt`), the actual reason this whole
+    mechanism was spec'd.
 
 * **`hal_millis()`:** monotonic milliseconds, needed for any timing/delay
   word. On Rebel-ROM, wire it to Circle's `CTimer` (already a fixed
