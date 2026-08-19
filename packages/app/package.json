@@ -3,9 +3,9 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "prestart": "npm run build --prefix ../engine",
+    "prestart": "npm run build --prefix ../engine && rm -rf .angular/cache",
     "start": "ng serve",
-    "prebuild": "npm run build --prefix ../engine",
+    "prebuild": "npm run build --prefix ../engine && rm -rf .angular/cache",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
