@@ -46,7 +46,7 @@ import { Arena } from './arena.js';
 import { Bank, BankTable, BLOCK_SIZE } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
-import { PrimitiveContext } from './primitives.js';
+import { PrimitiveContext, WarmReset } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
@@ -575,8 +575,17 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         // unchanged contract for programmatic callers.
         this.stack.clear();
         this.rstack.clear();
-        const message = err instanceof Error ? err.message : String(err);
-        this.reportError(message);
+        if (err instanceof WarmReset) {
+          // WARM already did this same clearing itself (primitives.ts,
+          // case 131) before throwing — landing back here is success,
+          // classic Forth WARM/QUIT semantics: the rest of the line is
+          // abandoned, same as any other error, but it's not one, so
+          // the prompt reads "ok", not "? ...".
+          this.emitString('ok');
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          this.reportError(message);
+        }
       }
       // The trailing CR belongs to the status text (`ok`/`? ...`), not
       // to the next prompt — matches real Forth's `ok\n`, printed once
@@ -612,6 +621,19 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     } catch (err) {
       if (this.sysvars.getState() === -1) {
         abortDefinition(this);
+      }
+      // WarmReset (primitives.ts, case 131) already cleared both stacks
+      // itself before throwing — landing back here is WARM's normal,
+      // successful completion (classic Forth WARM/QUIT semantics: the
+      // rest of the line is abandoned), not a genuine error, so unlike
+      // every other caught error here it isn't rethrown to the
+      // programmatic caller. Kept as its own branch rather than folded
+      // into replLoop()'s handling above so interpret()/beginLine() get
+      // the identical "does not throw" contract the interactive REPL
+      // does, deliberately breaking from this method's usual
+      // don't-touch-programmatic-callers stance for this one case.
+      if (err instanceof WarmReset) {
+        return;
       }
       throw err;
     }

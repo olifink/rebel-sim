@@ -38,6 +38,18 @@ import opcodes from './rebel-opcodes.json' with { type: 'json' };
 export const TRUE = -1;
 export const FALSE = 0;
 
+/** Thrown by WARM (case 131) to unwind the current line's nested
+ * generator chain (dispatch → threadFrom → executeXT → … → dispatchLine)
+ * back to the nearest driver — reusing the same propagation mechanism a
+ * genuine error uses, but as a distinct type so repl.ts's recovery sites
+ * can tell it apart and skip error-style reporting: WARM landing back at
+ * a clean prompt is success, not failure. Needed because self-hosted
+ * INTERPRET (M43) is itself a DOCOL-threaded word with its own live
+ * return-stack frame for as long as it's running a line — WARM can't
+ * just reset RSTK in place and fall through to an ordinary return, since
+ * that return address is exactly what got wiped. */
+export class WarmReset extends Error {}
+
 const DOVAR_TOKEN = opcodes.dovarTokenId;
 const DOCOL = opcodes.docolTokenId;
 
@@ -850,18 +862,26 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 131: // WARM ( -- ) — soft reset: same stack-clearing recovery
-      // replLoop's own catch block performs after any uncaught error
-      // (ABORT's effect, case 98), done directly rather than via throw,
-      // and without touching DICT/MMAP — the running dictionary and bank
-      // layout survive a WARM. No mid-definition guard is needed the way
-      // replLoop's own catch block has one: WARM isn't IMMEDIATE, so a
-      // non-immediate token typed while STATE is -1 gets compiled, not
-      // executed — this case can never run with a half-finished
-      // definition still open.
+    case 131: // WARM ( -- ) — soft reset, without touching DICT/MMAP: the
+      // running dictionary and bank layout survive a WARM. No
+      // mid-definition guard is needed the way replLoop's own catch block
+      // has one: WARM isn't IMMEDIATE, so a non-immediate token typed
+      // while STATE is -1 gets compiled, not executed — this case can
+      // never run with a half-finished definition still open.
+      //
+      // Clears both stacks directly (ABORT, case 98, does the same for
+      // the data stack alone) and then throws WarmReset purely to unwind
+      // back to the nearest repl.ts driver — self-hosted INTERPRET
+      // (M43) is itself DOCOL-threaded and holds its own live RSTK frame
+      // for as long as it's running the current line, so simply clearing
+      // RSTK and falling through to an ordinary return isn't possible:
+      // that return address is exactly what just got wiped. See
+      // WarmReset's own comment for the full reasoning; repl.ts's
+      // runLine()/replLoop() catch it specifically and recover silently
+      // (clean prompt, not an error) rather than reporting it.
       ctx.stack.clear();
       ctx.rstack.clear();
-      break;
+      throw new WarmReset();
 
     // COLD (132) never reaches here — inner.ts's dispatch() special-cases
     // it before executePrimitive is ever called, the same shape as

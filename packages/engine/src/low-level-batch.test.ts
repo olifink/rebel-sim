@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
+import { bootMachine } from './test-support.js';
 
 function run(line: string): number[] {
   const m = new Machine();
@@ -24,6 +25,20 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     const m = new Machine();
     expect(() => m.interpret('.S')).not.toThrow();
     expect(m.screen.readRowText(0).trimEnd()).toBe('');
+  });
+
+  it('self-hosted .S (system.fth, post-boot) on an empty stack prints nothing — regression for a real bug found by Oliver', () => {
+    // system.fth's own `: .S DEPTH 0 DO ... LOOP ;` had no guard for the
+    // empty-stack case (DEPTH 0). This Forth's DO/LOOP always runs its
+    // body at least once, even when limit == start (TYPE has an explicit
+    // guard for the exact same reason, just above in system.fth) -- so
+    // `0 0 DO` still ran once, computing `-1 PICK` and printing a
+    // garbage stack-pointer-ish value instead of nothing. Fixed by
+    // adding the same `DUP 0= IF DROP EXIT THEN` guard TYPE already has.
+    const m = bootMachine();
+    expect(() => m.interpret('.S')).not.toThrow();
+    expect(m.screen.readRowText(0).trimEnd()).toBe('');
+    expect(m.stack.toArray()).toEqual([]);
   });
 
   it('2SWAP', () => {
@@ -63,6 +78,27 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
       m.interpret(`${dst + i} C@`);
       expect(m.stack.pop()).toBe(99);
     }
+  });
+
+  it('self-hosted FILL/CMOVE (system.fth, post-boot) with zero length are true no-ops — regression for a real bug found by Oliver', () => {
+    // Same DO/LOOP-always-runs-once class as the .S bug above: system.fth's
+    // own `: FILL ... SWAP DO ... LOOP DROP ;` and `: CMOVE 0 DO ... LOOP
+    // 2DROP ;` had no zero-length guard, so `addr 0 char FILL` still wrote
+    // one stray byte and `src dst 0 CMOVE` still copied one stray byte.
+    // Fixed by adding TYPE's own `DUP 0= IF ... EXIT THEN` guard to both.
+    const m = bootMachine();
+    m.interpret('64 CREATE-BANK ZLEN');
+    const addr = m.stack.pop();
+    m.interpret(`${addr} 4 66 FILL`); // 'B' sentinel across the whole region
+    m.interpret(`${addr} 0 88 FILL`); // zero-length -- must not touch byte 0
+    m.interpret(`${addr} C@`);
+    expect(m.stack.pop()).toBe(66);
+
+    m.interpret(`${addr} 4 + 4 66 FILL`);
+    m.interpret(`${addr + 8} 4 99 FILL`); // distinct sentinel for the CMOVE target
+    m.interpret(`${addr} ${addr + 8} 0 CMOVE`); // zero-length -- must not touch target byte 0
+    m.interpret(`${addr + 8} C@`);
+    expect(m.stack.pop()).toBe(99);
   });
 
   it('BL pushes the space character code', () => {

@@ -88,8 +88,15 @@
 : NIP SWAP DROP ;
 : TUCK SWAP OVER ;
 : 2SWAP ROT >R ROT R> ;
-: DEPTH SP0 SP@ - 4 / ;
-: PICK CELLS SP@ + @ ;
+( SP@ must run first, before DEPTH pushes anything else of its own -- )
+( pushing SP0 before SP@ made SP@ read the pointer with SP0's own push )
+( already counted, over-stating every DEPTH result by 1. )
+: DEPTH SP@ SP0 SWAP - 4 / ;
+( n's own slot sits between SP@'s reading point and the item PICK )
+( wants, so must be counted too -- 1+ before CELLS, or PICK reads )
+( one cell too shallow: 0 PICK collides with its own argument slot, )
+( self-referential garbage, and every other index is off by one. )
+: PICK 1+ CELLS SP@ + @ ;
 ( 2OVER: same "the stack is memory" technique PICK itself uses -- )
 ( 3 PICK reaches the deeper of the two cells 2OVER needs to copy, )
 ( twice, once the first copy has shifted everything up by one. )
@@ -112,7 +119,15 @@
 : SPACE BL EMIT ;
 : HEX 16 BASE ! ;
 : DECIMAL 10 BASE ! ;
-: WARM SP0 SP! RP0 RP! ;
+( WARM stays native (rebel-opcodes.json 131), same category as COLD/ )
+( ABORT/EXECUTE/ACCEPT below -- it can't be safely self-hosted as an )
+( ordinary colon word. DOCOL pushes a word's own return address onto )
+( RSTK on entry and ; compiles a pop of that address to get back to )
+( the caller; a colon-word body that resets RP to empty via RP0 RP! )
+( destroys its own return address before ; ever runs, so the return )
+( itself underflows. The native primitive clears both stacks as a )
+( single atomic dispatch with no RSTK-based call/return of its own, )
+( so it has no such return address to lose. )
 
 ( Batch 5 -- needs Batch 3/4 already loaded. )
 : ?DUP DUP IF DUP THEN ;
@@ -121,9 +136,11 @@
 ( DO loop's own return-stack-resident index/limit, not the return )
 ( stack itself -- DO/LOOP never touch the data stack, so whatever )
 ( sits there when DO runs is exactly what the loop body sees on )
-( every iteration, undisturbed. )
-: FILL ( addr len char -- ) -ROT OVER + SWAP DO DUP I C! LOOP DROP ;
-: CMOVE ( addr1 addr2 len -- ) 0 DO 2DUP SWAP I + C@ SWAP I + C! LOOP 2DROP ;
+( every iteration, undisturbed. Both also need TYPE's own guard )
+( below -- a zero len still ran the body once, writing/copying )
+( one stray byte instead of staying a true no-op. )
+: FILL ( addr len char -- ) >R DUP 0= IF 2DROP R> DROP EXIT THEN R> -ROT OVER + SWAP DO DUP I C! LOOP DROP ;
+: CMOVE ( addr1 addr2 len -- ) DUP 0= IF 2DROP DROP EXIT THEN 0 DO 2DUP SWAP I + C@ SWAP I + C! LOOP 2DROP ;
 ( TYPE: classic DO/LOOP still runs its body once even when )
 ( index = limit at entry -- guarded so a zero-length TYPE stays a )
 ( true no-op, matching the native behavior this replaces exactly. )
@@ -131,8 +148,11 @@
 ( .S: reuses the still-native . for formatting, so its output is )
 ( guaranteed identical by construction rather than by re-deriving )
 ( digit formatting a second time. Bottom-to-top, matching the )
-( print order this replaces. )
-: .S DEPTH 0 DO DEPTH 1- I - PICK . LOOP ;
+( print order this replaces. Same zero-length DO/LOOP guard TYPE )
+( needs above -- an empty stack, DEPTH zero, must skip the loop )
+( entirely, or the one spurious iteration computes -1 PICK and )
+( prints a garbage address instead of nothing. )
+: .S DEPTH DUP 0= IF DROP EXIT THEN 0 DO DEPTH 1- I - PICK . LOOP ;
 
 ( ---------------------------------------------------------------- )
 
