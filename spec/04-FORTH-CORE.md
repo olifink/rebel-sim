@@ -1222,8 +1222,16 @@ today:
   Distinct from §7's bootstrap-loading requirement: §7 is how a target
   gets its *own* system vocabulary running before anything else exists;
   `LOAD` would be a *user-facing* word for interpreting arbitrary
-  block-resident source at runtime. Blocked on the same `BLKS`
-  infrastructure `01-HAL.md` already flags as optional/future.
+  block-resident source at runtime. Still not part of this cross-target
+  specification's own formal contract (this section remains accurate as
+  a spec matter, not a per-target implementation status), but no longer
+  hypothetical: Rebel-Sim built a real, working `LOAD` (M48,
+  `system.fth`) once the `BLKS` infrastructure existed — one native
+  primitive (`(SET-INPUT)`, redirecting the shared input cursor to a
+  block-resident line) plus a five-line portable Forth definition
+  feeding each line through `INTERPRET`. Worth reading as a concrete
+  reference before this section is ever formalized for real, not a
+  blocker any conformant target still needs to invent from scratch.
 - **Comment nesting.** `(` (§6.7) does not nest — the first closing `)`
   always ends it. A `\` (rest-of-line comment) word is not specified
   here either; not scoped by any word table in this document, added

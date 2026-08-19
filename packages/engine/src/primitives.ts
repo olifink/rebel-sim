@@ -74,6 +74,12 @@ export interface PrimitiveContext extends DictionaryContext {
    * into the TIB (`len === 0` means the line is exhausted; never
    * throws). The same method `nextInputToken()` is itself built on. */
   wordScan(delimiterCode: number): { addr: number; len: number };
+  /** FORTH-ARCHITECTURE.md §7: repoints the shared input cursor at an
+   * arbitrary `(addr, len)` region rather than the TIB — what `LOAD`
+   * (`system.fth`) needs to feed a `BLOCK`-resident line through the same
+   * `WORD`/`FIND`/`NUMBER`/`INTERPRET` machinery an ordinary typed line
+   * uses. */
+  setInput(addr: number, len: number): void;
 }
 
 /** Truncate a JS number to a signed 32-bit Forth cell. */
@@ -960,6 +966,18 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       for (let i = 0; i < BLOCK_SIZE; i++) {
         ctx.arena.writeByte(blockBase + i, ctx.arena.readByte(addr + i));
       }
+      break;
+    }
+
+    case 142: { // (SET-INPUT) ( addr len -- ) FORTH-ARCHITECTURE.md §7:
+      // repoints the shared input cursor — LOAD's own mechanism for
+      // feeding a BLOCK-resident screen line through WORD/FIND/NUMBER/
+      // INTERPRET exactly like a typed line. Paren-named like
+      // (BLOCK-READ)/(BLOCK-WRITE) (140/141): an internal primitive LOAD
+      // calls, not something meant to be typed directly.
+      const len = s.pop();
+      const addr = s.pop();
+      ctx.setInput(addr, len);
       break;
     }
 

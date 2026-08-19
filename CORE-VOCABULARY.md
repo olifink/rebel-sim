@@ -228,7 +228,10 @@ remote surface onto it (`PLAN.md`'s M8/M9 ordering).
   subsystem (reading a `BLKS` bank's contents as Forth source,
   `FORTH-ARCHITECTURE.md` §7's storage-model note). This document is
   what a screen's *contents* would be written in, not the loader that
-  reads them in.
+  reads them in. Out of scope *here* (this document's own M8 scope),
+  not unbuilt in general — Rebel-Sim has a real `LOAD` now (M48,
+  `system.fth`, `IMPLEMENTATION.md` §1.59), the entire reason this gap
+  was worth naming explicitly back when M8 first flagged it.
 - **`hal_error`/exception model** — still genuinely open everywhere
   (`FORTH-ARCHITECTURE.md` §9), and control-flow words here (`DO`/`LOOP`
   especially) will eventually want to interact with it (an early `LEAVE`

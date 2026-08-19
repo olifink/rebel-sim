@@ -136,14 +136,42 @@
 
 ( ---------------------------------------------------------------- )
 
-( WORDS -- lists every defined word name, most-recently-defined )
-( first. CORE-VOCABULARY.md section 12's own worked example, )
-( ported in verbatim, with one real fix: that doc writes 1F AND, )
-( a hex literal, but BASE defaults to 10 decimal, where 1F isn't )
-( a valid number at all. 31 is 1F's decimal value -- same mask, )
-( NAME_LEN_MASK, same five low bits either way. )
+( CONTEXT/CURRENT-VOCAB declared early, on their own, purely as )
+( forward references: WORDS below needs to compile calls against )
+( both, and a colon-definition's own compiled reference has to )
+( resolve to a real dictionary entry at compile time, not just )
+( eventually. Both stay genuinely unused, holding nothing )
+( meaningful, until VOCABULARY/DEFINITIONS -- far below, past SEE/ )
+( HIDE/FORGET -- actually initialize and start writing to them; )
+( that section has the full story of what they are and why they )
+( exist. Nothing between here and there ever executes WORDS or FIND )
+( for real (the native fallback tokenizer, not this self-hosted )
+( FIND, still handles every line until INTERPRET itself is defined, )
+( much later still), so uninitialized cells during this stretch are )
+( never actually read. )
+VARIABLE CONTEXT
+VARIABLE CURRENT-VOCAB
+
+( WORDS -- lists every word visible in the current search context, )
+( most-recently-defined first. CORE-VOCABULARY.md section 12's own )
+( worked example, ported in verbatim, with two real fixes: that doc )
+( writes 1F AND, a hex literal, but BASE defaults to 10 decimal, )
+( where 1F isn't a valid number at all -- 31 is 1F's decimal value, )
+( same mask, NAME_LEN_MASK, same five low bits either way. And it )
+( walked LATEST directly, before CONTEXT existed to separate )
+( browsing from compiling. )
+( Still walks LATEST directly when CONTEXT and CURRENT-VOCAB name )
+( the same vocabulary -- the common case, browsing whatever you're )
+( also compiling into -- since a vocabulary's own remembered cell )
+( only gets refreshed when DEFINITIONS switches *away* from it, not )
+( continuously as new words compile in; LATEST is the only thing )
+( that's actually live while it's the active compile target. Only )
+( walks CONTEXT's own stored position when browsing some *other*, )
+( currently-dormant vocabulary, where that stored position is )
+( correctly accurate precisely because nothing is compiling into it )
+( right now. )
 : WORDS
-  LATEST
+  CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
   BEGIN
     DUP
   WHILE
@@ -317,42 +345,75 @@ HIDE BRANCH-XT
 HIDE 0BRANCH-XT
 HIDE SLIT-XT
 
-( VOCABULARY/USE, DEVELOPING.md section 8: branching dictionary )
-( chains, not independent chains plus a search order -- each )
+( VOCABULARY/USE/DEFINITIONS, DEVELOPING.md section 8, revised for )
+( the real classic CONTEXT/CURRENT split. Browsing a vocabulary )
+( search-wise must never redirect where new words actually compile )
+( to, or a screen LOADed while merely looking around in EDITOR )
+( would land its own new words inside EDITOR instead of plain )
+( FORTH -- the original single-pointer USE this replaces did )
+( exactly that, found the hard way once the Screen Editor's own )
+( vocabulary existed to expose it. Branching dictionary chains )
+( still, not independent chains plus a search order -- each )
 ( vocabulary remembers its own LATEST position, starting as a )
 ( continuation of whatever chain was current, not empty, so )
 ( switching into one never loses access to words that already )
 ( existed before the branch point. )
 
-( Ordinary VARIABLE, not a sysvar -- just needs plain read/write, )
-( holding the address of whichever vocabulary's own cell USE )
-( should save the outgoing chain position back into next. )
-VARIABLE CURRENT-VOCAB
+( CONTEXT is which vocabulary FIND and WORDS search -- browsing, )
+( changed freely, any time, with no side effect on anything else. )
+( CURRENT-VOCAB is which vocabulary new definitions actually )
+( extend -- compiling, changed only by DEFINITIONS, deliberately. )
+( Both declared far above, near WORDS, purely as forward )
+( references -- this is where they actually start being used for )
+( real. Both are ordinary VARIABLEs holding the address of a )
+( vocabulary's own remembered-position cell, not a snapshotted )
+( value, so a later definition added to whichever vocabulary either )
+( currently names is visible immediately, via FIND/WORDS' own )
+( LATEST-vs-stored-position check just above -- not through this )
+( indirection alone. )
 
-( VOCABULARY name -- creates a new vocabulary, its own CREATEd )
-( cell capturing the CURRENT chain position at creation time, not )
-( zero. LATEST must run before CREATE: CREATE itself becomes the )
+( VOCABULARY name -- creates a new vocabulary. Its own CREATEd cell )
+( captures the CURRENT chain position at creation time, not zero -- )
+( LATEST must run before CREATE, since CREATE itself becomes the )
 ( new LATEST the instant it links its own header in, so capturing )
-( the old value has to happen first. )
-: VOCABULARY LATEST CREATE , ;
+( the old value has to happen first. DOES> gives every vocabulary a )
+( real runtime action now, not just a bare CREATEd value: naming a )
+( vocabulary switches CONTEXT to it directly -- the actual classic )
+( idiom, and what makes DEFINITIONS below able to just read CONTEXT )
+( rather than needing its own separate name-parsing step. )
+: VOCABULARY LATEST CREATE , DOES> CONTEXT ! ;
 
 ( Everything defined above this point becomes the root vocabulary. )
+( Naming FORTH sets CONTEXT via its own new DOES> action just )
+( described; CURRENT-VOCAB is set to match by hand here, once, )
+( since nothing earlier has established it yet the way a later )
+( DEFINITIONS call normally would. )
 VOCABULARY FORTH
-' FORTH 8 + CURRENT-VOCAB !
+FORTH
+CONTEXT @ CURRENT-VOCAB !
 
-( USE name -- switches which chain new definitions extend and )
-( lookups walk. Saves the outgoing chain's current position back )
-( into its own remembered cell, then loads the target's remembered )
-( position into LATEST itself. The +8 skips the target's Code )
-( Field and CREATE's reserved does-pointer cell -- the same offset )
-( executeXT's own DOVAR dispatch already uses to reach a CREATEd )
-( word's actual data. )
-: USE
-  ' 8 +
-  LATEST-ADDR @ CURRENT-VOCAB @ !
+( DEFINITIONS -- : promotes whatever CONTEXT currently names to )
+( also be the compile target -- saves the outgoing compile chain's )
+( current position back into its own remembered cell, then loads )
+( the target's remembered position into LATEST itself. The classic )
+( two-step idiom in full: EDITOR DEFINITIONS means "look here, and )
+( start compiling here too," as two separate, explicit actions )
+( rather than one combined one. )
+: DEFINITIONS
+  CONTEXT @
+  LATEST CURRENT-VOCAB @ !
   DUP @ LATEST-ADDR !
   CURRENT-VOCAB !
 ;
+
+( USE name -- kept as a synonym for the classic bare-name idiom, )
+( since every existing caller already spells it this way: parses )
+( the next token and EXECUTEs it, which for a vocabulary word runs )
+( VOCABULARY's own DOES> action above, setting CONTEXT. Browsing )
+( only -- USE alone never touches CURRENT-VOCAB or LATEST, unlike )
+( the single combined pointer this replaces; pair it with )
+( DEFINITIONS when compiling into the target is actually wanted. )
+: USE ' EXECUTE ;
 
 ( ---------------------------------------------------------------- )
 ( BLOCK/BUFFER/UPDATE/FLUSH -- FORTH-ARCHITECTURE.md section 7, the )
@@ -569,16 +630,31 @@ HIDE PICK-SLOT
 VARIABLE FIND-ADDR
 VARIABLE FIND-LEN
 
-( FIND addr len -- entry-addr flag : chain-walk from LATEST toward 0, )
-( skipping HIDDEN entries, comparing each candidate's already-uppercase )
-( stored name against addr len case-insensitively. entry-addr is 0 )
-( when flag is 0 -- meaningless either way, per spec's own contract. )
-( The per-character comparison uppercases the *input* byte only, )
-( since a stored name is already uppercase -- written that way at )
-( definition time -- lowercase a-z, ASCII 97-122, shift down by 32. )
+( FIND addr len -- entry-addr flag : chain-walk from the current )
+( search context toward 0, skipping HIDDEN entries, comparing each )
+( candidate's already-uppercase stored name against addr len )
+( case-insensitively. entry-addr is 0 when flag is 0 -- meaningless )
+( either way, per spec's own contract. The per-character comparison )
+( uppercases the *input* byte only, since a stored name is already )
+( uppercase -- written that way at definition time -- lowercase )
+( a-z, ASCII 97-122, shift down by 32. )
+( Walks CONTEXT's own target -- not the bare LATEST compile-chain )
+( pointer this used before CONTEXT existed. Ordinary interpreted/ )
+( compiled word dispatch, INTERPRET below, always wants what's )
+( currently visible while browsing, which is exactly CONTEXT's own )
+( job -- not what's currently being compiled into, which stays )
+( LATEST's job alone, untouched here -- compileCell/CREATE/etc. )
+( still act on it directly, unrelated to this search. )
+( Same LATEST-vs-stored-position check WORDS above already needs: )
+( a vocabulary's own remembered cell only gets refreshed when )
+( DEFINITIONS switches away from it, not continuously as new words )
+( compile in, so browsing whatever you're also compiling into has )
+( to read LATEST directly to see the live picture -- CONTEXT's own )
+( stored position is only accurate for some other, dormant )
+( vocabulary nothing is currently compiling into. )
 : FIND ( addr len -- entry-addr flag )
   FIND-LEN ! FIND-ADDR !
-  LATEST
+  CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
   BEGIN
     DUP
   WHILE
@@ -742,7 +818,185 @@ VARIABLE BOOT-HERE
 ( DICT space anything defined after the boot marker used, the same )
 ( way FORGETting the very first post-boot word would, without )
 ( needing to know that word's name. )
-: EMPTY BOOT-LATEST @ LATEST-ADDR ! BOOT-HERE @ HERE-ADDR ! ;
+
+( Also forces both CURRENT-VOCAB and CONTEXT back to FORTH's own )
+( cell -- not just LATEST/HERE. Found the hard way, before CONTEXT )
+( existed: EMPTY only ever reset the GLOBAL LATEST cell, with no )
+( idea what CURRENT-VOCAB currently pointed at. Calling EMPTY while )
+( some other vocabulary -- EDITOR, below -- was still the compile )
+( target left CURRENT-VOCAB still aimed at that vocabulary's own )
+( remembered-position cell. The next DEFINITIONS-equivalent switch )
+( then did its ordinary "save the outgoing chain's tip into )
+( CURRENT-VOCAB's cell" step -- which saved the now-reset, )
+( boot-marker LATEST value directly into that OTHER vocabulary's own )
+( cell, permanently overwriting its real chain tip. The vocabulary's )
+( own marker word survived, reachable from FORTH same as always, )
+( but every word actually defined inside it became permanently )
+( unreachable, even though the underlying bytes were never touched. )
+( CONTEXT needs the identical treatment now that it's a real, )
+( separate pointer too -- leaving it aimed at a vocabulary whose )
+( memory EMPTY just made reclaimable, then compiling enough new )
+( code to actually grow back into that space, would have CONTEXT )
+( walking straight into overwritten, unrelated bytes. Forcing both )
+( to FORTH here closes the gap completely: EMPTY now always leaves )
+( the machine in a clean, known FORTH state, matching a fresh COLD )
+( boot exactly, no matter which vocabulary was active or being )
+( browsed when it was called. )
+
+( FORTH, executed here, runs VOCABULARY's own DOES> action -- sets )
+( CONTEXT to FORTH's own cell directly, no name-parsing needed )
+( since FORTH is the literal word being called, not a runtime )
+( argument. CURRENT-VOCAB is then set to match by hand, the exact )
+( same one-line mirror the boot-time setup above already uses. )
+: EMPTY
+  BOOT-LATEST @ LATEST-ADDR !
+  BOOT-HERE @ HERE-ADDR !
+  FORTH
+  CONTEXT @ CURRENT-VOCAB !
+;
+
+( ---------------------------------------------------------------- )
+( Screen Editor -- FORTH-ARCHITECTURE.md section 7 follow-up, )
+( inspiration Starting-FORTH.pdf chapter 3, and )
+( inspiration figforth_editor_screens.txt. One screen is one BLKS )
+( block -- sixteen lines of sixty-four characters, matching classic )
+( Forth's own fixed 1024-byte screen layout exactly, and matching )
+( this project's own screen width of sixty-four character columns )
+( -- not a coincidence either. )
+
+( C/L is the classic name, characters per line. L/SCR is this )
+( project's own name, lines per screen, no classic precedent found )
+( for it. Both are fixed architectural constants, not queried from )
+( BLKS at runtime -- the 1024-byte block size they multiply out to )
+( is BLOCK-SIZE itself, already a fixed constant from the )
+( BLOCK/BUFFER section above. )
+64 CONSTANT C/L
+16 CONSTANT L/SCR
+
+: BLANKS ( addr len -- ) BL FILL ;
+
+( LOAD interprets screen n as Forth source, one line at a time. )
+( BLOCK gets the resident buffer; each line's own sixty-four bytes )
+( get pointed to directly via the new native SET-INPUT primitive, )
+( the one thing no earlier milestone needed, since every previous )
+( consumer of the shared input cursor only ever pointed it at the )
+( TIB. From there, INTERPRET reads exactly the way it reads any )
+( typed line, with zero awareness that its source is a block )
+( instead of a keystroke. )
+
+( Aligns CONTEXT with CURRENT-VOCAB for its own duration, restoring )
+( whatever CONTEXT was on the way out -- found necessary, not just )
+( tidy, by an actual failing case: a screen whose second line calls )
+( a word its first line just defined, LOADed while merely browsing )
+( some other vocabulary. FIND and WORDS only read LATEST directly )
+( when CONTEXT and CURRENT-VOCAB already agree -- otherwise CONTEXT )
+( names some other, dormant vocabulary's own frozen position, which )
+( can never see words compiled moments ago by *this* LOAD call. )
+( Without this, LOAD's own compile target was always right, but a )
+( multi-line screen referencing its own earlier definitions could )
+( fail to compile at all depending on what the caller happened to )
+( be browsing at the time -- purely accidental, not something a )
+( screen's own author has any control over. )
+: LOAD ( n -- )
+  CONTEXT @
+  CURRENT-VOCAB @ CONTEXT !
+  SWAP
+  BLOCK
+  L/SCR 0 DO
+    DUP I C/L * + C/L (SET-INPUT)
+    INTERPRET
+  LOOP
+  DROP
+  CONTEXT !
+;
+
+( The interactive editor commands live in their own vocabulary, not )
+( plain FORTH's -- single-letter names collide too easily with )
+( ordinary user code, I most of all, since it would shadow the )
+( loop-index word every DO/LOOP body depends on. VOCABULARY/ )
+( DEFINITIONS already exist for exactly this, DEVELOPING.md section )
+( 8: EDITOR's own chain branches from FORTH's current position, so )
+( every word defined above, LOAD included, stays reachable from )
+( inside EDITOR, but EDITOR's own L/T/TOP/CLEAR stay invisible once )
+( back in plain FORTH. DEFINITIONS here, not just EDITOR alone: )
+( these words need to actually compile into EDITOR, not just be )
+( visible while it's the search context. )
+VOCABULARY EDITOR
+EDITOR DEFINITIONS
+
+( SCR is the screen number every editor command below acts on by )
+( default, the same role classic Forth's own SCR variable plays. )
+VARIABLE SCR
+
+( LIST sets SCR and displays screen n, a header line then sixteen )
+( numbered lines of C/L characters each. Relies on every byte in a )
+( screen always being real text or a space, never a raw NUL byte -- )
+( true by construction, since CLEAR and T below both always blank )
+( before writing, and every screen gets CLEARed once at boot, )
+( further down. )
+: LIST ( n -- )
+  DUP SCR !
+  CR ." SCR #" SPACE DUP . CR
+  BLOCK
+  L/SCR 0 DO
+    I . DUP I C/L * + C/L TYPE CR
+  LOOP
+  DROP
+;
+
+( L redisplays the current screen without changing which one that )
+( is -- classic Forth's own split between a screen-number-taking )
+( LIST and a no-argument L. )
+: L ( -- ) SCR @ LIST ;
+
+( T-LINE is a scratch variable threading a computed line address )
+( through T, the same convention every other scratch variable in )
+( this file already established. Hidden below, once T no longer )
+( needs to find it by name. )
+VARIABLE T-LINE
+
+( T replaces one line of the current screen with the rest of the )
+( current input line's own text, blanked first and then truncated )
+( or padded to exactly C/L characters. The delimiter-one WORD call )
+( is the classic fig-FORTH TEXT idiom, ported directly: a delimiter )
+( byte that can never occur in typed input, since one is not a )
+( printable character, makes the scan run to the end of the line )
+( instead of stopping at the next space -- capturing everything )
+( after the line number as one span of raw text. )
+: T ( line# -- )
+  SCR @ BLOCK SWAP C/L * + T-LINE !
+  T-LINE @ C/L BLANKS
+  1 WORD C/L MIN
+  T-LINE @ SWAP CMOVE
+  UPDATE
+;
+
+( TOP jumps to and displays the very first screen -- this project's )
+( own reading of classic TOP's idea of a known starting point, )
+( adapted since nothing here tracks a persistent character-level )
+( cursor position the way classic R# did. )
+: TOP ( -- ) 0 LIST ;
+
+( CLEAR blanks screen n's entire content and marks it dirty -- for )
+( re-blanking a screen while editing. Every screen already starts )
+( genuinely blank, space-filled, not the zero-filled bytes a raw )
+( bank would otherwise hold: repl.ts fills the whole BLKS bank with )
+( spaces natively the moment it's created, before system.fth ever )
+( runs, since NUL is not BL and would make INTERPRET's own BL WORD )
+( scan read a run of raw NUL bytes as one long unrecognized token )
+( and ABORT the instant LOAD or LIST first touched an untouched )
+( screen. Simpler than classic fig-FORTH's own line-by-line erase )
+( loop: BLOCK already hands back one flat BLOCK-SIZE buffer here, )
+( not sixteen separately-addressed lines, so one BLANKS call does )
+( the whole screen in a single pass. )
+: CLEAR ( n -- ) DUP SCR ! BLOCK BLOCK-SIZE BLANKS UPDATE ;
+
+HIDE T-LINE
+
+( Switching back means compiling here again too, not just looking )
+( here -- FORTH DEFINITIONS, matching the EDITOR DEFINITIONS this )
+( section opened with. )
+FORTH DEFINITIONS
 
 ( The actual capture -- LATEST/HERE at this exact point already )
 ( include EMPTY's own just-closed definition, per the ordering note )

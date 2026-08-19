@@ -95,9 +95,12 @@ describe('(BLOCK-READ) / (BLOCK-WRITE) ( addr n -- ) — FORTH-ARCHITECTURE.md �
 
     expect(m.arena.readByte(blks.base + 5 * BLOCK_SIZE)).toBe(0xaa);
     expect(m.arena.readByte(blks.base + 5 * BLOCK_SIZE + BLOCK_SIZE - 1)).toBe(0xaa);
-    // Block 4's last byte and block 6's first byte are the immediate neighbors.
-    expect(m.arena.readByte(blks.base + 4 * BLOCK_SIZE + BLOCK_SIZE - 1)).toBe(0);
-    expect(m.arena.readByte(blks.base + 6 * BLOCK_SIZE)).toBe(0);
+    // Block 4's last byte and block 6's first byte are the immediate
+    // neighbors — untouched means still the space (32) BLKS is natively
+    // filled with at bank creation (repl.ts, Screen Editor follow-up),
+    // not a raw zero byte.
+    expect(m.arena.readByte(blks.base + 4 * BLOCK_SIZE + BLOCK_SIZE - 1)).toBe(32);
+    expect(m.arena.readByte(blks.base + 6 * BLOCK_SIZE)).toBe(32);
   });
 
   it('reads/writes work at both ends of the 16-block range (0 and 15)', () => {

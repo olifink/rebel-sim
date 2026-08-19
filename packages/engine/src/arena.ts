@@ -60,4 +60,16 @@ export class Arena {
   writeByte(offset: number, value: number): void {
     this.view.setUint8(offset, value);
   }
+
+  /** Fills `[offset, offset+length)` with one repeated byte — a fast
+   * native bulk operation for cases where a JS-level loop of
+   * `writeByte()` calls (never mind a Forth-level `DO`/`LOOP`'s
+   * token-threaded dispatch cost, orders of magnitude slower again)
+   * would be wasteful, e.g. blank-initializing a whole bank's content at
+   * boot. A `Uint8Array` view over the same buffer, not a `DataView`
+   * call — still the only method here touching the raw buffer directly,
+   * just not through `view`. */
+  fillBytes(offset: number, length: number, value: number): void {
+    new Uint8Array(this.buffer, offset, length).fill(value & 0xff);
+  }
 }

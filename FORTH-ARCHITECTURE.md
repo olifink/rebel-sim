@@ -468,17 +468,22 @@ Every dictionary entry, identical layout across all languages:
   * **Extension:** `.BLK` (`storage.ts`'s `TAG_TO_EXTENSION`,
     `spec/01-HAL.md` §6.3's table) — `.SCR` is already `SCRN`'s (the
     pixel framebuffer), so `BLKS` needed its own.
-  * **Status, 2026-08-19:** fully built on Rebel-Sim. The `BLKS` bank
-    (tag, `S`-class 16-block size, `.BLK` extension) and the
-    `(BLOCK-READ)`/`(BLOCK-WRITE)` primitives (`banks.ts`'s
+  * **Status, 2026-08-19:** fully built on Rebel-Sim, editor and all.
+    The `BLKS` bank (tag, `S`-class 16-block size, `.BLK` extension)
+    and the `(BLOCK-READ)`/`(BLOCK-WRITE)` primitives (`banks.ts`'s
     `BLOCK_SIZE`, `repl.ts`'s boot-created `BLKS` bank, `primitives.ts`
     tokens 140/141) landed 2026-08-18 — a `SAVE`d project round-trips
     `BLKS` like any other bank, `.BLK` files load back correctly. The
     portable `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` buffer pool
-    (`system.fth`) landed the next day. Next real step: the Screen
-    Editor commands themselves (`L`/`T`/`D`/... per
-    `figforth_editor_screens.txt`), the actual reason this whole
-    mechanism was spec'd.
+    (`system.fth`) landed the next day, immediately followed by the
+    actual reason this whole mechanism was spec'd: `LOAD` (one more
+    new primitive, `(SET-INPUT)`, redirecting the shared input cursor
+    to a block-resident line) and an `EDITOR` vocabulary —
+    `LIST`/`L`/`T`/`TOP`/`CLEAR` — the core edit/run loop (M48,
+    `IMPLEMENTATION.md` §1.59). Line insert/delete, text
+    search-and-substitute, and cross-screen `COPY`
+    (`figforth_editor_screens.txt`'s fuller word set) are a deliberate
+    follow-up, not yet built.
 
 * **`hal_millis()`:** monotonic milliseconds, needed for any timing/delay
   word. On Rebel-ROM, wire it to Circle's `CTimer` (already a fixed

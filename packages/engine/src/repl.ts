@@ -293,7 +293,17 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // FORTH-ARCHITECTURE.md §7: generic block storage, boot-created like
     // every other bank — (BLOCK-READ)/(BLOCK-WRITE) (140/141) resolve it
     // by tag via ctx.banks.requireBank('BLKS'), same pattern BANK@ uses.
-    this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'BLKS');
+    const blksBank = this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'BLKS');
+    // Screen Editor follow-up: space-filled, not the zero bytes a fresh
+    // bank would otherwise hold — NUL isn't BL, so the outer
+    // interpreter's own BL-delimited WORD scan (system.fth's LOAD/LIST)
+    // would read a run of raw NUL bytes as one long unrecognized token
+    // and ABORT the instant anything touched an untouched screen. A
+    // native fillBytes() call here is instant; doing this in Forth via
+    // 16 screens' worth of DO/LOOP-driven FILL calls (tried first) added
+    // over a second to every boot — negligible content, real dispatch
+    // cost, times 16 KiB of individual token-threaded steps.
+    this.arena.fillBytes(blksBank.base, BLKS_BANK_SIZE, SPACE_CHAR_CODE);
   }
 
   getBase(): number {
@@ -320,6 +330,21 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       this.inputPos++; // consume the delimiter that stopped the scan
     }
     return { addr: start, len };
+  }
+
+  /** FORTH-ARCHITECTURE.md §7's `LOAD` (screen-source interpretation):
+   * the one thing no existing primitive exposed — every prior consumer of
+   * the shared cursor (`ACCEPT`'s own `replLoop` step, `loadLineIntoTib`
+   * above) only ever pointed it at the TIB. `LOAD` needs to point it at an
+   * arbitrary `BLOCK`-returned buffer address instead, so the exact same
+   * `WORD`/`FIND`/`NUMBER`/`INTERPRET` machinery can read a screen's line
+   * as if it had been typed. Deliberately a thin, direct field-set — no
+   * bounds/bank validation here, same trust-the-caller precedent `WORD`
+   * itself already has (`len === 0` just means "nothing to read", never a
+   * thrown error). */
+  setInput(addr: number, len: number): void {
+    this.inputPos = addr;
+    this.inputEnd = addr + len;
   }
 
   private decodeBytes(addr: number, len: number): string {

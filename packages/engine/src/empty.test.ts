@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { Machine } from './repl.js';
 import { bootMachine } from './test-support.js';
+
+/** Whether `name` is currently findable via self-hosted FIND — the
+ * CONTEXT-based search order an ordinary typed word goes through, not
+ * the separate, deliberately narrower LATEST-scoped native tick (`'`),
+ * which only ever sees the compile chain regardless of what's merely
+ * being browsed. See the CONTEXT/CURRENT-VOCAB split tests below for why
+ * the two differ. */
+function findable(m: Machine, name: string): boolean {
+  m.interpret(`S" ${name}" FIND`);
+  const flag = m.stack.pop();
+  m.stack.pop(); // entry-addr, unused
+  return flag !== 0;
+}
 
 describe('EMPTY (system.fth, FORTH-ARCHITECTURE.md §7 follow-up) — resets the dictionary to its post-boot (COLD-equivalent) state', () => {
   it('forgets a user-defined word', () => {
@@ -88,5 +102,49 @@ describe('EMPTY (system.fth, FORTH-ARCHITECTURE.md §7 follow-up) — resets the
     m.interpret(': NEW 10 20 + ;');
     m.interpret('NEW');
     expect(m.stack.pop()).toBe(30);
+  });
+
+  it('calling EMPTY while a non-FORTH vocabulary is the compile target does not corrupt that vocabulary — regression for a real bug found by Oliver', () => {
+    // EMPTY only ever reset the global LATEST/HERE cells, with no idea
+    // what CURRENT-VOCAB currently pointed at. Calling it while EDITOR
+    // (or any other vocabulary) was still the *compile target* — i.e.
+    // reached via DEFINITIONS, not just USE's own context-only browsing
+    // — left CURRENT-VOCAB aimed at that vocabulary's own
+    // remembered-position cell. The next DEFINITIONS-equivalent switch
+    // then saved the freshly-reset (boot-marker) LATEST value directly
+    // into that vocabulary's own cell, permanently overwriting its real
+    // chain tip. The vocabulary's own marker word survived (reachable via
+    // FORTH's own chain), but everything defined inside it became
+    // permanently unreachable, even though the underlying bytes were
+    // never touched. Reproduced against EDITOR (system.fth's own real
+    // vocabulary, not a synthetic one) exactly as it was actually found.
+    // [Revised for the later CONTEXT/CURRENT-VOCAB split: the original
+    // report used plain USE, which was the single combined pointer at
+    // the time — DEFINITIONS is that same full switch's modern name;
+    // plain USE alone (browsing only) was never the vulnerable path.]
+    const m = bootMachine();
+    m.interpret('EDITOR DEFINITIONS');
+    expect(findable(m, 'L')).toBe(true);
+
+    // The bug: call EMPTY without switching back to FORTH first.
+    m.interpret('EMPTY');
+    m.interpret('FORTH DEFINITIONS');
+    m.interpret('EDITOR DEFINITIONS');
+
+    for (const name of ['L', 'T', 'TOP', 'CLEAR', 'SCR']) {
+      expect(findable(m, name)).toBe(true);
+    }
+    m.interpret('FORTH DEFINITIONS');
+  });
+
+  it('EMPTY leaves plain FORTH active even when called mid-vocabulary, so a following FORTH DEFINITIONS is a harmless no-op', () => {
+    const m = bootMachine();
+    m.interpret('EDITOR DEFINITIONS');
+    m.interpret('EMPTY');
+    // Already back on FORTH's own chain — LOAD (FORTH-root) reachable,
+    // EDITOR-only words are not, without any explicit FORTH DEFINITIONS
+    // at all.
+    expect(findable(m, 'LOAD')).toBe(true);
+    expect(findable(m, 'L')).toBe(false);
   });
 });

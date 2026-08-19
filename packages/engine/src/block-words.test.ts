@@ -39,8 +39,10 @@ describe('BLOCK / BUFFER / UPDATE / FLUSH (system.fth, FORTH-ARCHITECTURE.md §7
     m.interpret('4 BLOCK');
     const addr = m.stack.pop();
     m.arena.writeByte(addr, 0x99);
-    // Before UPDATE/FLUSH, BLKS's own bytes for block 4 are untouched.
-    expect(m.arena.readByte(blks.base + 4 * BLOCK_SIZE)).toBe(0);
+    // Before UPDATE/FLUSH, BLKS's own bytes for block 4 are untouched —
+    // still the space (32) every screen is natively blank-filled with,
+    // not a raw zero byte (Screen Editor follow-up, repl.ts).
+    expect(m.arena.readByte(blks.base + 4 * BLOCK_SIZE)).toBe(32);
 
     m.interpret('UPDATE FLUSH');
     expect(m.arena.readByte(blks.base + 4 * BLOCK_SIZE)).toBe(0x99);
@@ -55,7 +57,7 @@ describe('BLOCK / BUFFER / UPDATE / FLUSH (system.fth, FORTH-ARCHITECTURE.md §7
     m.arena.writeByte(addr, 0x77);
     m.interpret('FLUSH');
 
-    expect(m.arena.readByte(blks.base + 5 * BLOCK_SIZE)).toBe(0);
+    expect(m.arena.readByte(blks.base + 5 * BLOCK_SIZE)).toBe(32);
   });
 
   it('BLOCK loads real BLKS content on a genuine miss (round-trips through the native primitives)', () => {
@@ -106,8 +108,9 @@ describe('BLOCK / BUFFER / UPDATE / FLUSH (system.fth, FORTH-ARCHITECTURE.md §7
 
     expect(m.arena.readByte(blks.base + 0 * BLOCK_SIZE)).toBe(0x10);
     // Blocks 1-3 are still buffered (never evicted), so BLKS itself is
-    // still untouched for them until an explicit FLUSH.
-    expect(m.arena.readByte(blks.base + 1 * BLOCK_SIZE)).toBe(0);
+    // still untouched for them until an explicit FLUSH — still the
+    // native space-fill, not a raw zero byte.
+    expect(m.arena.readByte(blks.base + 1 * BLOCK_SIZE)).toBe(32);
   });
 
   it('BLOCK on an out-of-range block number throws via the underlying native bounds check', () => {

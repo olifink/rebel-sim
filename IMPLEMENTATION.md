@@ -2480,6 +2480,333 @@ boot or the last `EMPTY`, leaves the data stack/sysvars/`BLKS` content
 untouched, and new definitions work normally afterward with no
 corruption). Full engine suite: 371 passed (364 before, +7 new).
 
+### 1.59 The Screen Editor: `LOAD`, and the `EDITOR` vocabulary — `LIST`/`L`/`T`/`TOP`/`CLEAR` (M48, `FORTH-ARCHITECTURE.md` §7, `inspiration/Starting-FORTH.pdf` ch. 3, `inspiration/figforth_editor_screens.txt`)
+
+The actual reason `BLKS`/`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH`/`EMPTY`
+were spec'd (§1.56-§1.58): a screen is now a genuinely live place to
+write and run Forth source, not just a block of bytes with nowhere to
+go. One screen is one `BLKS` block — sixteen lines of sixty-four
+characters, matching classic Forth's fixed 1024-byte screen layout
+exactly, and matching this project's own screen width (sixty-four
+character columns) — not a coincidence.
+
+**Scope, agreed with Oliver up front:** the core edit/run loop first —
+`LIST`/`L` (display), `T` (replace a line), `LOAD` (run a screen as
+source), `TOP`/`CLEAR` — not the full classic set (insert/delete
+lines, text search-and-substitute, cross-screen `COPY`), which is
+real functionality but a separate follow-up once this loop is
+proven. Command naming follows classic fig-FORTH's own single-letter
+mnemonics (`L`/`T`), matching `inspiration/figforth_editor_screens.txt`
+and this project's demonstrated fig-FORTH fidelity elsewhere, rather
+than inventing more readable names that would diverge from the
+reference material this was explicitly spec'd against.
+
+**A new native primitive was genuinely required, not just Forth
+composition.** `LOAD` needs to feed a `BLOCK`-resident line through
+the same `WORD`/`FIND`/`NUMBER`/`INTERPRET` machinery an ordinary
+typed line uses — but nothing before this exposed a way to redirect
+`repl.ts`'s own shared input cursor (`inputPos`/`inputEnd`) away from
+the TIB. Every earlier consumer (`loadLineIntoTib`, `replLoop`'s own
+post-`ACCEPT` step) only ever pointed it there, privately, in
+TypeScript. `(SET-INPUT)` (token 142, `( addr len -- )`) is the new,
+minimal, surgical fix — a direct field-set on `Machine`, exposed
+through `PrimitiveContext` the same way `nextInputToken()`/`wordScan()`
+already are. Paren-named like `(BLOCK-READ)`/`(BLOCK-WRITE)`
+(140/141): internal plumbing `LOAD` calls, not something meant to be
+typed directly.
+
+**`LOAD` itself, plain Forth once `(SET-INPUT)` exists:**
+
+```
+: LOAD ( n -- )
+  BLOCK
+  L/SCR 0 DO
+    DUP I C/L * + C/L (SET-INPUT)
+    INTERPRET
+  LOOP
+  DROP
+;
+```
+
+`BLOCK` resolves the screen's resident buffer once; each iteration
+points the cursor at that line's own 64 bytes and calls `INTERPRET`
+directly — the same self-hosted word every REPL line already runs
+through, with zero awareness its source is a block instead of a
+keystroke. `C/L` (64, classic name, characters per line) and `L/SCR`
+(16, this project's own name, lines per screen) are fixed
+architectural constants — their product is `BLOCK-SIZE`, already
+fixed from the M46 section.
+
+**Editor commands live in their own `EDITOR` vocabulary, not plain
+`FORTH`'s — a real correctness reason, not just classic-fig-FORTH
+flavor.** Single-letter names collide too easily with ordinary user
+code, `I` most concretely: it would shadow the loop-index word every
+`DO`/`LOOP` body depends on. `VOCABULARY`/`USE` (already built, M13)
+were exactly the right existing tool: `EDITOR`'s own chain branches
+from `FORTH`'s current position at creation time, so every word
+defined before the branch — `LOAD` included, deliberately defined in
+plain `FORTH` before `VOCABULARY EDITOR` runs — stays reachable from
+inside `EDITOR`, but `EDITOR`'s own `L`/`T`/`TOP`/`CLEAR` stay
+invisible once back in plain `FORTH`. This also fixed the ordering
+inside `system.fth`: the new block had to land *before* `EMPTY`'s own
+`LATEST`/`HERE` capture step (not after it, where it was first
+drafted), or a later `EMPTY` call would silently un-define the entire
+editor along with any real user code — "the state `COLD` produces"
+has to include the editor now that it exists.
+
+**Two real bugs found and fixed while building this, both classes
+already seen before in this file — worth recording exactly why they
+recurred.**
+
+1. *The `(` comment-closing bug, a third time (M43's write-up already
+   called this "hit five times").* Every early draft mentioning
+   `(BLOCK-READ)`/`(BLOCK-WRITE)` or even a bare `#SCR)`-shaped token
+   inside a `(` comment broke `bootMachine()` the same way §1.57's own
+   write-up already describes: a comment's closing scan is per-token,
+   not per-character, and a token ending in `)` — even by
+   accident, mid-sentence, like `section 8)` — closes it early. Also
+   caught a *new* variant this time: several draft comment lines used
+   a trailing `--` to "continue" onto the next `( ... )` line,
+   forgetting that every comment line has to open *and* close on its
+   own — an unclosed `(` just runs to end-of-line and swallows
+   whatever real code came next as more (silently discarded) comment
+   text, a quieter failure than the premature-close case, caught by
+   grepping for comment lines with no trailing `)` before ever loading
+   the file. Every comment in this section was rewritten to avoid
+   embedded parens entirely, and mechanically verified (`grep`) rather
+   than eyeballed, once was clearly not enough.
+2. *A real, measured performance regression: boot time roughly 2.5x'd
+   (about 200ms to about 500ms), and a first draft spiked far worse.*
+   `CLEAR` looping over all sixteen screens at boot, to blank-fill
+   `BLKS`, first used a Forth-level `BLANKS`/`FILL` — a `DO`/`LOOP`
+   writing one byte at a time through the token-threaded inner
+   interpreter. Sixteen KiB of individual generator-driven dispatches
+   added *over a second* to every single boot, on top of the compile-
+   time cost below, and reliably timed out `control-flow.test.ts`
+   under full-suite parallel load. Fixed structurally, not just
+   worked around: `Arena` gained `fillBytes()`, a native `Uint8Array`
+   bulk fill; `BLKS` is now space-filled once, natively, the moment
+   `repl.ts` creates the bank, before `system.fth` ever runs — and the
+   Forth-level boot-time blank-fill loop (`BLANK-ALL-SCREENS`) was
+   deleted outright, not merely sped up, since it was no longer needed
+   at all. The *remaining* ~300ms increase is compile-time cost, not
+   execution — self-hosted `INTERPRET`'s own `FIND` is `O(dictionary
+   size)` per token (§1.54's own known tradeoff, `test-support.ts`'s
+   `AMPLE_STEP_BUDGET` comment already names it), and this milestone
+   is simply the first to add enough new colon-definitions to make
+   that cost clearly visible in wall-clock terms, not a regression
+   specific to this code. Addressed as a test-infrastructure
+   accommodation, not a product fix: `vitest.config.ts`'s
+   `testTimeout` raised to 20s, since a test calling `bootMachine()`
+   more than once was demonstrated (twice, on different runs,
+   different specific tests each time — the failure moves, the root
+   cause doesn't) tripping the 5s default under full-suite CPU
+   contention.
+
+**A smaller wrinkle in `LIST`'s own output:** `." SCR # "` doesn't
+print a trailing space the way it looks like it should — `."`'s own
+text is reconstructed from whitespace-tokenized words rejoined with
+single spaces (`consumeQuotedText`'s documented behavior, §1's own
+`."`/`S"` note), which silently drops space immediately before the
+closing quote. `SEE`'s existing code already works around exactly
+this (`." :" 32 EMIT` rather than trusting a trailing space) — `LIST`
+now follows the same established pattern (`." SCR #" SPACE DUP . CR`)
+rather than reinventing a second workaround.
+
+*Implementation:* `arena.ts` (`fillBytes()`), `repl.ts` (`setInput()`,
+`BLKS`'s native space-fill), `primitives.ts` (token 142), `rebel-opcodes.json`
+(token 142's note), `system.fth` (`LOAD`, `EDITOR` vocabulary and its
+five words, `BLANKS`, `C/L`/`L/SCR`), `vitest.config.ts` (`testTimeout`).
+*Tests:* `screen-editor.test.ts` (new — `BLKS` starts space-filled,
+`LOAD` runs real multi-line source including a later line calling an
+earlier line's just-defined word, a blank screen loads as a no-op,
+`EDITOR` vocabulary isolation both ways, `T`'s space-padding and
+truncation, `CLEAR` re-blanking, `LIST`/`L`/`TOP` output content, and
+per-screen write isolation); `block-io.test.ts`/`block-words.test.ts`
+(existing "untouched byte" assertions updated from `0` to `32`, now
+that `BLKS` starts space-filled rather than zero-filled). Full engine
+suite: 385 passed (371 before, +14 new).
+
+**M48 follow-up, found immediately by Oliver:** `EMPTY` (§1.58) only
+ever reset the *global* `LATEST` sysvar — it had no idea what
+`CURRENT-VOCAB` currently pointed at. Calling it while `EDITOR` was
+still the active vocabulary left `CURRENT-VOCAB` aimed at `EDITOR`'s
+own remembered-position cell; the next `USE FORTH` then saved the
+freshly-reset `LATEST` value straight into that cell, permanently
+overwriting `EDITOR`'s real chain tip — `L`/`T`/`TOP`/`CLEAR`/`SCR`
+all became unreachable, though `EDITOR` the marker word itself
+survived (found via `FORTH`'s own chain) and the underlying `DICT`
+bytes were never actually touched. Fixed by having `EMPTY` also force
+`CURRENT-VOCAB` back to `FORTH`'s own cell — resolved once, at the
+top level, into a new `FORTH-VOCAB-CELL` constant, since `'` isn't
+`IMMEDIATE` and writing `' FORTH 8 +` directly inside `EMPTY`'s body
+would defer to runtime instead (the same live-argument shape `USE`'s
+own body deliberately relies on, wrong here). `empty.test.ts` gained
+two regression tests reproducing the exact reported scenario against
+the real `EDITOR` vocabulary. Also caught the `(`-comment-closing bug
+a third time while writing the fix's own comments — verified this
+time with a precise per-token Python check matching
+`consumeQuotedText`'s actual rule, not an approximation, which found
+the rest of the file already clean. Full engine suite: 387 passed
+(385 before, +2 new). **Resolved the next day, §1.60:** the real
+`CONTEXT`/`CURRENT` split fixes this as a side effect, rather than
+needing a `LOAD`-specific save/restore hack.
+
+### 1.60 `CONTEXT`/`CURRENT-VOCAB`: the real classic vocabulary split, replacing single-pointer `USE` (M48 follow-up 2, `DEVELOPING.md` §8)
+
+M13's original `USE` conflated two independent classic Forth
+concepts into one combined switch: *browsing* a vocabulary (what
+`FIND`/`WORDS` search) and *compiling into* one (what `:`/`CREATE`
+extend). That conflation is exactly what let a `LOAD`ed screen's own
+words land in the wrong vocabulary (§1.59's own follow-up) if the
+caller merely browsed `EDITOR` — via `USE EDITOR`, to call `L`/`T`
+interactively — without remembering to switch back to `FORTH` first.
+Asked for directly: "what would it take to split our `USE` to follow
+the `CONTEXT`/`CURRENT` split too?"
+
+**The shape.** `CONTEXT` (new `VARIABLE`) is which vocabulary `FIND`/
+`WORDS` search. `CURRENT-VOCAB` (existing) is which vocabulary new
+definitions extend. `VOCABULARY` is redefined with `DOES>` —
+`: VOCABULARY LATEST CREATE , DOES> CONTEXT ! ;` — giving every
+vocabulary word a real runtime action for the first time: naming one
+(`EDITOR`, typed or executed) sets `CONTEXT` directly, the actual
+classic idiom, not just a bare `CREATE`d value push. `USE name`
+survives as a thin, syntax-compatible synonym, `: USE ' EXECUTE ;` —
+since `'` isn't `IMMEDIATE` (§1's own note on this), it defers to
+runtime, reading its own target from whatever line calls `USE`,
+exactly the same trick the original combined `USE` already relied
+on; `EXECUTE`ing a vocabulary word now runs its `DOES>` action, so
+`USE` becomes context-only automatically, with no call-site rewrite
+needed anywhere `USE` was used purely for browsing. `DEFINITIONS`
+(new) is the classic second step: `: DEFINITIONS CONTEXT @ LATEST
+CURRENT-VOCAB @ ! DUP @ LATEST-ADDR ! CURRENT-VOCAB ! ;` — promotes
+whatever `CONTEXT` currently names to also become `CURRENT-VOCAB`,
+the exact same save-outgoing/load-incoming dance the original `USE`
+always did in one step, just now a deliberate second action:
+`EDITOR DEFINITIONS` means "look here, and start compiling here
+too."
+
+**A genuine dead end, found and reversed before landing on the
+right design.** The obvious first cut — `FIND`/`WORDS` always walk
+`CONTEXT @ @`, dereferencing a vocabulary's own remembered-position
+cell — breaks immediately, and not on some edge case: `EMPTY` itself
+failed to compile the moment this landed. That cell is a *snapshot*,
+refreshed only when `DEFINITIONS` switches *away* from a vocabulary
+— not continuously as new words compile into it. `FORTH`'s own cell
+was frozen at whatever `LATEST` was the instant `VOCABULARY FORTH`
+itself ran, at the very top of the file; every single word compiled
+since — `DEFINITIONS`, `USE`, `FIND`, `INTERPRET`, `EMPTY` itself —
+was invisible to `CONTEXT @ @`, because nothing had ever refreshed
+`FORTH`'s own cell in the meantime. **The actual fix:** `FIND`/
+`WORDS` compare `CONTEXT` against `CURRENT-VOCAB` first — equal
+(browsing exactly what you're also compiling into, the common case)
+walks `LATEST` directly, the only thing genuinely live; different
+(browsing some other, dormant vocabulary) walks that vocabulary's
+own stored position, which is trustworthy precisely because nothing
+is compiling into it right now:
+
+```
+CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
+```
+
+**A second instance of the identical gap, caught by an actual
+failing test, not spotted by inspection.** `LOAD` itself needs the
+same fix, for the same underlying reason: a screen whose second line
+calls a word its first line just defined, `LOAD`ed while merely
+browsing some *other* vocabulary the whole time (`CONTEXT` ≠
+`CURRENT-VOCAB` throughout), failed to compile — `FIND`, called from
+inside `LOAD`'s own second `INTERPRET` iteration, couldn't see what
+`LOAD`'s own first iteration had just compiled a moment earlier,
+since `CONTEXT` never agreed with `CURRENT-VOCAB` during the whole
+call. Fixed by having `LOAD` align `CONTEXT` with `CURRENT-VOCAB` for
+its own duration, restoring the caller's original `CONTEXT`
+afterward:
+
+```
+: LOAD ( n -- )
+  CONTEXT @
+  CURRENT-VOCAB @ CONTEXT !
+  SWAP
+  BLOCK
+  L/SCR 0 DO
+    DUP I C/L * + C/L (SET-INPUT)
+    INTERPRET
+  LOOP
+  DROP
+  CONTEXT !
+;
+```
+
+This is the general form of the save/restore idea §1.59's own
+follow-up sketched but never built — now solving a real, demonstrated
+compile failure rather than a hypothetical inconsistency.
+
+**A forward-reference wrinkle, caught immediately by a failed
+boot, not subtly.** `WORDS` is defined very early in the file,
+alongside `SEE`, and needs to compile a call against `CONTEXT` — but
+`CONTEXT`/`CURRENT-VOCAB` didn't exist as words until the real
+`VOCABULARY` section, far later. Both are now declared early, right
+before `WORDS`, purely as forward references: genuinely unused,
+holding nothing meaningful, until the real `VOCABULARY`/
+`DEFINITIONS` section initializes them for real — nothing executes
+`WORDS` or self-hosted `FIND` for real in between (the native
+fallback tokenizer still handles every line until `INTERPRET` itself
+is defined, much later still), so the gap is inert.
+
+**The `(`-comment-closing bug, a fourth time**, this time in the new
+`FIND` write-up itself (`(INTERPRET, below)` closed early). Caught by
+re-running the precise per-token Python checker §1.59's own follow-up
+introduced over the whole file, not by re-reading it — the exact
+value of keeping that check around rather than trusting a careful
+read, restated once more.
+
+**A deliberate scope boundary: the native `'` (tick) primitive and
+`findWord`/`listDictionaryEntries` (`dictionary.ts`) are completely
+untouched — zero engine changes for this entire feature.** `'` is
+used pervasively at bootstrap, resolving `BRANCH`/`LIT`/`EXIT`/etc.
+before any vocabulary concept exists at all, and internally for
+breakpoint/`ACCEPT`/`INTERPRET` resolution (`repl.ts`) — all
+inherently scoped to "the compile chain," not "whatever's being
+browsed." Checked every existing `'` call site in `system.fth`
+individually: vocabulary names (`' EDITOR`, `' FORTH`) and kernel xts
+(`' BRANCH`, `' LIT`, ...) all resolve correctly via `LATEST` regardless
+of `CONTEXT`, since vocabulary marker words and kernel primitives
+always live in `FORTH`'s own base chain, reachable from any fork.
+Making native lookup `CONTEXT`-aware would need a genuine new sysvar
+(`findWord` has no way to read an arbitrary Forth-level `VARIABLE`'s
+current value) and risks breaking bootstrap itself (the native
+fallback tokenizer resolves words the exact same way, before `CONTEXT`
+would even be initialized) — real engine surgery, for a consistency
+gain nothing in this codebase's own `'` usage actually needs. `HIDE`/
+`FORGET` stay `LATEST`-scoped too, same reasoning, unchanged.
+
+**Existing tests updated, not just extended.** `'`-based reachability
+checks (`screen-editor.test.ts`, `empty.test.ts`) switched to a small
+shared-shape `findable()` helper (`S" name" FIND`, checking
+self-hosted `FIND`'s own returned flag) in each file — `'` no longer
+means the same thing `CONTEXT`-wise, so checking reachability through
+it would silently test the wrong mechanism from here on. The two
+`EMPTY`-corruption regression tests from §1.58's own follow-up were
+revised to reproduce the bug through `DEFINITIONS` (the actually
+vulnerable path now) rather than plain `USE` (context-only, never
+vulnerable in the new design). Two `LOAD` tests gained an explicit
+`USE FORTH` *after* `LOAD`, not before, to call the loaded word — a
+vocabulary you're only browsing can't see words compiled elsewhere
+after its own fork point, ordinary chain isolation, not a leftover
+chore left in by accident; had `LOAD` wrongly compiled into the
+browsed vocabulary instead of `FORTH`, that same switch would fail to
+find the word at all, so the test still genuinely covers the original
+concern. Four new tests directly prove the fixed properties: browsing
+alone never redirects compilation, `DEFINITIONS` does, and a word
+`LOAD`ed while merely browsing `EDITOR` is reachable from plain
+`FORTH` afterward with no special handling required.
+
+*Implementation:* `packages/app/public/system.fth` only — no engine
+package changes. *Tests:* `screen-editor.test.ts`/`empty.test.ts`
+(both revised in place, plus new coverage). Full engine suite: 390
+passed (387 before, +3 net — several tests rewritten, not purely
+additive).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2631,5 +2958,6 @@ exactly as it would be on the bare-metal target.
 | **M45** | `BLKS` bank + `(BLOCK-READ)`/`(BLOCK-WRITE)` (§1.56, `FORTH-ARCHITECTURE.md` §7): the HAL half of the classic Forth block-buffer mechanism, spec'd ahead of the Screen Editor work and built the same day the backing bank was renamed `SCRS`→`BLKS` (generic block storage, no screen/text assumption). Boot-created 16-block (16 KiB) resident bank, two bounds-checked memcpy primitives (tokens 140/141), a new `.BLK` extension so `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` round-trip it for free. Portable Forth `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` and any editor word are still unbuilt — staged next. | `banks.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `storage.ts`, `block-io.test.ts` |
 | **M46** | `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` (§1.57, `FORTH-ARCHITECTURE.md` §7): the portable half of M45's mechanism, built entirely in `system.fth` over `(BLOCK-READ)`/`(BLOCK-WRITE)` — no engine changes. A fixed 4-slot buffer pool (round-robin eviction, one dirty flag per slot), explicitly initialized rather than trusting a zero-filled default, every loop a full unconditional scan since `LEAVE`/`UNLOOP` don't exist yet and `EXIT` inside a `DO` loop would corrupt the return stack. Caught and fixed a real bug while writing it: a paren-named primitive like `(BLOCK-READ)` mentioned inside a `(` comment closes that comment early, since `(` doesn't nest and a comment's own scan is per-token — every mention rewritten as plain prose instead. Internal plumbing `HIDE`n after `FLUSH`; only `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` stay visible. | `system.fth`, `block-words.test.ts` |
 | **M47** | `EMPTY` (§1.58, `FORTH-ARCHITECTURE.md` §7): resets the dictionary to `COLD`'s post-boot state in place, without `COLD`'s own full `Machine` rebuild — spec'd for the Screen Editor's expected edit/reload cycle. Pure Forth, no engine changes: reuses `FORGET`'s `LATEST-ADDR`/`HERE-ADDR` write-back against a captured point instead of a named-word chain-walk. The real trick is capturing that point *after* `EMPTY`'s own definition closes (via two plain `VARIABLE`s set post-hoc, not a `CONSTANT` baked in too early), so `EMPTY` never forgets itself. Defined after `INTERPRET` on purpose — "the state `COLD` produces" means the complete post-boot vocabulary. | `system.fth`, `empty.test.ts` |
+| **M48** | The Screen Editor (§1.59, `FORTH-ARCHITECTURE.md` §7): `LOAD` plus an `EDITOR` vocabulary (`LIST`/`L`/`T`/`TOP`/`CLEAR`) — the core edit/run loop, single-letter fig-FORTH-style names, full classic set (insert/delete/search/`COPY`) deferred. One new native primitive, `(SET-INPUT)` (142) — nothing before this needed to redirect the shared input cursor away from the TIB. `EDITOR` is a real, separate vocabulary (`VOCABULARY`/`USE`, M13) specifically so single-letter names like `T` don't collide with ordinary code (`I` would shadow the loop-index word). Two real bugs surfaced and fixed: the `(` comment-closing footgun a third time (plus a new unclosed-comment variant), and a genuine ~2.5x boot-time regression from a first-draft Forth-level blank-fill loop, fixed by giving `Arena` a native `fillBytes()` and space-filling `BLKS` at bank creation instead — `vitest.config.ts`'s `testTimeout` raised to absorb the remaining, structural self-hosted-compile cost. **Follow-up 1, found immediately:** `EMPTY` silently corrupted `EDITOR`'s own dictionary chain if called while `EDITOR` was still active, since it reset `LATEST` without ever touching `CURRENT-VOCAB` — fixed by having `EMPTY` also force `CURRENT-VOCAB` back to `FORTH`. **Follow-up 2 (§1.60), the next day:** replaced single-pointer `USE` with the real classic `CONTEXT`/`CURRENT-VOCAB` split — browsing a vocabulary no longer redirects where new words compile, fixing the `LOAD`-lands-in-the-wrong-vocabulary concern for good, plus a genuine dead-end design (`FIND`/`WORDS` always dereferencing `CONTEXT`) found and reversed before landing on the right one (compare `CONTEXT` against `CURRENT-VOCAB`, only dereference when they differ). Zero engine changes for either follow-up. | `arena.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `vitest.config.ts`, `screen-editor.test.ts`, `empty.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
