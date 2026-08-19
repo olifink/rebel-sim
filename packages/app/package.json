@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
+    "prestart": "npm run build --prefix ../engine",
     "start": "ng serve",
+    "prebuild": "npm run build --prefix ../engine",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
