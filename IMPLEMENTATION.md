@@ -2807,6 +2807,160 @@ package changes. *Tests:* `screen-editor.test.ts`/`empty.test.ts`
 passed (387 before, +3 net — several tests rewritten, not purely
 additive).
 
+### 1.61 Four real self-hosted-only bugs: `DEPTH`/`PICK`/`.S`/`2OVER`, `FILL`/`CMOVE` zero-length, `WARM` (M49)
+
+Found by actually using the machine — the freshly-built Screen Editor
+and monitor — not by inspection or planned review. All four share one
+shape: only the *self-hosted* (`system.fth`, post-boot) definition was
+ever wrong; the native primitive of the same name (still boot-
+registered and still what a bare `new Machine()` dispatches to) was
+always correct. That's exactly why the existing test suite never
+caught any of them — every affected word already had passing tests,
+all constructed via `new Machine()`, none via `bootMachine()`.
+
+**`DEPTH` — off by one.** `: DEPTH SP0 SP@ - 4 / ;` pushed `SP0`
+*before* calling `SP@`, so `SP@` read the live pointer with `SP0`'s
+own already-pushed value counted, over-stating every result by 1 (a
+genuinely empty stack reported `DEPTH` 1). Fixed by reordering so
+`SP@` runs first: `: DEPTH SP@ SP0 SWAP - 4 / ;`.
+
+**`PICK` — a self-referential collision, found chasing a second `.S`
+report.** `: PICK CELLS SP@ + @ ;` never accounted for its own
+argument `u`'s stack slot sitting between `SP@`'s reading point and
+the item `PICK` actually wants. Concretely: caller pushes `u`, `PICK`
+converts it to a byte offset in place (`CELLS`, same slot, same
+depth), then `SP@` reads the pointer — which is `u`'s own slot address,
+one cell *too shallow*. `0 PICK` therefore collides with its own
+leftover argument slot: the `+`/`@` pair ends up fetching from the
+exact address `PICK`'s own scratch computation just wrote to, so it
+returns that computed address's numeric value back to itself — visibly
+a `SP`-ish garbage number, not a stack value. Every other index `n`
+silently returns what should have been index `n-1`'s value (same
+one-cell shallow reasoning, just not self-referential). Fixed with
+`: PICK 1+ CELLS SP@ + @ ;`, counting `u`'s own slot. This
+transitively fixes two dependents with no changes to their own source:
+`.S` (garbage top/last-printed item on any nonempty stack) and
+`2OVER` (`: 2OVER 3 PICK 3 PICK ;`, silently wrong the same way) —
+both were already written assuming correct `PICK` semantics; verified
+directly (`10 20 30 0 PICK` → `30`; `1 2 3 4 2OVER` → the standard
+`1 2 3 4 1 2`).
+
+**`.S`/`FILL`/`CMOVE` — the same missing zero-length guard, three
+times.** Root cause: `(DO)`/`(LOOP)` (§6.5-equivalent, `system.fth`'s
+own control-flow block) are the classic *unbounded-count* kind, not
+ANS `?DO` — the compiled body always runs at least once, even when
+`limit` equals the starting index at entry. `TYPE` already carries an
+explicit guard for exactly this (`DUP 0= IF 2DROP EXIT THEN` before
+its own loop) — `.S`'s `DEPTH 0 DO ... LOOP` didn't: with `DEPTH` 0,
+`0 0 DO` still ran once, computing a spurious `-1 PICK` and printing
+whatever garbage that resolved to. Auditing every other `DO`/`LOOP`
+site in `system.fth` for the identical shape (not just fixing the one
+reported) turned up two more real, previously-undetected instances:
+`FILL`/`CMOVE` given a zero length each still wrote/copied one stray
+byte instead of staying true no-ops — reproduced directly (a
+5-byte-filled sentinel region, then a `0`-length `FILL`/`CMOVE` over
+part of it, checking the untouched byte) before fixing, not merely
+reasoned about. All three now carry the same guard:
+
+```
+: FILL ( addr len char -- )
+  >R DUP 0= IF 2DROP R> DROP EXIT THEN R>
+  -ROT OVER + SWAP DO DUP I C! LOOP DROP ;
+: CMOVE ( addr1 addr2 len -- )
+  DUP 0= IF 2DROP DROP EXIT THEN
+  0 DO 2DUP SWAP I + C@ SWAP I + C! LOOP 2DROP ;
+: .S
+  DEPTH DUP 0= IF DROP EXIT THEN
+  0 DO DEPTH 1- I - PICK . LOOP ;
+```
+
+`FILL`'s guard is shaped differently from `CMOVE`/`.S`'s because its
+length argument (`len`) isn't on top — `char` is — so the char is
+parked on the return stack (`>R`) just long enough to `DUP 0=` test
+`len` underneath it, then restored (`R>`) before the real body runs.
+
+**`WARM` — the one needing a real design decision, not just
+arithmetic.** Reported as an RSTK underflow, traced first to `WARM`'s
+own self-hosted redefinition (`: WARM SP0 SP! RP0 RP! ;` — §1.50's
+original M35 derivation, later moved into `system.fth` as BOOTSTRAP by
+M42). Removing that redefinition (falling back to the native
+primitive, §1.50) didn't fix it — the *native* primitive underflowed
+too, confirmed by direct instrumentation: at the moment `WARM`'s own
+`ctx.rstack.clear()` ran, `RSTK` depth was already 1, not 0. That one
+frame is self-hosted `INTERPRET`'s (M43) own return address —
+`INTERPRET` is itself a `DOCOL`-threaded colon word, holding a live
+`RSTK` frame for as long as it's running any line at all, definitions
+or not. "Reset `RSTK` to true empty, then return normally" is a
+structural contradiction once anything self-hosted is the caller, not
+a bug specific to `WARM`'s own composition: plain `RP0 RP!`, typed
+directly with nothing to do with `WARM`, reproduces the identical
+underflow. `spec/04-FORTH-CORE.md` §6.12 independently traced and
+endorsed this exact `WARM` composition as correct BOOTSTRAP, before a
+self-hosted outer interpreter (§6.13) existed to break it against —
+corrected there too (§6.12 now KERNEL, with the full derivation and
+counter-derivation written out).
+
+The fix changes `WARM`'s tested behavioral contract, so this one was
+discussed before implementing: classic Forth `WARM`/`QUIT` don't
+resume the interrupted line — they clear the stacks and jump back to
+the interpreter's own top level, discarding whatever's left of the
+current input, rather than the old (already-broken, never actually
+achievable) "clears the stack, then keeps executing the rest of the
+line" contract the original `warm.test.ts` assumed untested. `WARM`
+(`primitives.ts` case 131) now clears both stacks, then throws a new
+`WarmReset` (`extends Error {}`) purely to unwind the current line's
+nested generator chain — `dispatch()` → `threadFrom()` → `executeXT()`
+→ … → `dispatchLine()`, self-hosted `INTERPRET`'s own live frames
+included — back to the nearest driver, reusing the same propagation
+mechanism a genuine error already uses through every level of `yield*`
+delegation, but as a distinct type. `repl.ts`'s two recovery sites
+catch it specifically rather than treating it as a generic error:
+`replLoop()` (the interactive REPL) prints a clean `ok`, not `?
+...` error text; `runLine()` (`interpret()`/`beginLine()`, every
+programmatic/test caller) swallows it without rethrowing, so
+`interpret()`'s existing "does not throw" contract holds for both
+entry points identically. `WARM` stays reclassified to native —
+joining `COLD`/`ABORT`/`EXECUTE`/`ACCEPT` (§1.36, §1.50) as a word that
+can't be safely self-hosted, for its own distinct reason: `COLD`
+because no primitive dispatch can rebuild the environment it's
+executing inside of; `WARM` because clearing `RSTK` from inside an
+ordinary call destroys the very return address that call needs to get
+back out.
+
+**Verification, live in a real browser, not just the unit suite —
+new for this session.** `chrome-devtools-mcp` installed mid-session
+specifically to check the `.S`/`PICK` fix against actual dev-server/
+production-build staleness Oliver suspected (ruled out: both a fresh
+`ng serve` and a statically-served production build, in an isolated
+browser context with no prior service-worker state, reproduced the
+*fixed* behavior correctly). Once installed, also exercised the app's
+own new WebMCP tools (`type`/`read_screen`/`read_stack`/…, exposed by
+the running page itself) to drive the real Forth REPL directly for the
+`WARM` fix specifically — `1 2 3 WARM 4 5` followed by `RP0 RP!`
+followed by `10 20 30 .S`, confirming the abandoned-line behavior, the
+still-expected `RP0 RP!` underflow-and-recover, and normal operation
+immediately afterward, all in one running session.
+
+**Test coverage gap, the actual root cause of all four shipping
+unnoticed.** Eight new `bootMachine()`-based regression tests, added
+specifically alongside (not replacing) the existing native-only ones,
+across `stack-arith.test.ts` (`DEPTH`, `PICK`, `.S`, `2OVER`),
+`low-level-batch.test.ts` (`.S` empty-stack, `FILL`/`CMOVE`
+zero-length), and a rewritten `warm.test.ts` (the new contract, plus a
+dedicated `RP0 RP!`-alone case confirming that primitive is
+deliberately left as a genuine footgun, not silently patched over).
+
+*Implementation:* `packages/app/public/system.fth`, `primitives.ts`,
+`repl.ts`. *Tests:* `stack-arith.test.ts`, `low-level-batch.test.ts`,
+`warm.test.ts`. `spec/04-FORTH-CORE.md` updated: §6.1's `DEPTH`/`PICK`
+reference definitions corrected in place; a new zero-length `DO`/`LOOP`
+trap paragraph in §6.5; §6.3/§6.8 (`FILL`/`CMOVE`/`.S`)
+cross-referencing it; §6.12's `WARM` entry rewritten in full
+(BOOTSTRAP → KERNEL); §2.4's headline BOOTSTRAP-word count corrected
+(54 → 53) to match. `01-HAL.md`/`03-SYSVARS.md` checked, no changes
+needed. Full engine suite: 398 passed (390 before, +8 new).
+`packages/app` test suite: 20 passed, unaffected.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2959,5 +3113,6 @@ exactly as it would be on the bare-metal target.
 | **M46** | `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` (§1.57, `FORTH-ARCHITECTURE.md` §7): the portable half of M45's mechanism, built entirely in `system.fth` over `(BLOCK-READ)`/`(BLOCK-WRITE)` — no engine changes. A fixed 4-slot buffer pool (round-robin eviction, one dirty flag per slot), explicitly initialized rather than trusting a zero-filled default, every loop a full unconditional scan since `LEAVE`/`UNLOOP` don't exist yet and `EXIT` inside a `DO` loop would corrupt the return stack. Caught and fixed a real bug while writing it: a paren-named primitive like `(BLOCK-READ)` mentioned inside a `(` comment closes that comment early, since `(` doesn't nest and a comment's own scan is per-token — every mention rewritten as plain prose instead. Internal plumbing `HIDE`n after `FLUSH`; only `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` stay visible. | `system.fth`, `block-words.test.ts` |
 | **M47** | `EMPTY` (§1.58, `FORTH-ARCHITECTURE.md` §7): resets the dictionary to `COLD`'s post-boot state in place, without `COLD`'s own full `Machine` rebuild — spec'd for the Screen Editor's expected edit/reload cycle. Pure Forth, no engine changes: reuses `FORGET`'s `LATEST-ADDR`/`HERE-ADDR` write-back against a captured point instead of a named-word chain-walk. The real trick is capturing that point *after* `EMPTY`'s own definition closes (via two plain `VARIABLE`s set post-hoc, not a `CONSTANT` baked in too early), so `EMPTY` never forgets itself. Defined after `INTERPRET` on purpose — "the state `COLD` produces" means the complete post-boot vocabulary. | `system.fth`, `empty.test.ts` |
 | **M48** | The Screen Editor (§1.59, `FORTH-ARCHITECTURE.md` §7): `LOAD` plus an `EDITOR` vocabulary (`LIST`/`L`/`T`/`TOP`/`CLEAR`) — the core edit/run loop, single-letter fig-FORTH-style names, full classic set (insert/delete/search/`COPY`) deferred. One new native primitive, `(SET-INPUT)` (142) — nothing before this needed to redirect the shared input cursor away from the TIB. `EDITOR` is a real, separate vocabulary (`VOCABULARY`/`USE`, M13) specifically so single-letter names like `T` don't collide with ordinary code (`I` would shadow the loop-index word). Two real bugs surfaced and fixed: the `(` comment-closing footgun a third time (plus a new unclosed-comment variant), and a genuine ~2.5x boot-time regression from a first-draft Forth-level blank-fill loop, fixed by giving `Arena` a native `fillBytes()` and space-filling `BLKS` at bank creation instead — `vitest.config.ts`'s `testTimeout` raised to absorb the remaining, structural self-hosted-compile cost. **Follow-up 1, found immediately:** `EMPTY` silently corrupted `EDITOR`'s own dictionary chain if called while `EDITOR` was still active, since it reset `LATEST` without ever touching `CURRENT-VOCAB` — fixed by having `EMPTY` also force `CURRENT-VOCAB` back to `FORTH`. **Follow-up 2 (§1.60), the next day:** replaced single-pointer `USE` with the real classic `CONTEXT`/`CURRENT-VOCAB` split — browsing a vocabulary no longer redirects where new words compile, fixing the `LOAD`-lands-in-the-wrong-vocabulary concern for good, plus a genuine dead-end design (`FIND`/`WORDS` always dereferencing `CONTEXT`) found and reversed before landing on the right one (compare `CONTEXT` against `CURRENT-VOCAB`, only dereference when they differ). Zero engine changes for either follow-up. | `arena.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `vitest.config.ts`, `screen-editor.test.ts`, `empty.test.ts` |
+| **M49** | Four real self-hosted-only bugs (§1.61), found by Oliver actually using the machine rather than planned review: `DEPTH` (off-by-one, `SP0`/`SP@` pushed in the wrong order), `PICK` (self-referential garbage on `0 PICK`, off-by-one on every other index — transitively fixed `.S`/`2OVER` too, no changes to either), `.S`/`FILL`/`CMOVE` (all three missing the same zero-length `DO`/`LOOP` guard `TYPE` already had), and `WARM` (self-hosted `INTERPRET`'s own live `RSTK` frame makes "reset `RSTK`, then return normally" structurally impossible — reclassified back to native, now throws a dedicated `WarmReset` signal caught by `repl.ts`'s two recovery sites, aligned with classic `WARM`/`QUIT` semantics: abandons the rest of the line instead of the old, already-broken "keeps executing it" contract). All four only ever affected the self-hosted (`system.fth`) definition, never the native primitive underneath — exactly why none of it showed up in the existing native-only tests. Verified live in a real browser for the first time this session, via `chrome-devtools-mcp` and the app's own new WebMCP tools. `spec/04-FORTH-CORE.md` corrected in several places to match (§6.1, §6.3, §6.5, §6.8, §6.12, §2.4). | `system.fth`, `primitives.ts`, `repl.ts`, `stack-arith.test.ts`, `low-level-batch.test.ts`, `warm.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

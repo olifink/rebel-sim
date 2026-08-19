@@ -762,6 +762,24 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     `COLD`/`WARM` *contract* above requires the host-signal indirection,
     that's a Rebel-Sim implementation detail forced by its host language,
     not a cross-target requirement.
+    **Update, M49:** this contract was silent on one real question —
+    does `WARM` resume executing the rest of the line it was called
+    from, or abandon it? Found to matter once Rebel-Sim's outer
+    interpreter is self-hosted (`INTERPRET`, M43): `INTERPRET` is then
+    itself a threaded colon word holding its own live return-stack
+    frame for the whole time it's running a line, so "clear `RSTK` to
+    empty, then return normally" is a structural contradiction — the
+    return address that return needs is exactly what got cleared, on
+    *any* line, not just one invoking `WARM`. **Resolved: `WARM`
+    follows classic Forth `WARM`/`QUIT` semantics — clears both stacks
+    and abandons whatever remains of the current input line, jumping
+    back to the interpreter's own top level, rather than resuming it.**
+    A target with no self-hosted outer interpreter has no live frame to
+    protect and can implement `WARM` however it likes, including
+    resuming the line, but shouldn't assume that survives adding one.
+    Full derivation and the mechanism Rebel-Sim uses (a dedicated
+    signal unwinding the call chain, distinct from an ordinary error):
+    `spec/04-FORTH-CORE.md` §6.12.
 
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 

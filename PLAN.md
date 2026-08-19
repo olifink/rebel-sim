@@ -4172,3 +4172,120 @@ afterward with no special handling needed.
 Full engine suite: 390 passed (387 before, +3 net — several tests
 rewritten in place, not purely additive). `packages/app` builds
 clean.
+
+## M49 — Four real self-hosted-only bugs, found by actually using the machine: `DEPTH`/`PICK`/`.S`/`2OVER`, `FILL`/`CMOVE` zero-length, `WARM` — done
+
+Not planned work — found by Oliver actually using the freshly-built
+Screen Editor and monitor, one report at a time, each one run down to
+a precise root cause before moving to the next. All four only ever
+affected the *self-hosted* (`system.fth`, post-boot) definitions — the
+native primitives they shadow were always correct — which is exactly
+why none of this showed up in the existing test suite: every affected
+word already had passing native-only tests (`new Machine()`, pre-boot)
+that never exercised the buggy self-hosted path at all. Verified live
+in an actual browser for the first time this session too, not just the
+unit suite: `chrome-devtools-mcp` (installed mid-session specifically
+for this) driving a real Chrome instance against the built app, and
+once installed, the app's own new WebMCP tools (`type`/`read_screen`/
+`read_stack`/…) talking to the running Forth REPL directly.
+
+**`DEPTH` — off by one, always.** `: DEPTH SP0 SP@ - 4 / ;` pushed
+`SP0` *before* calling `SP@`, so `SP@` read the pointer with `SP0`'s
+own already-pushed value counted — every result over-stated by 1. A
+genuinely empty, freshly-booted stack reported `DEPTH` 1; `.` on it
+correctly underflowed, since there was really nothing there. Fixed by
+reordering to `: DEPTH SP@ SP0 SWAP - 4 / ;` — `SP@` must run before
+`DEPTH` pushes anything of its own.
+
+**`PICK` — the deeper bug hiding behind `.S`.** Reported next as ".S
+still prints a number" after the `DEPTH` fix landed — turned out to be
+a second, unrelated bug in `PICK` itself: `: PICK CELLS SP@ + @ ;`
+never accounted for its own argument `u`'s stack slot sitting between
+`SP@`'s reading point and the item `PICK` actually wants. `0 PICK`
+collided with that leftover slot and returned self-referential
+garbage — an address, not a stack value, which is exactly the `SP - 4`
+number being reported — while every other index silently returned
+what should have been index-1's value. Fixed with `: PICK 1+ CELLS
+SP@ + @ ;`. This transitively fixed `.S` (garbage top/last-printed
+item on any nonempty stack) and `2OVER` (built from two `3 PICK`
+calls, silently wrong the same way) with no changes to either's own
+source — both were already written assuming correct `PICK` semantics.
+
+**`.S`/`FILL`/`CMOVE` — the empty-stack case `.S` still couldn't
+handle.** Reported once more, precisely: "just try `.S` without values
+on the stack." Root cause this time: `(DO)`/`(LOOP)` here are the
+classic, unbounded-count kind — the compiled body always runs *at
+least once*, even when `limit` equals the starting index (`TYPE`
+already carries an explicit guard for exactly this reason, a few lines
+above `.S` in `system.fth`). `.S`'s own `DEPTH 0 DO ... LOOP` had no
+such guard: with `DEPTH` 0, `0 0 DO` still ran once, computing a
+spurious `-1 PICK`. Auditing every other `DO`/`LOOP` site in
+`system.fth` for the same shape turned up two more, real, previously
+undetected bugs: `FILL`/`CMOVE` given a zero length each still wrote/
+copied one stray byte instead of staying true no-ops (reproduced
+directly before fixing, not just reasoned about). All three fixed with
+`TYPE`'s own `DUP 0= IF ... EXIT THEN` guard.
+
+**`WARM` — the one that needed a real design decision, not just an
+arithmetic fix.** Reported as "`WARM` fails with an RSTK underflow,
+which seems `RP0 RP!` fails now." Removing `WARM`'s self-hosted
+redefinition (falling back to the always-correct native primitive)
+didn't fix it — the native primitive underflowed too. Root cause,
+confirmed by direct instrumentation: self-hosted `INTERPRET` (M43) is
+itself a `DOCOL`-threaded colon word with its own live `RSTK` frame
+for as long as it's running a line — clearing `RSTK` to true empty and
+then trying to return normally is a structural contradiction once
+anything self-hosted is the caller, not specific to `WARM`'s own
+composition at all: plain `RP0 RP!`, typed directly with no `WARM`
+involved, reproduced the identical underflow. Confirmed as a genuine,
+inherent architectural fact (not a Rebel-Sim implementation quirk) by
+tracing it against `spec/04-FORTH-CORE.md` §6.12, which had
+independently derived and endorsed the exact same now-broken `WARM`
+composition as a correct BOOTSTRAP definition, before a self-hosted
+outer interpreter (§6.13) existed to break it against.
+
+Discussed with Oliver before implementing, since the fix changes
+`WARM`'s tested behavioral contract: classic Forth `WARM`/`QUIT`
+semantics don't resume the interrupted line at all — they clear the
+stacks and jump back to the interpreter's own top level, discarding
+whatever's left of the current input. Agreed and implemented: `WARM`
+(`primitives.ts` case 131) clears both stacks, then throws a new
+`WarmReset` signal purely to unwind the current line's nested
+generator chain (self-hosted `INTERPRET`'s own live frames included)
+back to the nearest driver — reusing the same propagation mechanism a
+genuine error uses, but as a distinct type so `repl.ts`'s two recovery
+sites (`replLoop()`, the interactive REPL; `runLine()`, `interpret()`/
+`beginLine()`) can tell it apart from a real error and recover
+silently (a clean `ok`, not `? ...` error text; no rethrow to
+programmatic callers either) rather than reporting it. `system.fth`'s
+broken self-hosted `WARM` redefinition stays removed for good — `WARM`
+is native again, joining `COLD`/`ABORT`/`EXECUTE`/`ACCEPT` in the
+category of words that can't be safely self-hosted, for its own
+distinct reason (documented inline).
+
+**Test coverage gap, the actual root cause of all four shipping
+unnoticed:** every one of `DEPTH`/`PICK`/`.S`/`2OVER`/`FILL`/`CMOVE`/
+`WARM` already had passing tests — all of them constructed via a bare
+`new Machine()` (pre-boot, exercising the native primitive by name,
+never shadowed) rather than `bootMachine()` (post-boot, where
+`system.fth`'s self-hosted redefinition is what a real session
+actually runs). Eight new `bootMachine()`-based regression tests added
+across `stack-arith.test.ts`, `low-level-batch.test.ts`, and a
+rewritten `warm.test.ts`, specifically targeting the self-hosted path
+the existing native-only tests structurally couldn't reach.
+
+`spec/04-FORTH-CORE.md` updated for all four findings, not just noted
+in this log: §6.1's `DEPTH`/`PICK` reference definitions corrected to
+the fixed compositions, with the reasoning inline; a new "real
+implementation trap" paragraph in §6.5 documenting the zero-length
+`DO`/`LOOP` behavior explicitly, so a second target doesn't rediscover
+it the same way; §6.3 (`FILL`/`CMOVE`) and §6.8 (`.S`) rows
+cross-referencing that trap; and §6.12's `WARM` entry rewritten in
+full — reclassified BOOTSTRAP → KERNEL, the derivation and why it
+breaks explained in detail, and §2.4's headline BOOTSTRAP-word count
+corrected (54 → 53) to match. `01-HAL.md`/`03-SYSVARS.md` checked, no
+changes needed.
+
+Full engine suite: 398 passed (390 before, +8 new). `packages/app`
+test suite: 20 passed, unaffected. `IMPLEMENTATION.md` (§1.61, new;
+milestone table) updated to match.

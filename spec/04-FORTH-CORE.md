@@ -106,18 +106,21 @@ part of the *portable* contract.
 
 Applying §2.2's test to the full 133-word reference vocabulary (§6;
 130 plus the `WARM`/`COLD` reset words, §6.12, plus `REDRAW`, §6.9,
-added after this catalog's first pass) reclassifies **54 of them as
+added after this catalog's first pass) reclassifies **53 of them as
 BOOTSTRAP** — everything from stack shufflers (`OVER`, `ROT`, `2DUP`,
 `NIP`, `TUCK`, …) to, more significantly, **the entire
 structured-control-flow compiler layer**
 (`IF`/`ELSE`/`THEN`/`BEGIN`/`UNTIL`/`WHILE`/`REPEAT`/`DO`/`LOOP`/
-`+LOOP`/`RECURSE`/`I`/`J`), **`VARIABLE`/`CONSTANT`**, and — once a
-target already has `SP0`/`SP!`/`RP0`/`RP!` for `DEPTH`/`PICK`/`I`/`J`
-anyway (§6.10) — **`WARM`** itself, all fully expressible from lower
-primitives that already exist. That leaves a 79-word native kernel
-before §6.13's addendum — see §6 for the full, word-by-word table,
-§6.5/§6.6 for the two highest-value derivations, and §6.12/§4.6 for why
-`COLD`, unlike `WARM`, has no such shortcut.
+`+LOOP`/`RECURSE`/`I`/`J`) and **`VARIABLE`/`CONSTANT`**, all fully
+expressible from lower primitives that already exist. That leaves an
+80-word native kernel before §6.13's addendum — see §6 for the full,
+word-by-word table, §6.5/§6.6 for the two highest-value derivations,
+and §6.12/§4.6 for why `WARM` and `COLD` both ultimately need KERNEL
+support, for different reasons. (This count originally included
+`WARM` among the 54 BOOTSTRAP words, on the strength of the derivation
+traced in §6.12 — corrected there, and here, once a self-hosted outer
+interpreter, §6.13, actually existed to break that derivation against;
+see §6.12 for the finding.)
 
 ### 2.5 The outer interpreter itself is not exempt
 
@@ -368,12 +371,13 @@ requirement (`01-HAL.md` §5.5's treatment of the suspension mechanism
 is the direct precedent for this framing).
 
 **Either way, `COLD` reduces the dictionary to its fresh-boot state —
-every bootstrap-layer word (§7) is gone immediately afterward**, `WARM`
-(§6.12) included, since it's one of them. A conformant target's
-post-`COLD` sequence MUST re-run the same bootstrap load (§7.1) a
-genuine power-on boot runs — not merely restart the interactive prompt
-against a dictionary that currently has nothing in it past the native
-KERNEL words.
+every bootstrap-layer word (§7) is gone immediately afterward.** `WARM`
+(§6.12) is KERNEL, not one of them — it survives a `COLD` exactly like
+`DUP`/`SWAP`/any other native primitive, boot-registered before
+`system.fth` ever loads. A conformant target's post-`COLD` sequence
+MUST re-run the same bootstrap load (§7.1) a genuine power-on boot
+runs — not merely restart the interactive prompt against a dictionary
+that currently has nothing in it past the native KERNEL words.
 
 ---
 
@@ -575,8 +579,8 @@ trivially built from.
 | `NIP` | `( a b -- b )` | BOOTSTRAP | `: NIP SWAP DROP ;` |
 | `TUCK` | `( a b -- b a b )` | BOOTSTRAP | `: TUCK SWAP OVER ;` |
 | `?DUP` | `( x -- x x \| x )` | BOOTSTRAP | `: ?DUP DUP IF DUP THEN ;` |
-| `DEPTH` | `( -- n )` | BOOTSTRAP | `: DEPTH SP0 SP@ - 4 / ;` — needs `SP0`/`SP@` (§6.10), both themselves KERNEL. |
-| `PICK` | `( xu…x0 u -- xu…x0 xu )` | BOOTSTRAP | `: PICK CELLS SP@ + @ ;` — the data stack is ordinary arena memory (`DSTK`, `02-MEMORY-MODEL.md`); `PICK` is nothing more than indexed access into it via `SP@`. |
+| `DEPTH` | `( -- n )` | BOOTSTRAP | `: DEPTH SP@ SP0 SWAP - 4 / ;` — needs `SP0`/`SP@` (§6.10), both themselves KERNEL. **Order matters, found by direct implementation**: `SP@` MUST run before `DEPTH` pushes anything of its own. An earlier pass of this specification had `SP0 SP@ - 4 /` — pushing `SP0` *first* — which makes `SP@` read the pointer with `SP0`'s own already-pushed value counted, over-stating every result by 1 (a genuinely empty stack reports `DEPTH` 1, not 0). |
+| `PICK` | `( xu…x0 u -- xu…x0 xu )` | BOOTSTRAP | `: PICK 1+ CELLS SP@ + @ ;` — the data stack is ordinary arena memory (`DSTK`, `02-MEMORY-MODEL.md`); `PICK` is nothing more than indexed access into it via `SP@`. **The leading `1+`, found by direct implementation, is required**: `u` occupies its own stack slot sitting between `SP@`'s reading point and the item `PICK` actually wants, so it must be counted too. An earlier pass of this specification had `CELLS SP@ + @` with no `1+` — `0 PICK` collided with its own leftover argument slot and returned self-referential garbage (a raw address, not a stack value) instead of duplicating the top; every other index silently returned what should have been index-1's value. `2OVER` (§6.1 above) composes correctly from two `3 PICK` calls only once `PICK` itself has this fix — it needed no change of its own. |
 | `ROLL` | `( xu…x0 u -- xu-1…x0 xu )` | BOOTSTRAP, low priority | Expressible via `SP@`-based memory shuffling the same way `PICK` is, but the multi-cell shift is genuinely more intricate to get right by hand. Reasonable for a target to keep this one native pending a verified bootstrap definition, rather than ship an untested hand-derivation. |
 
 ### 6.2 Arithmetic, comparison, bitwise
@@ -607,8 +611,8 @@ trivially built from.
 | `+!` | `( n addr -- )` | BOOTSTRAP | `: +! DUP @ ROT + SWAP ! ;` — already identified as derivable in this project's own design history; carried forward here as settled, not a new finding. |
 | `CELLS` | `( n -- n×4 )` | BOOTSTRAP | `: CELLS 4 * ;` — `4` is a true constant here (`02-MEMORY-MODEL.md`'s cell size is fixed at 4 bytes on every target, not something to abstract over). |
 | `CELL+` | `( addr -- addr+4 )` | BOOTSTRAP | `: CELL+ 4 + ;` |
-| `FILL` | `( addr len char -- )` | BOOTSTRAP | A loop over `C!` using `DO`/`LOOP` (§6.5) and `I`. |
-| `CMOVE` | `( addr1 addr2 len -- )` | BOOTSTRAP | A loop over `C@`/`C!`. Low-to-high, overlapping-range corruption is a documented footgun inherited from the reference behavior, not something a Forth-source loop changes. |
+| `FILL` | `( addr len char -- )` | BOOTSTRAP | A loop over `C!` using `DO`/`LOOP` (§6.5) and `I`. **MUST guard `len = 0` explicitly** — see §6.5's zero-length `DO`/`LOOP` trap; found missing by direct implementation, `addr 0 char FILL` wrote one stray byte instead of staying a true no-op. |
+| `CMOVE` | `( addr1 addr2 len -- )` | BOOTSTRAP | A loop over `C@`/`C!`. Low-to-high, overlapping-range corruption is a documented footgun inherited from the reference behavior, not something a Forth-source loop changes. **MUST guard `len = 0` explicitly**, same trap and same finding as `FILL` above. |
 
 ### 6.4 Return stack
 
@@ -733,6 +737,27 @@ Notes on the less-obvious lines:
   compile-time-only construct with no interpret-time meaning, matching
   how the reference primitive implementations already gate them.
 
+**A real implementation trap, found the hard way and worth stating
+explicitly so a second target doesn't rediscover it:** this `DO`/`LOOP`
+is the classic, unbounded-count kind (not ANS Forth's `?DO`) — `(DO)`
+unconditionally pushes loop control, and the compiled body always runs
+**at least once**, even when `limit` equals the starting index at
+entry. `0 0 DO ... LOOP` still executes its body one full time, with
+`I` reading `0`, before `(LOOP)`'s increment-and-compare notices
+they're equal and stops. Any BOOTSTRAP word built over `DO`/`LOOP`
+using a caller-supplied count (`FILL`/`CMOVE`, §6.3; `TYPE`, §6.7; `.S`,
+§6.8; and any target-specific word following the same shape) **MUST**
+explicitly guard the zero-count case itself — typically `DUP 0= IF
+<clean up the stack appropriately> EXIT THEN` before the loop, the
+same shape `NUMBER`'s own zero-length guard uses (§6.13) — since
+`DO`/`LOOP` provide no such guard on their own. Found missing on three
+separate words in the same reference implementation pass (`.S`,
+`FILL`, `CMOVE` — `TYPE` already had it, which is what exposed the
+other three as inconsistent rather than merely untested): `.S` on a
+genuinely empty stack computed a spurious `-1 PICK` and printed
+garbage; `FILL`/`CMOVE` given a zero length each still wrote/copied one
+stray byte instead of staying true no-ops.
+
 ### 6.6 Defining words — the second flagship reduction
 
 | Word | Effect | | |
@@ -774,7 +799,7 @@ carrying it alongside a now-redundant bootstrap definition.
 | Word | Effect | | |
 |---|---|---|---|
 | `.` | `( n -- )`, print in current `BASE` | **KERNEL**, flagged for a future refactor | A real Forth system's usual layering puts pictured-numeric-output primitives (`<#`/`#`/`#S`/`#>`/`HOLD`/`SIGN`) at the true kernel boundary, with `.` (and `U.`, field-width variants, …) defined *in Forth* on top of them. This specification does not require that refactor now — it's a bigger structural change than the rest of this catalog — but records it as the recommended direction: adding that small primitive set and demoting `.` to BOOTSTRAP is a natural next revision, not a rejected idea. |
-| `.S` | `( -- )`, non-destructive stack dump | BOOTSTRAP | A loop from `SP@` to `SP0` (or the reverse, depending on print order) printing each cell via `.` — the same "the stack is memory" technique `PICK`/`I`/`J` already use. |
+| `.S` | `( -- )`, non-destructive stack dump | BOOTSTRAP | A `DEPTH`-driven `DO`/`LOOP` calling `PICK`/`.` per item — the same "the stack is memory" technique `PICK`/`I`/`J` already use. **MUST guard the empty-stack case explicitly**, same §6.5 zero-length `DO`/`LOOP` trap as `FILL`/`CMOVE` (§6.3): found missing by direct implementation, `.S` on a genuinely empty stack computed a spurious `-1 PICK` and printed a stack-pointer-ish garbage value instead of nothing. |
 | `BASE` | `( -- addr )` | **KERNEL** | Direct sysvar-cell address exposure, same pattern as `HERE-ADDR`/`LATEST-ADDR` (§6.10). |
 | `HEX` `DECIMAL` | `( -- )` | BOOTSTRAP | `: HEX 16 BASE ! ;`  `: DECIMAL 10 BASE ! ;` |
 
@@ -902,23 +927,67 @@ worth it by itself.
 
 | Word | Effect | | Definition (if BOOTSTRAP) |
 |---|---|---|---|
-| `WARM` | `( -- )`, soft reset: clears both stacks; `DICT`/`MMAP`/every sysvar otherwise untouched | BOOTSTRAP | `: WARM SP0 SP! RP0 RP! ;` |
+| `WARM` | `( -- )`, soft reset: clears both stacks and abandons whatever remains of the current input line (classic Forth `WARM`/`QUIT` semantics — control returns to the interpreter's own top level, not to the token after `WARM`); `DICT`/`MMAP`/every sysvar otherwise untouched | **KERNEL** | See the correction below — an earlier pass of this specification classified `WARM` as BOOTSTRAP, found wrong once §6.13 exists. |
 | `COLD` | `( -- )`, full reset: dictionary, bank layout, stacks, and every sysvar reinitialized exactly as at a fresh boot | **KERNEL** | See §4.6 — the contract (fresh-boot-equivalent state before the next line runs) is fixed there; no target-independent mechanism can be given here, because none exists. |
 
-`WARM`'s derivation is worth tracing once, since it's a genuine finding
-in its own right: `SP0 SP!` resets the data stack's live pointer to its
-own constant empty-state address (§6.10); `RP0 RP!` does the same for
-the return stack, using the (already-just-reset) data stack as
-transient scratch space to carry `RP0`'s value across to `RP!` — safe
-precisely because a push immediately followed by a pop nets to zero
-effect on the very stack `WARM` is in the middle of resetting. **A
-dedicated `WARM` primitive is not required at all** once a target has
-`SP0`/`SP!`/`RP0`/`RP!` (§6.10) — which it needs regardless, as the
-foundation `DEPTH`/`PICK`/`I`/`J`/`.S` already build on (§6.1, §6.5,
-§6.8). `COLD` has no equivalent shortcut: it isn't that no one has
-found the derivation yet, it's that no primitive dispatch — Forth-
-defined or native — can rebuild the environment it's currently
-executing inside of (§4.6).
+**A correction, found by direct implementation, not merely reasoned
+about in the abstract:** an earlier pass of this specification traced
+a `WARM` derivation as a genuine finding — `SP0 SP!` resets the data
+stack's live pointer to its own constant empty-state address (§6.10);
+`RP0 RP!` does the same for the return stack, using the
+(already-just-reset) data stack as transient scratch space to carry
+`RP0`'s value across to `RP!`, safe on its own since a push
+immediately followed by a pop nets to zero effect on the very stack
+being reset — and concluded `WARM` could be ordinary BOOTSTRAP,
+`: WARM SP0 SP! RP0 RP! ;`, needing no dedicated primitive once a
+target already has `SP0`/`SP!`/`RP0`/`RP!` (§6.10) for `DEPTH`/`PICK`/
+`I`/`J`/`.S` regardless.
+
+That derivation is correct in isolation but **breaks once §6.13's
+self-hosted outer interpreter exists**: `INTERPRET` is then itself an
+ordinary DOCOL-threaded word, holding its own live return-stack frame
+— its own return address — for as long as it is running the current
+line. `RP0 RP!`, executed as part of `WARM`'s own body while
+`INTERPRET` is mid-line, resets `RSTK` out from under that very frame.
+When `WARM`'s own `;` tries to return, and again when `INTERPRET`
+itself tries to return once the line finishes, the return address each
+needs has already been wiped — an unconditional return-stack underflow
+on *any* line once §6.13 is loaded, not merely one invoking `WARM`:
+`RP0 RP!` typed directly, with no `WARM` involved at all, reproduces
+the identical failure, which is what exposed this as a fact about
+`RP0 RP!`'s interaction with a live self-hosted caller, not a bug
+specific to `WARM`'s own composition.
+
+Unlike `DEPTH`/`PICK` above (§6.1 — genuine off-by-one bugs, fixable by
+reordering the same primitives), this isn't fixable by rederiving a
+better Forth-source composition: nothing expressible in ordinary Forth
+source can unwind an already-in-progress call frame without going
+through a normal return, and a normal return is exactly what's unsafe
+here — there is no `THROW`/`CATCH` in this kernel to build one from
+(§8). `WARM` therefore reclassifies to KERNEL, joining `COLD` (§4.6) as
+a reset operation a running self-hosted interpreter cannot safely
+perform on itself via an ordinary call — for a different underlying
+reason in each case: `COLD` because no primitive dispatch can rebuild
+the environment it's currently executing inside of; `WARM` because
+clearing `RSTK` from inside an ordinary call destroys the very return
+address that call needs. `WARM` needs less from a target than `COLD`
+does, though — no environment rebuild, only a native-level mechanism to
+unwind the current line's call chain without going through a normal
+return (the reference implementation throws a dedicated signal from
+the primitive, caught specifically by its outer driving loop and
+recovered from silently, distinct from a genuine error; a HAL layer
+without exceptions could dispatch the same reset-and-discard-
+remaining-input effect some other way). This is also why `WARM`'s
+behavioral contract above now says explicitly that it abandons the
+rest of the current line rather than resuming it: an earlier pass of
+this specification left that case untested and implicitly assumed
+resumable, matching `ABORT`'s "recover and report" shape (§8) rather
+than classic `WARM`/`QUIT`'s "clear and return to top level" shape,
+which is what a target actually needs to be able to guarantee. A
+target whose outer interpreter is not self-hosted at all (§6.13 not
+implemented) has no live call frame to protect and MAY use the
+original BOOTSTRAP derivation above safely — but should not assume
+that remains true once it later adds §6.13.
 
 ### 6.13 The outer interpreter, self-hosted
 
