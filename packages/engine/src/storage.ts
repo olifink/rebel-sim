@@ -76,6 +76,7 @@ const TAG_TO_EXTENSION: Readonly<Record<string, string>> = {
   RSTK: 'RST',
   MMAP: 'MAP',
   WORK: 'WRK',
+  BLKS: 'BLK',
 };
 const EXTENSION_TO_TAG: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(TAG_TO_EXTENSION).map(([tag, ext]) => [ext, tag]),

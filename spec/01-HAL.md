@@ -574,13 +574,14 @@ below is (or should become) a synchronous Forth primitive.
   | `RSTK` | `.RST` |
   | `MMAP` | `.MAP` |
   | `WORK` | `.WRK` |
+  | `BLKS` | `.BLK` |
 
   Every bank tag a conformant target's memory model defines
   (`02-MEMORY-MODEL.md`) gets an entry here — this specification does
   not special-case any tag out of the persistence mechanism. Three
   groups, by what persisting them actually buys:
 
-  - `SCRN`/`FONT`/`SPRT`/`DICT`/`DATA` — ordinary content assets.
+  - `SCRN`/`FONT`/`SPRT`/`DICT`/`DATA`/`BLKS` — ordinary content assets.
   - `CHAR`/`KMAP`/`SYSV`/`DSTK`/`RSTK` — live session state. Together
     with `MMAP` (below), these are what make §8's state-portability
     claim (`FORTH-ARCHITECTURE.md` — pause a session, dump it, resume
@@ -720,13 +721,15 @@ still its first real consumer) are one use of it, but nothing about the
 bank itself is screen- or text-specific; any block-structured data a
 target wants to address this way is equally valid content.
 
-This is **OPTIONAL** and forward-looking: as of this version, no target
-has Forth-level block words that would actually write into such a bank,
-so there is no real write path to exercise yet, and `BLKS` has no
-assigned extension in the table above. A target implementing `BLOCK`/
-`BUFFER`/`UPDATE`/`FLUSH` (or any other block-consuming words) MUST
-choose and document a `BLKS` extension consistent with §6.3's
-convention when it does.
+This is still **OPTIONAL**: as of this version, no target has
+Forth-level block words (`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH`) that would
+actually write into such a bank, so there is no real write path to
+exercise yet — `hal_block_read`/`hal_block_write` exist on Rebel-Sim
+today (`(BLOCK-READ)`/`(BLOCK-WRITE)`, `primitives.ts` tokens 140/141)
+but nothing above them does. `BLKS`'s extension (`.BLK`, §6.3's table)
+**is** assigned, ahead of a conformant target actually needing it —
+worth stating explicitly since §6.3's own rule normally has a target
+choose and document an extension only once it exists.
 
 A screen/block editor built on `BLKS` will very likely display a
 block's contents by copying its bytes into `CHAR` in bulk (e.g. one

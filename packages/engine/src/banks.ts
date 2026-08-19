@@ -57,6 +57,14 @@ export const BankSizeXXL = 4096 * 1024;
 
 const SIZE_CLASSES = [BankSizeXS, BankSizeS, BankSizeM, BankSizeL, BankSizeXL, BankSizeXXL];
 
+/** FORTH-ARCHITECTURE.md §7: the fixed unit `hal_block_read`/
+ * `hal_block_write` (primitives.ts's `(BLOCK-READ)`/`(BLOCK-WRITE)`, 140/
+ * 141) move — classic Forth's 1024-byte "screen" size, not something any
+ * target gets to pick independently. Lives here (not repl.ts, which
+ * creates the `BLKS` bank sized from it) so primitives.ts can import it
+ * too without a repl.ts<->primitives.ts circular dependency. */
+export const BLOCK_SIZE = 1024;
+
 /** Rounds up to the smallest size class that fits `bytes` — used when a
  * bank's size comes from a loaded file rather than a compile-time
  * constant (docs/STORAGE.md §5). Returns undefined if nothing fits

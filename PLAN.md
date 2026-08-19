@@ -3691,3 +3691,67 @@ item 13, `spec/04-FORTH-CORE.md`'s `(` row (`**[Revised]**`), and
 `IMPLEMENTATION.md` (§1.55, new; milestone table) all updated to
 record the reversal. Full engine suite: 345 passed, unchanged in
 count (one test rewritten, not added).
+
+## M45 — `BLKS` bank + `(BLOCK-READ)`/`(BLOCK-WRITE)`: the HAL half of classic block storage — done
+
+Spec'd with Oliver ahead of the Screen Editor work
+(`inspiration/Starting-FORTH.pdf` ch. 3,
+`inspiration/figforth_editor_screens.txt`): `FORTH-ARCHITECTURE.md` §7
+already named `hal_block_read`/`hal_block_write` as block-granularity-
+only HAL calls (no caching semantics in the contract itself), but never
+nailed down capacity, buffer-pool size, or the on-disk extension. Two
+real decisions came out of that spec conversation: a small fixed
+4-slot buffer pool for the not-yet-built portable `BLOCK`/`BUFFER`/
+`UPDATE`/`FLUSH` layer (sized so a two-block word like the reference
+editor's `COPY` works without a later redesign), and a 16-block (16
+KiB) starting capacity for the backing bank. Immediately after, the
+backing bank itself got renamed `SCRS` → `BLKS` across every doc that
+mentioned it (`FORTH-ARCHITECTURE.md`, `spec/01-HAL.md`,
+`spec/04-FORTH-CORE.md`, `CLAUDE.md`, `CORE-VOCABULARY.md`, `PLAN.md`,
+`DEVELOPING.md`, `IMPLEMENTATION.md`) plus its extension (`.SCB` →
+`.BLK`): the bank carries no screen/text assumption, only a fixed
+1024-byte addressing granularity, so the name shouldn't imply
+otherwise — classic Forth source-editing screens are its first
+consumer, not its definition.
+
+This milestone builds the HAL half only — the bank and the two
+primitives — not the portable buffer pool or any editor word (both
+still unbuilt, staged as the next real step, same as the spec's own
+"Status" note now says).
+
+**What shipped:** `BLKS`, boot-created in `repl.ts`'s constructor
+exactly like `WORK`/`KMAP`/every other fixed bank — tag and name both
+`BLKS`, `16 * BLOCK_SIZE` bytes (rounds to exactly the `S` size class).
+`BLOCK_SIZE` (1024) lives in `banks.ts`, not `repl.ts`, specifically so
+`primitives.ts` can import it too without a `repl.ts`↔`primitives.ts`
+circular dependency — same reason `CELL_SIZE` already lives in
+`arena.ts`. `(BLOCK-READ)`/`(BLOCK-WRITE)` (tokens 140/141,
+`( addr n -- )`) are the actual `hal_block_read`/`hal_block_write`
+primitives, paren-named like `(DO)`/`(LOOP)`/`(+LOOP)` since they're an
+internal mechanism a future Forth-level `BLOCK`/`BUFFER` will call, not
+something meant to be typed directly. Both resolve `BLKS` by tag via
+`ctx.banks.requireBank('BLKS')` (same lookup `BANK@` uses), bounds-check
+`n` against the bank's actual size (not a hardcoded constant) before
+touching memory, and copy via a plain `arena.readByte`/`writeByte` loop
+— same shape `CMOVE`/`FILL` already use, since `BLKS` is fully
+arena-resident and there's no real "device" on the other end. Adding
+`BLKS: 'BLK'` to `storage.ts`'s `TAG_TO_EXTENSION` was the entire
+persistence story — `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` (M5/M33) round-trip
+it through the existing project-asset pipeline for free, no new storage
+code needed.
+
+`block-io.test.ts` (new): bank shape (tag/name/size), a full
+1024-byte round-trip, block-boundary isolation (writing block 5 doesn't
+touch blocks 4 or 6), both ends of the 16-block range (0 and 15),
+out-of-range errors (negative and ≥16), and a full `SAVE`/`RESTORE`
+round-trip through a fake `StorageHal`. `(BLOCK-READ)`/`(BLOCK-WRITE)`'s
+`addr` side needed a dedicated scratch bank in tests — `PAD`/`TIB`
+(128/256 bytes) are both smaller than one block, so using either would
+have silently overrun into whatever bank sits next in the arena.
+
+Full engine suite: 353 passed (345 before, +8 new). `spec/01-HAL.md`
+§6.3's tag↔extension table and §6.5 (now describing `BLKS` as
+"extension assigned, ahead of a target needing it" rather than
+"optional, no extension yet"), `FORTH-ARCHITECTURE.md` §7's block-buffer
+note, and `IMPLEMENTATION.md` (§1.56, new; milestone table) all updated
+to match.

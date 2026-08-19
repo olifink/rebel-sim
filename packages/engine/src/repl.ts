@@ -43,7 +43,7 @@
  */
 
 import { Arena } from './arena.js';
-import { Bank, BankTable } from './banks.js';
+import { Bank, BankTable, BLOCK_SIZE } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
 import { PrimitiveContext } from './primitives.js';
@@ -83,6 +83,11 @@ const PAD_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch tex
 // it would for either alone, so merging them costs one XS class
 // instead of two.
 const WORK_BANK_SIZE = TIB_SIZE + PAD_SIZE;
+// FORTH-ARCHITECTURE.md §7: generic 1024-byte-block-addressable storage
+// (renamed from SCRS 2026-08-18) — (BLOCK-READ)/(BLOCK-WRITE) (140/141,
+// primitives.ts) are the only primitives that touch it directly. 16
+// blocks rounds to exactly the S size class, no rounding waste.
+const BLKS_BANK_SIZE = 16 * BLOCK_SIZE; // 16 KiB
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
@@ -284,6 +289,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     this.padBase = workBank.base + TIB_SIZE;
     this.padSize = PAD_SIZE;
+
+    // FORTH-ARCHITECTURE.md §7: generic block storage, boot-created like
+    // every other bank — (BLOCK-READ)/(BLOCK-WRITE) (140/141) resolve it
+    // by tag via ctx.banks.requireBank('BLKS'), same pattern BANK@ uses.
+    this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'BLKS');
   }
 
   getBase(): number {

@@ -20,7 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
-import { BankTable } from './banks.js';
+import { BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
 import {
@@ -925,6 +925,43 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // "never special-cased by spelling" reason `:`/`;`/`IMMEDIATE` are.
       markLatestCompileOnly(ctx);
       break;
+
+    case 140: { // (BLOCK-READ) ( addr n -- ) FORTH-ARCHITECTURE.md §7's
+      // hal_block_read(n, addr): copy block n's 1024 bytes from the
+      // resident BLKS bank into RAM at addr. Bounds-checked against
+      // BLKS's actual size, not left to DataView to throw obscurely.
+      const n = s.pop();
+      const addr = s.pop();
+      const blks = ctx.banks.requireBank('BLKS');
+      const blockCount = blks.size / BLOCK_SIZE;
+      if (n < 0 || n >= blockCount) {
+        throw new Error(`block ${n} out of range (0..${blockCount - 1})`);
+      }
+      const blockBase = blks.base + n * BLOCK_SIZE;
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        ctx.arena.writeByte(addr + i, ctx.arena.readByte(blockBase + i));
+      }
+      break;
+    }
+
+    case 141: { // (BLOCK-WRITE) ( addr n -- ) hal_block_write(n, addr):
+      // the write-back half of (BLOCK-READ) (140) — same bounds check,
+      // copies the other direction. Doesn't itself touch disk — SAVE/
+      // BSAVE persist the whole BLKS bank separately, at project-save
+      // time, same as any other bank.
+      const n = s.pop();
+      const addr = s.pop();
+      const blks = ctx.banks.requireBank('BLKS');
+      const blockCount = blks.size / BLOCK_SIZE;
+      if (n < 0 || n >= blockCount) {
+        throw new Error(`block ${n} out of range (0..${blockCount - 1})`);
+      }
+      const blockBase = blks.base + n * BLOCK_SIZE;
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        ctx.arena.writeByte(blockBase + i, ctx.arena.readByte(addr + i));
+      }
+      break;
+    }
 
     default:
       throw new Error(`unknown primitive token ${tokenId}`);

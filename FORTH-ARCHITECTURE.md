@@ -415,15 +415,21 @@ Every dictionary entry, identical layout across all languages:
     calls — carries over regardless of how the flash layout is finalized.
 
 * **`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` — the classic Forth block-buffer
-  words, spec'd but not yet built anywhere.** [2026-08-18, spec'd with
-  Oliver ahead of the Screen Editor work (`inspiration/Starting-FORTH.pdf`
-  ch. 3, `inspiration/figforth_editor_screens.txt`).] These are ordinary
+  words, spec'd ahead of the Screen Editor work
+  (`inspiration/Starting-FORTH.pdf` ch. 3,
+  `inspiration/figforth_editor_screens.txt`); the HAL half is now built
+  on Rebel-Sim, the portable-Forth half isn't yet.** These are ordinary
   portable Forth words, not primitives, built once over exactly two HAL
   entry points:
   - `hal_block_read(n, addr)`/`hal_block_write(n, addr)`: move exactly
     1024 bytes between block `n`'s backing store and RAM at `addr`. No
     caching/eviction semantics belong in this contract — every target
-    implements only "move these 1024 bytes," nothing more.
+    implements only "move these 1024 bytes," nothing more. **[Built,
+    2026-08-18]** on Rebel-Sim: `(BLOCK-READ)`/`(BLOCK-WRITE)`
+    (`primitives.ts` tokens 140/141, `( addr n -- )`), paren-named like
+    `(DO)`/`(LOOP)`/`(+LOOP)` since they're an internal primitive the
+    portable layer below calls, not something meant to be typed
+    directly.
   - Above that HAL boundary, `BLOCK ( n -- addr )`, `BUFFER ( n -- addr )`,
     `UPDATE ( -- )`, `FLUSH ( -- )` are identical Forth source on every
     target — a small, fixed 4-slot buffer pool (round-robin/least-
@@ -451,17 +457,18 @@ Every dictionary entry, identical layout across all languages:
     `BUFFER`/`UPDATE`/`FLUSH` Forth source carry over unmodified — this is
     the actual mechanism that makes real disk-backed block I/O tolerable
     there, unlike on Rebel-Sim where it's free.
-  * **New extension needed:** `BLKS` needs its own entry in the
-    tag↔extension table (`storage.ts`'s `TAG_TO_EXTENSION` here;
-    `docs/STORAGE.md` §4 on Rebel-ROM) — `.SCR` is already `SCRN`'s (the
-    pixel framebuffer). Proposed: `.BLK` ("blocks") — **[Renamed,
-    2026-08-18]** was `.SCB`, dropped along with the `SCRS`→`BLKS`
-    rename since it isn't screen-specific either.
-  * **Status:** design only, nothing built yet. Next real step: register
-    the `BLKS` bank tag/size class, add `hal_block_read`/`hal_block_write`
-    as primitives, then `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` in
-    `system.fth`, before any editor command (`L`/`T`/`D`/... per
-    `figforth_editor_screens.txt`) can be written.
+  * **Extension:** `.BLK` (`storage.ts`'s `TAG_TO_EXTENSION`,
+    `spec/01-HAL.md` §6.3's table) — `.SCR` is already `SCRN`'s (the
+    pixel framebuffer), so `BLKS` needed its own.
+  * **Status, 2026-08-18:** the `BLKS` bank (tag, `S`-class 16-block
+    size, `.BLK` extension) and the `(BLOCK-READ)`/`(BLOCK-WRITE)`
+    primitives are built on Rebel-Sim (`banks.ts`'s `BLOCK_SIZE`,
+    `repl.ts`'s boot-created `BLKS` bank, `primitives.ts` tokens
+    140/141) — a `SAVE`d project now round-trips `BLKS` like any other
+    bank, and `.BLK` files load back correctly. Next real step:
+    `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` in `system.fth`, before any editor
+    command (`L`/`T`/`D`/... per `figforth_editor_screens.txt`) can be
+    written.
 
 * **`hal_millis()`:** monotonic milliseconds, needed for any timing/delay
   word. On Rebel-ROM, wire it to Circle's `CTimer` (already a fixed

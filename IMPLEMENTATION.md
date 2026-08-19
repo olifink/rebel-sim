@@ -2244,6 +2244,68 @@ unchanged — comment consumption/discarding behavior itself, interpreting
 or compiling, is identical either way; only what gets *compiled* changed).
 Full engine suite: 345 passed, unchanged in count.
 
+### 1.56 `BLKS`: generic block storage, and `(BLOCK-READ)`/`(BLOCK-WRITE)` (M45, `FORTH-ARCHITECTURE.md` §7)
+
+Spec'd with Oliver ahead of the Screen Editor work
+(`inspiration/Starting-FORTH.pdf` ch. 3,
+`inspiration/figforth_editor_screens.txt`): a HAL surface at block
+granularity only — move exactly 1024 bytes, no caching/eviction
+semantics — so any target can back it however it wants (Rebel-Sim: an
+ordinary resident bank; an embedded target: real flash/USB block I/O),
+with everything else (the buffer pool, `BLOCK`/`BUFFER`/`UPDATE`/
+`FLUSH`) built once as identical portable Forth source above it. Same
+turn, the backing bank was renamed `SCRS` → `BLKS`: the bank itself
+carries no screen/text assumption, only a fixed 1024-byte addressing
+granularity — classic Forth source-editing screens are its first
+consumer, not its definition, so the name shouldn't imply otherwise.
+
+This milestone builds the HAL half only — the two primitives and their
+backing bank — not the portable Forth buffer pool or any editor word
+yet (`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` remain unbuilt, staged as the
+next real step).
+
+`BLKS` is boot-created in `repl.ts`'s constructor exactly like every
+other fixed bank (`WORK`, `KMAP`, ...): tag and name both `BLKS`, sized
+`16 * BLOCK_SIZE` (16 KiB) — 16 blocks rounds to exactly the `S` size
+class, no rounding waste. `BLOCK_SIZE` (1024, the fixed classic-Forth
+screen size no target gets to vary) lives in `banks.ts` rather than
+`repl.ts`, specifically so `primitives.ts` can import it too without
+creating a `repl.ts`↔`primitives.ts` circular dependency — the same
+reason `CELL_SIZE` already lives in `arena.ts` rather than wherever it
+was first needed.
+
+`(BLOCK-READ)`/`(BLOCK-WRITE)` (tokens 140/141, `( addr n -- )`) are
+the actual `hal_block_read`/`hal_block_write` primitives — paren-named
+like `(DO)`/`(LOOP)`/`(+LOOP)` (tokens 53-55) since they're an internal
+mechanism the not-yet-built Forth-level `BLOCK`/`BUFFER` will call, not
+something meant to be typed directly at the prompt. Both resolve `BLKS`
+by tag via `ctx.banks.requireBank('BLKS')` (the same lookup `BANK@`
+uses) rather than caching its base — bounds-check `n` against the
+bank's *actual* size (`blks.size / BLOCK_SIZE`, not a hardcoded `16`)
+before touching memory, throwing `block ${n} out of range (0..15)` on
+a miss, the same loud-failure convention `BANK@` uses for an unknown
+tag. The copy itself is a plain byte-by-byte loop against
+`ctx.arena.readByte`/`writeByte`, same shape `CMOVE`/`FILL` already
+use — `BLKS` is fully arena-resident, so there's no real "device" on
+the other end of either call, just another bank access.
+
+Persistence is free: `BLKS` is an ordinary bank like any other, so
+`SAVE`/`RESTORE`/`BSAVE`/`BLOAD` (M5/M33, already built) round-trip it
+through the project-asset pipeline the moment `storage.ts`'s
+`TAG_TO_EXTENSION` gets a `BLKS: 'BLK'` entry — no new storage code
+needed. `(BLOCK-READ)`/`(BLOCK-WRITE)` never touch disk themselves;
+`FLUSH`ing a dirty in-Forth buffer into the resident `BLKS` bank
+(once it exists) will be a smaller, separate act from persisting the
+whole bank at project-save time.
+
+*Implementation:* `banks.ts` (`BLOCK_SIZE`), `repl.ts` (`BLKS` bank
+creation), `primitives.ts` (tokens 140/141), `rebel-opcodes.json`
+(both primitives' notes, `bankTags.BLKS`), `storage.ts`
+(`TAG_TO_EXTENSION.BLKS`). *Tests:* `block-io.test.ts` (new — bank
+shape, round-trip, block-boundary isolation, both-ends-of-range
+coverage, out-of-range errors, and a full `SAVE`/`RESTORE` round-trip).
+Full engine suite: 353 passed (345 before, +8 new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2392,5 +2454,6 @@ exactly as it would be on the bare-metal target.
 | **M42** | `spec/04-FORTH-CORE.md` §6 KERNEL→BOOTSTRAP reclassification (§1.26's control-flow block and more): 59 words moved from native primitives into `system.fth` — the entire control-flow compiler, `VARIABLE`/`CONSTANT`, stack shufflers/arithmetic derivatives — built from five primitives that stay native (`BRANCH`/`0BRANCH`/`(DO)`/`(LOOP)`/`(+LOOP)`). The `DOCON` Code-Field sentinel removed entirely (`CONSTANT` is `CREATE , DOES> @` now). New `COMPILE-ONLY` bootstrap-marking keyword. `test-support.ts`'s `bootMachine()` introduced — engine tests exercising any now-BOOTSTRAP word need it, since a bare `Machine` no longer has `IF`/`BEGIN`/`VARIABLE`/etc. defined at all. | `system.fth`, `primitives.ts`, `dictionary.ts`, `inner.ts`, `rebel-opcodes.json`, `test-support.ts` |
 | **M43** | Self-hosting the outer interpreter (§1.54, `spec/04-FORTH-CORE.md` §5.2/§6.13) — the deferred half of M42's own spec. `WORD`/`FIND`/`NUMBER`/`INTERPRET`/`[`/`]` and `:`/`;`/`IMMEDIATE`/`COMPILE-ONLY` are all genuine dictionary words now; the old native tokenizer survives only as a fallback (bootstrapping `system.fth` itself, and any `Machine` that never loads a bootstrap layer). Full detail in §1.54. Followed by two small spec/behavior additions the same day: `NUMBER`'s digit-validation gap folded back into `spec/04-FORTH-CORE.md` §6.13 (a divergence found while implementing it), and `NUMBER` echoing its failing token before `ABORT` (§8's own new RECOMMENDED convention, the classic fig-Forth/Forth-79 `TOKEN ?` idiom — neither predecessor had `THROW`/`CATCH`). | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `app.spec.ts` |
 | **M44** | Comment retention reverted (§1.32, §1.55): `(` (token 93) now discards its text unconditionally, compiling or not — plain classic Forth behavior — instead of M11's `(SLIT)`+`2DROP` compiled-inline-data encoding. The whole point of retaining it was so `SEE` could echo a comment back; it never did (M12 confirmed `SEE` shows `"comment text" 2DROP`, not `( comment text )`, indistinguishable from a genuine discarded string) and the ambiguity was never resolved, so keeping the extra compiled bytes stopped earning its keep. `FORTH-ARCHITECTURE.md` §9 item 13 and `spec/04-FORTH-CORE.md`'s `(` row both updated to record the reversal. | `primitives.ts`, `rebel-opcodes.json`, `comments.test.ts` |
+| **M45** | `BLKS` bank + `(BLOCK-READ)`/`(BLOCK-WRITE)` (§1.56, `FORTH-ARCHITECTURE.md` §7): the HAL half of the classic Forth block-buffer mechanism, spec'd ahead of the Screen Editor work and built the same day the backing bank was renamed `SCRS`→`BLKS` (generic block storage, no screen/text assumption). Boot-created 16-block (16 KiB) resident bank, two bounds-checked memcpy primitives (tokens 140/141), a new `.BLK` extension so `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` round-trip it for free. Portable Forth `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` and any editor word are still unbuilt — staged next. | `banks.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `storage.ts`, `block-io.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
