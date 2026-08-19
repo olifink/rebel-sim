@@ -3832,3 +3832,72 @@ builds clean (no engine changes to this milestone means no build-graph
 risk, but verified anyway). `FORTH-ARCHITECTURE.md` §7's block-buffer
 note and `IMPLEMENTATION.md` (§1.57, new; milestone table) updated to
 record the mechanism as fully built rather than HAL-only.
+
+## M47 — `EMPTY`: reset the dictionary to `COLD`'s state without rebuilding the whole machine — done
+
+Asked for directly, ahead of starting the Screen Editor commands:
+editing and reloading screen source is expected to want a clean
+vocabulary — no leftover user-defined words — far more often than a
+genuinely fresh machine. `COLD` (M35) already resets the dictionary,
+but only as a side effect of rebuilding the entire `Machine` (fresh
+arena, cleared stacks, a brand-new REPL session, `Machine`'s
+memory-holding fields being `readonly` leaves no in-place option for
+`COLD` itself). `EMPTY` does only the dictionary half, in place,
+leaving stacks, sysvars, `BLKS` and every other bank's content, and
+the running REPL session untouched — literally "the vocabulary
+`COLD` produces, the rest of the machine as-is," per the request.
+
+Pure Forth, `system.fth` only, no engine changes — same shape as M46:
+`EMPTY` reuses `FORGET`'s own `LATEST-ADDR`/`HERE-ADDR` write-back
+mechanism (`DEVELOPING.md` §8.6), just against a fixed captured point
+instead of a chain-walk to a named word.
+
+**The actual design problem:** the reset point has to include
+`EMPTY`'s own dictionary entry, or calling `EMPTY` would forget
+`EMPTY` and become uncallable after one use. The naive approach —
+`LATEST CONSTANT BOOT-LATEST` right before defining `EMPTY` — doesn't
+work: `LATEST`/`HERE` keep growing while `BOOT-LATEST` and `EMPTY`
+are themselves still being defined, so a marker captured too early
+excludes them from the very state it's supposed to preserve. Fixed by
+declaring two ordinary `VARIABLE`s (`BOOT-LATEST`/`BOOT-HERE`) first,
+defining `EMPTY` to read from them, and only capturing the real
+`LATEST`/`HERE` values into those variables *after* `EMPTY`'s own
+closing `;` — at that exact point `LATEST` already *is* `EMPTY`'s own
+entry (the most recently defined word) and `HERE` already points past
+its compiled body, so the captured marker inherently includes `EMPTY`
+itself.
+
+**Placement:** defined after `INTERPRET` (M43), the previous literal
+last word in `system.fth` — "the state `COLD` produces" means the
+*complete* post-boot vocabulary. This doesn't conflict with
+`INTERPRET`'s own "must load last of all" rule, which is about
+nothing being able to *call* `INTERPRET` before it exists, not about
+nothing being definable afterward: `dispatchLine()` (`repl.ts`)
+already switches every line after `INTERPRET`'s own definition to the
+real self-hosted path rather than the native fallback tokenizer, so
+`EMPTY`'s definition is the first content in `system.fth` to actually
+load through genuine self-hosted `INTERPRET` rather than the native
+one — worked cleanly, a small extra proof that path handles ordinary
+`VARIABLE`/`:`/`;` definitions correctly, not just previously-tested
+REPL lines.
+
+One test-writing wrinkle: once `system.fth` has fully loaded, an
+unfound word no longer throws the native fallback's `unrecognized
+word: X` — self-hosted `NUMBER` fails digit validation and calls
+`ABORT` instead, after `TYPE`ing the failing token to the screen first
+(`NUM-ABORT`, M43's own follow-up). Tests assert `.toThrow()` plus a
+screen-content check, the same pattern `self-hosted-interpreter.test.ts`
+already established, not the pre-boot message.
+
+`empty.test.ts` (new, 7 tests, via `bootMachine()`): forgets a
+user-defined word, `HERE` matches a freshly-booted machine exactly
+(proving the reclaim is byte-precise, not approximate), the full
+system vocabulary — `BLOCK`/`BUFFER`/`FLUSH`/`WORDS`/`SEE`/`FORGET`/
+`EMPTY` itself — survives an `EMPTY` call, repeatable across multiple
+defines, a safe no-op when nothing's been defined since boot or the
+last `EMPTY`, leaves the data stack/sysvars/`BLKS` content untouched,
+and new definitions work normally afterward with no corruption.
+
+Full engine suite: 371 passed (364 before, +7 new). `packages/app`
+builds clean. `IMPLEMENTATION.md` (§1.58, new; milestone table)
+updated to match.

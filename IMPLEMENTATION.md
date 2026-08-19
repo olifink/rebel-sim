@@ -2410,6 +2410,76 @@ via the underlying native bounds check, and internal plumbing is
 confirmed hidden while the four public words aren't). Full engine
 suite: 364 passed (353 before, +11 new).
 
+### 1.58 `EMPTY`: reset the dictionary to its post-boot state without a full `COLD` (M47, `FORTH-ARCHITECTURE.md` §7)
+
+Spec'd ahead of the Screen Editor work, same session as §1.56/§1.57:
+editing and reloading screen source repeatedly is expected to want a
+clean vocabulary — no leftover user-defined words — far more often
+than a genuinely fresh machine. `COLD` (§1.50) already resets the
+dictionary, but by rebuilding the entire `Machine` (fresh arena,
+cleared stacks, a brand-new REPL session) — real overkill for "forget
+what I just typed while iterating on a screen." `EMPTY` does only the
+dictionary half, in place, leaving everything else — stacks, sysvars,
+`BLKS` and every other bank's content, the running REPL session —
+untouched.
+
+Pure Forth, no engine changes, same shape as §1.57: `EMPTY` reuses
+`FORGET`'s own (`DEVELOPING.md` §8.6) `LATEST-ADDR`/`HERE-ADDR`
+write-back mechanism, just against a fixed captured point instead of
+a chain-walk to a named word.
+
+**The real design problem, and how it's solved:** `EMPTY` needs to
+reset the dictionary chain back to "everything `system.fth` itself
+defines, nothing the user adds afterward" — which means the reset
+point has to include `EMPTY`'s own dictionary entry, or calling
+`EMPTY` would forget `EMPTY` and become uncallable after one use. A
+naive `LATEST CONSTANT BOOT-LATEST` right before defining `EMPTY`
+doesn't work: `LATEST`/`HERE` keep growing while `BOOT-LATEST` and
+`EMPTY` are themselves still being defined, so a marker captured too
+early excludes them from the very state it's supposed to preserve.
+The fix: declare two ordinary `VARIABLE`s (`BOOT-LATEST`/`BOOT-HERE`)
+first, define `EMPTY` to read from them (`BOOT-LATEST @ LATEST-ADDR !
+BOOT-HERE @ HERE-ADDR !`), and only *after* `EMPTY`'s own closing `;`
+capture the real `LATEST`/`HERE` values into those variables. At that
+exact point, `LATEST` already *is* `EMPTY`'s own entry (it's the most
+recently defined word) and `HERE` already points past `EMPTY`'s
+compiled body — so the captured marker inherently includes `EMPTY`
+itself, and calling it never forgets itself.
+
+**Placement matters, and doesn't conflict with `INTERPRET`'s own
+rule.** `EMPTY` is defined *after* `INTERPRET` (§1.54) — the literal
+last thing in `system.fth` before this milestone — since "the state
+`COLD` produces" means the *complete* post-boot vocabulary, and
+`INTERPRET` was previously the last word defined. `INTERPRET`'s own
+"must load last of all" comment is about nothing being able to *call*
+`INTERPRET` before it exists, not about nothing being definable
+afterward; from `INTERPRET`'s own definition onward, `dispatchLine()`
+(`repl.ts`) already switches every subsequent line to the real
+self-hosted `INTERPRET` rather than the native fallback tokenizer —
+`EMPTY`'s own definition is therefore the first content in
+`system.fth` to load through the genuine self-hosted path rather than
+the native one, a small extra proof that path works correctly for
+ordinary `VARIABLE`/`:`/`;` definitions, not just previously-tested
+REPL lines.
+
+One test-writing wrinkle worth recording: once `system.fth` has fully
+loaded (any `bootMachine()`), an unfound word no longer throws the
+native fallback's `unrecognized word: X` — self-hosted `INTERPRET`'s
+own `NUMBER` fails digit validation and calls `ABORT` instead (after
+`TYPE`ing the failing token to the screen first, `NUM-ABORT`, §1.54's
+own follow-up). Tests assert `.toThrow()` plus a screen-content check,
+the same pattern `self-hosted-interpreter.test.ts` already established
+for exactly this case, not the pre-boot native-fallback message.
+
+*Implementation:* `packages/app/public/system.fth` only — no engine
+package changes. *Tests:* `empty.test.ts` (new — forgets a
+user-defined word, `HERE` matches a freshly-booted machine exactly,
+the full system vocabulary survives an `EMPTY` call, repeatable
+across multiple defines, a no-op when nothing's been defined since
+boot or the last `EMPTY`, leaves the data stack/sysvars/`BLKS` content
+untouched, and new definitions work normally afterward with no
+corruption). Full engine suite: 371 passed (364 before, +7 new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -2560,5 +2630,6 @@ exactly as it would be on the bare-metal target.
 | **M44** | Comment retention reverted (§1.32, §1.55): `(` (token 93) now discards its text unconditionally, compiling or not — plain classic Forth behavior — instead of M11's `(SLIT)`+`2DROP` compiled-inline-data encoding. The whole point of retaining it was so `SEE` could echo a comment back; it never did (M12 confirmed `SEE` shows `"comment text" 2DROP`, not `( comment text )`, indistinguishable from a genuine discarded string) and the ambiguity was never resolved, so keeping the extra compiled bytes stopped earning its keep. `FORTH-ARCHITECTURE.md` §9 item 13 and `spec/04-FORTH-CORE.md`'s `(` row both updated to record the reversal. | `primitives.ts`, `rebel-opcodes.json`, `comments.test.ts` |
 | **M45** | `BLKS` bank + `(BLOCK-READ)`/`(BLOCK-WRITE)` (§1.56, `FORTH-ARCHITECTURE.md` §7): the HAL half of the classic Forth block-buffer mechanism, spec'd ahead of the Screen Editor work and built the same day the backing bank was renamed `SCRS`→`BLKS` (generic block storage, no screen/text assumption). Boot-created 16-block (16 KiB) resident bank, two bounds-checked memcpy primitives (tokens 140/141), a new `.BLK` extension so `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` round-trip it for free. Portable Forth `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` and any editor word are still unbuilt — staged next. | `banks.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `storage.ts`, `block-io.test.ts` |
 | **M46** | `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` (§1.57, `FORTH-ARCHITECTURE.md` §7): the portable half of M45's mechanism, built entirely in `system.fth` over `(BLOCK-READ)`/`(BLOCK-WRITE)` — no engine changes. A fixed 4-slot buffer pool (round-robin eviction, one dirty flag per slot), explicitly initialized rather than trusting a zero-filled default, every loop a full unconditional scan since `LEAVE`/`UNLOOP` don't exist yet and `EXIT` inside a `DO` loop would corrupt the return stack. Caught and fixed a real bug while writing it: a paren-named primitive like `(BLOCK-READ)` mentioned inside a `(` comment closes that comment early, since `(` doesn't nest and a comment's own scan is per-token — every mention rewritten as plain prose instead. Internal plumbing `HIDE`n after `FLUSH`; only `BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` stay visible. | `system.fth`, `block-words.test.ts` |
+| **M47** | `EMPTY` (§1.58, `FORTH-ARCHITECTURE.md` §7): resets the dictionary to `COLD`'s post-boot state in place, without `COLD`'s own full `Machine` rebuild — spec'd for the Screen Editor's expected edit/reload cycle. Pure Forth, no engine changes: reuses `FORGET`'s `LATEST-ADDR`/`HERE-ADDR` write-back against a captured point instead of a named-word chain-walk. The real trick is capturing that point *after* `EMPTY`'s own definition closes (via two plain `VARIABLE`s set post-hoc, not a `CONSTANT` baked in too early), so `EMPTY` never forgets itself. Defined after `INTERPRET` on purpose — "the state `COLD` produces" means the complete post-boot vocabulary. | `system.fth`, `empty.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

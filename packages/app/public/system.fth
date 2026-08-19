@@ -704,3 +704,56 @@ HIDE NUM-ABORT
   REPEAT
   2DROP
 ;
+
+( ---------------------------------------------------------------- )
+( EMPTY -- FORTH-ARCHITECTURE.md section 7 follow-up, spec'd ahead )
+( of the Screen Editor work: resets the dictionary chain back to )
+( exactly the state COLD produces -- the full system.fth vocabulary, )
+( nothing user-defined -- without COLD's own full machine rebuild )
+( (fresh arena, cleared stacks, a fresh REPL session). Editing and )
+( reloading screen source repeatedly is expected to want a clean )
+( vocabulary far more often than a genuinely fresh machine. )
+
+( Placed after INTERPRET on purpose, not before: "the state COLD )
+( produces" means the complete post-boot vocabulary, and INTERPRET )
+( is the last word system.fth previously defined. Appending here )
+( doesn't conflict with INTERPRET's own "must load last of all" )
+( requirement -- that rule is about nothing being able to call )
+( INTERPRET before it exists, not about nothing being definable )
+( after it. From this point on, dispatchLine's switchover already )
+( means every following line -- these included -- loads through the )
+( real self-hosted INTERPRET, not the native fallback, exactly like )
+( any ordinary REPL line after boot. )
+
+( BOOT-LATEST/BOOT-HERE capture LATEST/HERE once, right after EMPTY )
+( itself is fully defined -- not as CONSTANTs baked in at the point )
+( they're declared, which would be too early: LATEST/HERE keep )
+( growing while BOOT-LATEST, BOOT-HERE, and EMPTY are themselves )
+( still being defined. Reading them fresh from VARIABLEs, then )
+( capturing the real values only after EMPTY's closing semicolon, )
+( makes EMPTY's own reset point include EMPTY itself -- so calling )
+( EMPTY never forgets EMPTY, and it stays callable repeatedly. )
+VARIABLE BOOT-LATEST
+VARIABLE BOOT-HERE
+
+( EMPTY -- : same LATEST-ADDR/HERE-ADDR write-back FORGET already )
+( uses (DEVELOPING.md section 8.6), just to a fixed captured point )
+( instead of a chain-walk to a named word -- reclaims every byte of )
+( DICT space anything defined after the boot marker used, the same )
+( way FORGETting the very first post-boot word would, without )
+( needing to know that word's name. )
+: EMPTY BOOT-LATEST @ LATEST-ADDR ! BOOT-HERE @ HERE-ADDR ! ;
+
+( The actual capture -- LATEST/HERE at this exact point already )
+( include EMPTY's own just-closed definition, per the ordering note )
+( above. )
+LATEST BOOT-LATEST !
+HERE BOOT-HERE !
+
+( BOOT-LATEST/BOOT-HERE are internal plumbing from here on -- hidden )
+( the same way FIND-ADDR/NUM-ADDR already are. Safe after the fact: )
+( HIDE only flips a flag on an existing entry, it doesn't grow HERE, )
+( so hiding them here can't disturb the values just captured. EMPTY )
+( itself stays visible -- it's the public word this is all for. )
+HIDE BOOT-LATEST
+HIDE BOOT-HERE
