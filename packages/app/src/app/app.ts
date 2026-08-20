@@ -248,6 +248,11 @@ export class App implements AfterViewInit, OnDestroy {
     // ACCEPT a line onto the screen, interpret, repeat, forever. The app
     // shell's only job is to keep calling step() so it can make progress.
     this.zone.runOutsideAngular(() => {
+      // Startup banner (VERSION, primitives.ts case 143) — ordinary
+      // interpret() call, not REPL-driven, so it never shows a prompt or
+      // "ok" of its own; just the "Rebel Forth vMAJOR.MILESTONE.BUILD"
+      // line, once, before the first real prompt appears below it.
+      this.machine.interpret('VERSION');
       this.machine.startRepl();
       this.startPump();
     });

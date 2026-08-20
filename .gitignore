@@ -7,6 +7,10 @@ yarn-error.log
 dist/
 out-tsc/
 
+# Generated at every build (packages/engine/scripts/gen-build-info.mjs) —
+# never hand-edited or committed, see that script's own note
+packages/engine/src/build-info.ts
+
 # Angular
 **/.angular/
 coverage/

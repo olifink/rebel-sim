@@ -34,6 +34,8 @@ import {
   writeHeader,
 } from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
+import { VERSION_MAJOR, VERSION_MILESTONE } from './version.js';
+import { BUILD_STAMP } from './build-info.js';
 
 export const TRUE = -1;
 export const FALSE = 0;
@@ -998,6 +1000,23 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const len = s.pop();
       const addr = s.pop();
       ctx.setInput(addr, len);
+      break;
+    }
+
+    case 143: { // VERSION ( -- ) prints "Rebel Forth vMAJOR.MILESTONE.BUILD"
+      // MAJOR/MILESTONE (version.ts) are hand-bumped alongside PLAN.md's
+      // own M-numbered milestone log; BUILD (build-info.ts) is
+      // regenerated fresh on every build, never hand-edited — see each
+      // file's own note. Not a SYSVAR: build identity is static per-build
+      // metadata, not live interpreter state like BASE/HERE, and SYSV
+      // groups are meant to be generated from the same cross-target
+      // layout as Rebel-ROM's real sysvars.h — this has no such
+      // counterpart to stay in sync with yet.
+      const text = `Rebel Forth v${VERSION_MAJOR}.${VERSION_MILESTONE}.${BUILD_STAMP}`;
+      for (const ch of text) {
+        ctx.screen.emit(ch.charCodeAt(0));
+      }
+      ctx.screen.emit(10);
       break;
     }
 
