@@ -3108,6 +3108,43 @@ anywhere.
 token 100's stale note corrected). *Tests:* `bank-access.test.ts`
 (`BANKS` suite), `project.test.ts` (`PROJECTS` suite).
 
+### 1.64 `DUMP`: a classic hex dump (M52)
+
+Requested directly as a follow-on to `BANKS`/`PROJECTS`: 16 rows of 8
+bytes each — an 8-digit hex address, 8 space-separated 2-digit hex
+bytes, then those same 8 bytes again as characters (anything below
+`BL`, a non-printable control code, shown as `.` instead) — a fixed
+128-byte dump starting at a given address, no length argument. Pure
+Forth, `system.fth`, right after `BANKS`; no engine changes.
+
+**Nibble/byte/cell hex formatting built from scratch, no shift
+primitive needed.** `HEXDIGIT ( n -- )` maps 0-15 to an ASCII hex
+digit. `HEX2 ( byte -- )` prints a byte as two digits via one `/ 16`
+(the high nibble) and one `MOD 16` (the low nibble) — no loop needed,
+a single byte only has two nibbles. `HEX8 ( n -- )`, the interesting
+one: extracts all eight nibbles of a cell via a `DUP 16 MOD SWAP 16 /`
+loop, which leaves them on the stack lowest-nibble-first with the
+now-always-zero ninth remainder on top; dropping that remainder and
+then just popping straight through `HEXDIGIT` eight times prints
+most-significant-first with no separate reversal step, since the last
+nibble extracted is the most significant one and popping is LIFO.
+Avoids needing a native `RSHIFT`/`LSHIFT` this codebase doesn't have —
+plain `/`/`MOD`, already KERNEL primitives, are enough.
+
+**No bounds checking against the arena's real extent** — same
+trust-the-caller precedent raw `@`/`C@`/`BANK@` already have; dumping
+past a bank's own end just reads whatever memory happens to follow.
+
+**Live-verified** via `chrome-devtools-mcp`: `BANK@ SYSV DUMP` shows
+the `SYSV` header's `'S'`/`'V'` magic bytes, its mostly-zero content
+rendered as dots, and `0xFF` sysvar bytes rendering as their own raw
+extended-ASCII glyphs — the spec's "0x20 or higher" printable rule has
+no upper bound, so a high byte prints whatever glyph that code point
+maps to rather than another dot, exactly as asked for.
+
+*Implementation:* `system.fth` (`HEXDIGIT`/`HEX2`/`HEX8`/`DUMP`).
+*Tests:* `dump.test.ts` (new).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3263,5 +3300,6 @@ exactly as it would be on the bare-metal target.
 | **M49** | Four real self-hosted-only bugs (§1.61), found by Oliver actually using the machine rather than planned review: `DEPTH` (off-by-one, `SP0`/`SP@` pushed in the wrong order), `PICK` (self-referential garbage on `0 PICK`, off-by-one on every other index — transitively fixed `.S`/`2OVER` too, no changes to either), `.S`/`FILL`/`CMOVE` (all three missing the same zero-length `DO`/`LOOP` guard `TYPE` already had), and `WARM` (self-hosted `INTERPRET`'s own live `RSTK` frame makes "reset `RSTK`, then return normally" structurally impossible — reclassified back to native, now throws a dedicated `WarmReset` signal caught by `repl.ts`'s two recovery sites, aligned with classic `WARM`/`QUIT` semantics: abandons the rest of the line instead of the old, already-broken "keeps executing it" contract). All four only ever affected the self-hosted (`system.fth`) definition, never the native primitive underneath — exactly why none of it showed up in the existing native-only tests. Verified live in a real browser for the first time this session, via `chrome-devtools-mcp` and the app's own new WebMCP tools. `spec/04-FORTH-CORE.md` corrected in several places to match (§6.1, §6.3, §6.5, §6.8, §6.12, §2.4). | `system.fth`, `primitives.ts`, `repl.ts`, `stack-arith.test.ts`, `low-level-batch.test.ts`, `warm.test.ts` |
 | **M50** | `BANK-SIZE` (§1.62), the read-only `Bank.size` counterpart `BANK@` never had — and, found by Oliver while looking at the bank monitor, `BANK@` itself switches from `tag` to `name` lookup: a tag-keyed lookup could only ever reach whichever same-tagged bank was created first, silently hiding every other one, once multiple banks could legitimately share a tag (project `DATA` assets today, a future second `BLKS`-tagged bank). Every boot-created system bank gets an explicit `name` matching its `tag` (`SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` previously got auto-generated serials) so existing `BANK@ SYSV`-style lookups are unaffected; the `BLKS` bank (renamed `EDITOR`, same session) is the first real beneficiary — `BANK@ EDITOR`, not `BANK@ BLKS`. `MemoryMap.findBankAddr()` (M20) deleted as dead code once nothing called it. Also renamed the `BLKS`-tagged boot bank's own `name` to `EDITOR` (its only consumer today, the Screen Editor) — tag stays generic/HAL-level, `name` is free to say what a given instance is for. Resize discussed as a future direction; deliberately given no reserved wording, since `spec/02-MEMORY-MODEL.md` §7 already defers it explicitly and the reason is structural (no compaction/relocation), not just unbuilt. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `mmap.ts`, `bank-access.test.ts`, `block-io.test.ts`, `mmap.test.ts` |
 | **M51** | `BANKS` and `PROJECTS` (§1.63), requested directly: `WORDS`-shaped dev-ergonomics words to browse what banks/projects actually exist. `BANKS` is pure Forth (`system.fth`), walking `MMAP`'s own fixed-stride slot table directly, the same "it's just arena memory" reasoning `WORDS` already applies to the dictionary chain. `PROJECTS` is one new primitive (145) wrapping `storage.ts`'s `listProjects()`, since project names live in `StorageHal`, not the arena. Found and fixed a real, pre-existing `rebel-opcodes.json` doc staleness along the way: `CREATE-BANK`'s (100) own note still described its pre-M30 design (name==tag, no auto-serial), superseded once M30 routed it through `BankTable.createBank()`. | `system.fth`, `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `project.test.ts` |
+| **M52** | `DUMP` (§1.64), a classic hex dump: 16 rows of 8 bytes, 8-digit hex address, space-separated hex bytes, ASCII column with `.` for non-printable. Pure Forth, `system.fth` — no engine changes. New `HEXDIGIT`/`HEX2`/`HEX8` helpers build nibble/byte/cell hex formatting from `/`/`MOD` alone, no native shift primitive needed; `HEX8` extracts all eight nibbles via a `DUP 16 MOD SWAP 16 /` loop and prints them straight off the stack, most-significant-first, since extraction order and LIFO pop order happen to align. | `system.fth`, `dump.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

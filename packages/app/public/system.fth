@@ -254,6 +254,49 @@ VARIABLE CURRENT-VOCAB
   LOOP
 ;
 
+( DUMP, M51: a classic hex dump, requested alongside BANKS -- 16 rows )
+( of 8 bytes each, 128 bytes total starting at the given address. Row )
+( shape: an 8-digit hex address, 8 space-separated 2-digit hex bytes, )
+( then those same 8 bytes again as characters, with anything below BL )
+( -- a non-printable control code -- shown as a dot instead. Deliberately )
+( fixed-size, no length argument -- classic Forth DUMP takes one, but )
+( nothing here needs a variable-length dump yet, and one screenful is )
+( plenty for now. No bounds checking against the arena's real extent, )
+( same trust-the-caller precedent raw @/C@ and BANK@ already have. )
+
+( HEXDIGIT n -- : prints one hex digit for 0..15. )
+: HEXDIGIT DUP 10 < IF 48 + ELSE 10 - 65 + THEN EMIT ;
+
+( HEX2 byte -- : prints a byte as two hex digits, high nibble first. )
+: HEX2 DUP 16 / HEXDIGIT 16 MOD HEXDIGIT ;
+
+( HEX8 n -- : prints a cell as eight hex digits, most significant )
+( first. Extracts nibbles low to high via repeated 16 MOD / 16 / and )
+( leaves them stacked lowest-first, so popping straight back off with )
+( HEXDIGIT after dropping the always-zero ninth remainder naturally )
+( prints most-significant-first -- no separate reversal step needed. )
+: HEX8
+  8 0 DO DUP 16 MOD SWAP 16 / LOOP
+  DROP
+  HEXDIGIT HEXDIGIT HEXDIGIT HEXDIGIT
+  HEXDIGIT HEXDIGIT HEXDIGIT HEXDIGIT
+;
+
+: DUMP ( addr -- )
+  16 0 DO
+    DUP I 8 * +
+    DUP HEX8 BL EMIT
+    8 0 DO DUP I + C@ HEX2 BL EMIT LOOP
+    8 0 DO
+      DUP I + C@
+      DUP BL < IF DROP 46 THEN
+      EMIT
+    LOOP
+    DROP CR
+  LOOP
+  DROP
+;
+
 ( SEE support, DEVELOPING.md section 3: decompiling a definition. )
 ( CORE-VOCABULARY.md section 12 itself flagged SEE as the natural )
 ( next step once WORDS proved the chain-walk mechanics work -- )
