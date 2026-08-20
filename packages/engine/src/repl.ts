@@ -293,7 +293,20 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // FORTH-ARCHITECTURE.md §7: generic block storage, boot-created like
     // every other bank — (BLOCK-READ)/(BLOCK-WRITE) (140/141) resolve it
     // by tag via ctx.banks.requireBank('BLKS'), same pattern BANK@ uses.
-    const blksBank = this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'BLKS');
+    // Named 'EDITOR', not 'BLKS' — tag stays the generic, HAL-level
+    // "1024-byte block storage" identity (M45's SCRS->BLKS rename is
+    // still the right call), but `name` is real per-bank identity
+    // (uniqueness is enforced on it, multiple banks are expected to
+    // share a tag) and the bank monitor's own display column, so it's
+    // free to say what THIS instance is actually for — today, the only
+    // consumer is the Screen Editor (LOAD/LIST/BLOCK/BUFFER/UPDATE/
+    // FLUSH). Cosmetic/persistence-only: BANK@/requireBank('BLKS') look
+    // up by tag, never name, and an existing saved project's own
+    // already-baked-in name keeps restoring correctly regardless of
+    // this boot-time default (RESTORE replaces the whole bank table
+    // from the save file itself) — only a project saved after this
+    // change gets the new 'EDITOR.BLK' asset basename.
+    const blksBank = this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'EDITOR');
     // Screen Editor follow-up: space-filled, not the zero bytes a fresh
     // bank would otherwise hold — NUL isn't BL, so the outer
     // interpreter's own BL-delimited WORD scan (system.fth's LOAD/LIST)

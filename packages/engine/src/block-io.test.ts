@@ -39,10 +39,15 @@ function memoryHal(): StorageHal {
 }
 
 describe('BLKS bank (FORTH-ARCHITECTURE.md §7, renamed from SCRS 2026-08-18)', () => {
-  it('is boot-created as a 16-block (16 KiB) resident bank named BLKS', () => {
+  it('is boot-created as a 16-block (16 KiB) resident bank tagged BLKS, named EDITOR', () => {
+    // Tag stays the generic, HAL-level "1024-byte block storage" identity
+    // (BANK@/requireBank always resolve by tag) — name is the real,
+    // uniqueness-backed per-bank identity, free to say what THIS instance
+    // is actually for, since a tag is expected to repeat across banks.
+    // Named for its only consumer today, the Screen Editor.
     const m = new Machine();
     const blks = m.banks.requireBank('BLKS');
-    expect(blks.name).toBe('BLKS');
+    expect(blks.name).toBe('EDITOR');
     expect(blks.size).toBe(16 * BLOCK_SIZE);
   });
 
@@ -144,7 +149,9 @@ describe('(BLOCK-READ) / (BLOCK-WRITE) ( addr n -- ) — FORTH-ARCHITECTURE.md �
     m1.interpret('PROJECT BLKPROJ');
     m1.interpret('SAVE');
 
-    expect(hal.readFile('/PROJECTS/BLKPROJ/BLKS.BLK')).toBeDefined();
+    // Asset basename is the bank's name (EDITOR), not its tag (BLKS) —
+    // storage.ts's own SAVE writes `${bank.name}.${ext}`.
+    expect(hal.readFile('/PROJECTS/BLKPROJ/EDITOR.BLK')).toBeDefined();
 
     const m2 = new Machine({ storageHal: hal });
     m2.interpret('RESTORE BLKPROJ');

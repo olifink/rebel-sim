@@ -2265,9 +2265,22 @@ yet (`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH` remain unbuilt, staged as the
 next real step).
 
 `BLKS` is boot-created in `repl.ts`'s constructor exactly like every
-other fixed bank (`WORK`, `KMAP`, ...): tag and name both `BLKS`, sized
-`16 * BLOCK_SIZE` (16 KiB) — 16 blocks rounds to exactly the `S` size
-class, no rounding waste. `BLOCK_SIZE` (1024, the fixed classic-Forth
+other fixed bank (`WORK`, `KMAP`, ...), sized `16 * BLOCK_SIZE`
+(16 KiB) — 16 blocks rounds to exactly the `S` size class, no rounding
+waste. **Update, found by Oliver while looking at the bank monitor:**
+tag and name started out both `BLKS`, but `name` is real per-bank
+identity — uniqueness is enforced on it, not on `tag`, and multiple
+banks are expected to eventually share a tag — so it's free to say
+what a *given* `BLKS`-tagged bank is actually for rather than
+repeating the generic tag. Renamed to `EDITOR` (its only consumer
+today): `BANK@`/`requireBank('BLKS')` still resolve by tag, unaffected;
+the only real consequence is the persisted asset basename
+(`storage.ts`'s `${bank.name}.${ext}`) — a project saved after this
+change gets `EDITOR.BLK` instead of `BLKS.BLK`; an already-saved
+project keeps restoring correctly regardless, since `RESTORE` replaces
+the whole bank table from the save file's own recorded names.
+
+`BLOCK_SIZE` (1024, the fixed classic-Forth
 screen size no target gets to vary) lives in `banks.ts` rather than
 `repl.ts`, specifically so `primitives.ts` can import it too without
 creating a `repl.ts`↔`primitives.ts` circular dependency — the same
