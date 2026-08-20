@@ -190,14 +190,23 @@ VARIABLE CURRENT-VOCAB
 ( currently-dormant vocabulary, where that stored position is )
 ( correctly accurate precisely because nothing is compiling into it )
 ( right now. )
+( Skips FLAG_HIDDEN, value 64, same guard FIND uses below -- a real )
+( bug, found by Oliver: this loop used to print every name in the )
+( chain unconditionally, so HIDEd plumbing words -- NUM-LEN, )
+( CURRENT-SLOT, INIT-BUFFERS, and others -- still showed up here even )
+( though FIND already refused to find them, giving the misleading )
+( appearance that a listed word should be callable when it isn't. )
 : WORDS
   CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
   BEGIN
     DUP
   WHILE
-    DUP 4 + C@ 31 AND
-    OVER 5 +
-    SWAP TYPE  32 EMIT
+    DUP 4 + C@
+    DUP 64 AND 0= IF
+      31 AND OVER 5 + SWAP TYPE 32 EMIT
+    ELSE
+      DROP
+    THEN
     @
   REPEAT
   DROP

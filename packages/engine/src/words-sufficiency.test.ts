@@ -69,4 +69,21 @@ describe('WORDS — behavior once the real bootstrap layer has loaded', () => {
     m.interpret('DEPTH');
     expect(m.stack.pop()).toBe(depthBefore);
   });
+
+  // Regression for a real bug found by Oliver: WORDS printed every name in
+  // the chain unconditionally, with no FLAG_HIDDEN check, even though FIND
+  // (used by INTERPRET) already refuses to find a HIDEn word — so e.g.
+  // NUM-LEN/CURRENT-SLOT/INIT-BUFFERS showed up in WORDS but typing them
+  // back gave "unrecognized word" or, worse, an ABORT once NUMBER's own
+  // fallback tried and failed to parse the name as a number.
+  it('does not list HIDEn plumbing words (system.fth genuinely HIDEs several)', () => {
+    const m = bootMachine();
+    m.interpret('WORDS');
+    const listed = fullScreenText(m);
+    for (const hidden of ['NUM-LEN', 'CURRENT-SLOT', 'INIT-BUFFERS', 'FIND-ADDR', 'FIND-LEN', 'NUM-ABORT']) {
+      expect(listed).not.toContain(hidden);
+    }
+    // Sanity: these really are absent from FIND too, not merely coincidentally-unlisted names.
+    expect(() => m.interpret("' NUM-LEN")).toThrow(/unrecognized word/i);
+  });
 });
