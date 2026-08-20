@@ -703,7 +703,7 @@ plausible-looking layout from content files alone (ignoring a present
 `MMAP` asset) is non-conformant, even if every individual bank's content
 happens to load correctly.
 
-### 6.5 Optional/future: generic block storage (`BLKS`)
+### 6.5 Optional: generic block storage (`BLKS`)
 
 `hal_block_read(n)`/`hal_block_write(n)` are **not** a raw
 numbered-block device call under this model. They are redefined as
@@ -721,25 +721,32 @@ still its first real consumer) are one use of it, but nothing about the
 bank itself is screen- or text-specific; any block-structured data a
 target wants to address this way is equally valid content.
 
-This is still **OPTIONAL**: as of this version, no target has
-Forth-level block words (`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH`) that would
-actually write into such a bank, so there is no real write path to
-exercise yet — `hal_block_read`/`hal_block_write` exist on Rebel-Sim
-today (`(BLOCK-READ)`/`(BLOCK-WRITE)`, `primitives.ts` tokens 140/141)
-but nothing above them does. `BLKS`'s extension (`.BLK`, §6.3's table)
-**is** assigned, ahead of a conformant target actually needing it —
-worth stating explicitly since §6.3's own rule normally has a target
-choose and document an extension only once it exists.
+Still **OPTIONAL** at the HAL level — a target with no need for
+block-structured storage may simply not implement
+`hal_block_read`/`hal_block_write` at all. **[Updated] Rebel-Sim now
+has a real write path**: the portable Forth-level `BLOCK`/`BUFFER`/
+`UPDATE`/`FLUSH` buffer pool (`system.fth`) is built entirely on top of
+`(BLOCK-READ)`/`(BLOCK-WRITE)` (`primitives.ts` tokens 140/141), and a
+full Screen Editor (`LOAD`/`LIST`/`L`/`T`/`TOP`/`CLEAR`, `EDITOR`
+vocabulary) is built on top of *that* — genuinely exercised, not
+theoretical. `rebel-rom` has no Forth executor yet, so it remains
+unexercised there; this paragraph no longer generalizes to "no target,"
+only to targets without a self-hosted outer interpreter at all yet.
+`BLKS`'s extension (`.BLK`, §6.3's table) **is** assigned, ahead of a
+conformant target actually needing it — worth stating explicitly since
+§6.3's own rule normally has a target choose and document an extension
+only once it exists.
 
-A screen/block editor built on `BLKS` will very likely display a
-block's contents by copying its bytes into `CHAR` in bulk (e.g. one
-`BLKS` block's worth of text `CMOVE`'d into the visible grid for
-editing) rather than one character at a time through `emit`/
-`write_char` — exactly the case §3.2's `redraw_all()` exists for.
-Nothing new needs designing here when that editor is actually built:
-copy the block's bytes into `CHAR`, then call `redraw_all()` (or its
-Forth-level `REDRAW`) once to resynchronize the framebuffer, the same
-pattern the storage module already uses for a project restore.
+A screen/block editor built on `BLKS` displays a block's contents by
+copying its bytes into `CHAR` in bulk (one `BLKS` block's worth of text
+`CMOVE`'d into the visible grid for editing) rather than one character
+at a time through `emit`/`write_char` — exactly the case §3.2's
+`redraw_all()` exists for; Rebel-Sim's own editor does exactly this
+(`LIST`, `system.fth`), confirming the pattern predicted below rather
+than needing anything new: copy the block's bytes into `CHAR`, then
+call `redraw_all()` (or its Forth-level `REDRAW`) once to resynchronize
+the framebuffer, the same pattern the storage module already uses for
+a project restore.
 
 ### 6.6 Sysvar contract — `STORAGE` group
 
