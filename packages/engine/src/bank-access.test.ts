@@ -61,3 +61,41 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
     expect(m.stack.toArray()).toEqual([m.arena.sizeBytes]);
   });
 });
+
+describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
+  it('resolves a known bank tag to the same size findBank() reports', () => {
+    const m = new Machine();
+    const sysv = m.banks.findBank('SYSV')!;
+
+    m.interpret('BANK-SIZE SYSV');
+    expect(m.stack.toArray()).toEqual([sysv.size]);
+  });
+
+  it('is case-insensitive, same convention as BANK@', () => {
+    const m = new Machine();
+    const dict = m.banks.findBank('DICT')!;
+
+    m.interpret('BANK-SIZE dict');
+    expect(m.stack.toArray()).toEqual([dict.size]);
+  });
+
+  it('reaches every bank tag Machine creates, not just a subset', () => {
+    for (const bank of new Machine().banks.getAllBanks()) {
+      const m = new Machine();
+      m.interpret(`BANK-SIZE ${bank.tag}`);
+      expect(m.stack.toArray()).toEqual([bank.size]);
+    }
+  });
+
+  it('throws on an unknown tag, same convention as BANK@', () => {
+    const m = new Machine();
+    expect(() => m.interpret('BANK-SIZE NOPE')).toThrow('unknown bank: NOPE');
+  });
+
+  it('reports the size class a requested size was rounded up to, not the raw request', () => {
+    const m = new Machine();
+    m.banks.createBank('DATA', 100, 'SMALL'); // rounds up to XS, 4096
+    m.interpret('BANK-SIZE DATA');
+    expect(m.stack.toArray()).toEqual([4096]);
+  });
+});

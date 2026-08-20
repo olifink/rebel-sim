@@ -1020,6 +1020,22 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    case 144: { // BANK-SIZE ( "tag" -- size ) — same tag lookup as
+      // BANK@ (99), same parsed-word convention, same "unknown bank"
+      // error; returns the bank's actual size (already rounded up to
+      // its size class at creation, banks.ts's createBank) rather than
+      // its base. First real consumer: a future capacity display
+      // (e.g. DICT used/free) — see banks.ts/spec/02-MEMORY-MODEL.md §7
+      // for why this stays a plain read accessor, not a resize.
+      const tag = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.findBank(tag);
+      if (bank === undefined) {
+        throw new Error(`unknown bank: ${tag}`);
+      }
+      s.push(bank.size);
+      break;
+    }
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }
