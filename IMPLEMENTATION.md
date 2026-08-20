@@ -1366,9 +1366,26 @@ field; `Machine` already satisfied it structurally, same precedent as
 case.
 
 **Addr only, not `addr size`:** matches every other `SOMETHING@`
-word's one-value convention. `Bank.size` (and `name`/`flags`) isn't
-returned — left to a future bank-inspection word if a real need shows
-up, not built ahead of one.
+word's one-value convention. `Bank.size` (and `flags`) isn't returned —
+`BANK-SIZE` (§1.62) fills the size half later, once a real need for it
+showed up.
+
+**Update, M50 (found by Oliver while adding `BANK-SIZE`): resolves by
+`name` now, not `tag`.** The paragraphs above describe M18 as shipped
+— genuinely accurate at the time, when `name` uniqueness didn't exist
+yet and no tag had more than one bank. Once both became real (M5's
+identity retrofit; project `DATA` assets), tag-keyed lookup became a
+real, demonstrated ambiguity: two banks sharing a tag, and `BANK@`
+could only ever reach whichever was created first — the second was
+permanently unreachable through it, silently. `name` is the real,
+uniqueness-backed identity (`banks.ts`, `spec/02-MEMORY-MODEL.md`
+§4.7); every boot-created system bank now has an explicit `name`
+matching its `tag` (`repl.ts`), so `BANK@ SYSV`-style lookups are
+unaffected — only banks that genuinely share a tag (`BLKS` → `EDITOR`,
+project `DATA` assets) need their real name instead. Same parsing/
+uppercasing/error-message shape throughout, just `findBankByName()`
+instead of a tag-keyed lookup. `BANK-SIZE` (§1.62) was built name-based
+from the start; this made `BANK@` consistent with it, not the reverse.
 
 API-mediated rather than an arena-resident table, purely on
 implementation economics: `BankTable` (`banks.ts`) is plain host-side
@@ -1459,6 +1476,11 @@ flag constants, `BankTable` constructor + `createBank()` wire into
 
 ### 1.41 `BANK@` reads `MMAP` directly (M20, `DEVELOPING.md` §12)
 
+**Superseded, M50 (§1.62):** `findBankAddr()` is deleted outright —
+`BANK@` resolves by `name` now, not `tag`, so this tag-keyed read path
+has no caller left. Kept below as the historical record of what M20
+actually shipped.
+
 The smaller, more contained half of M19's own "Follow-on, not
 resolved" note — a pure read-path swap made possible because M19
 already proved `MMAP` is a correct mirror of the host bank table, in
@@ -1508,13 +1530,16 @@ own array, only `MMAP`. `getAllBanks()`/`findBank()` read `MMAP`
 directly as of M22, so this gap no longer exists — kept here as the
 historical record of what M21 actually shipped.
 
-**A real gotcha, found while testing, still true today:** a tag over 4
-characters truncates on write (the fixed field width every real tag
-already respects by convention), but `BANK@`'s lookup never truncates
-its search string — a bank created with a >4-char tag is only findable
-by its first 4 characters. Not new behavior in `BANK@` itself, just the
-first time anything could actually create a tag violating the
-already-existing convention.
+**A real gotcha, found while testing, still true today (though its
+field changed under it — see §1.62):** a tag over 4 characters
+truncates on write (the fixed field width every real tag already
+respects by convention). Originally about `BANK@`'s own tag-keyed
+search string; now that `BANK@`/`BANK-SIZE` resolve by `name` (M50),
+the live version of this gotcha is `name`'s own 8-character field
+(`BANK_NAME_LEN`, `banks.ts`) — a `CREATE-BANK` call's auto-generated
+serial name is always exactly 8 digits so this never bites there, but
+an explicit `name` passed host-side (`repl.ts`'s boot banks, `storage.ts`
+asset restoration) truncates the same way a >4-char tag always did.
 
 *Implementation:* `rebel-opcodes.json` (token 100), `primitives.ts`
 (case 100, imports `BankFlagResident`/`BankFlagActive`). No
@@ -2974,6 +2999,61 @@ cross-referencing it; §6.12's `WARM` entry rewritten in full
 needed. Full engine suite: 398 passed (390 before, +8 new).
 `packages/app` test suite: 20 passed, unaffected.
 
+### 1.62 `BANK-SIZE`, and `BANK@` switches from `tag` to `name` lookup (M50)
+
+Started as "add the read-only counterpart `BANK@` never had" and
+surfaced a real, pre-existing ambiguity in `BANK@` itself along the
+way (found by Oliver while looking at the bank monitor).
+
+**`BANK-SIZE ( "name" -- size )`, primitive 144:** same parsed-word
+lookup, uppercasing, and `? unknown bank: <NAME>` error `BANK@` (99)
+already has; pushes `Bank.size` (already rounded to its size class at
+creation, `banks.ts`'s `createBank`) instead of `base`. Deliberately
+read-only — `spec/02-MEMORY-MODEL.md` §7 explicitly defers any richer
+resize/reallocate model ("do not design ahead of these"): banks are
+handed out by a pure bump allocator with no compaction or relocation
+ever, so resizing anything but the most-recently-created bank would
+mean either relocating it (rewriting every absolute address anyone
+holds into it — infeasible for `DICT` once anything's compiled) or
+leaking the freed space (no freelist exists). Discussed as a possible
+future feature; left with no reserved wording rather than guessed at.
+
+**`BANK@` switches from `tag` to `name` (see §1.39's own "Update, M50"
+note for the historical context).** `MemoryMap.findBankAddr()` (M20,
+§1.41) — `BANK@`'s old tag-keyed lookup path — is deleted outright,
+along with the `mmap.test.ts` suite that tested it directly; nothing
+else called it. `BankTable.findBankByName()` (pre-existing, `storage.ts`'s
+own lookup) is what both `BANK@` and `BANK-SIZE` call now.
+
+**Every boot-created system bank gained an explicit `name` (`repl.ts`):**
+`SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` previously omitted `name` and
+got an auto-generated 8-digit serial (`WORK`/`EDITOR`/`MMAP` already
+had explicit names) — without this, switching `BANK@` to name-based
+lookup would have broken `BANK@ SYSV`-style calls immediately, since
+`SYSV`'s bank was never actually *named* `SYSV`. Now name == tag for
+all six, so nothing about typing `BANK@ SYSV` changed observably.
+
+**`CREATE-BANK` itself is deliberately unchanged** — it still always
+auto-generates a name, never derived from its tag argument (M27's own
+fix, §1.43, for exactly the "two same-tagged banks silently collide on
+name" bug this would reintroduce). One real, narrow consequence: a
+bank made via `CREATE-BANK MYBANK` is *not* later reachable via
+`BANK@ MYBANK` — `MYBANK` became its tag, not its name — only via the
+address `CREATE-BANK` already returned, or the real auto-generated
+name read back host-side. Two `mmap.test.ts` tests that assumed the
+old tag-reachability were rewritten to prove this explicitly rather
+than silently pass on the new (accidentally-still-working) semantics.
+
+*Implementation:* `rebel-opcodes.json` (tokens 99, 144), `primitives.ts`
+(case 99 rewritten, case 144 new), `repl.ts` (6 `createBank` calls gain
+an explicit name), `mmap.ts` (`findBankAddr()` deleted). *Tests:*
+`bank-access.test.ts` (rewritten for name lookup, `BANK-SIZE` suite
+added), `block-io.test.ts`, `mmap.test.ts` (`findBankAddr` suite
+deleted, two `CREATE-BANK` tests rewritten). `spec/02-MEMORY-MODEL.md`
+§4.7 and `spec/01-HAL.md`'s bank-introspection item updated to describe
+name-based lookup; `spec/04-FORTH-CORE.md`'s one stale "`BANK@` only
+looks up by tag" aside corrected.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3127,5 +3207,6 @@ exactly as it would be on the bare-metal target.
 | **M47** | `EMPTY` (§1.58, `FORTH-ARCHITECTURE.md` §7): resets the dictionary to `COLD`'s post-boot state in place, without `COLD`'s own full `Machine` rebuild — spec'd for the Screen Editor's expected edit/reload cycle. Pure Forth, no engine changes: reuses `FORGET`'s `LATEST-ADDR`/`HERE-ADDR` write-back against a captured point instead of a named-word chain-walk. The real trick is capturing that point *after* `EMPTY`'s own definition closes (via two plain `VARIABLE`s set post-hoc, not a `CONSTANT` baked in too early), so `EMPTY` never forgets itself. Defined after `INTERPRET` on purpose — "the state `COLD` produces" means the complete post-boot vocabulary. | `system.fth`, `empty.test.ts` |
 | **M48** | The Screen Editor (§1.59, `FORTH-ARCHITECTURE.md` §7): `LOAD` plus an `EDITOR` vocabulary (`LIST`/`L`/`T`/`TOP`/`CLEAR`) — the core edit/run loop, single-letter fig-FORTH-style names, full classic set (insert/delete/search/`COPY`) deferred. One new native primitive, `(SET-INPUT)` (142) — nothing before this needed to redirect the shared input cursor away from the TIB. `EDITOR` is a real, separate vocabulary (`VOCABULARY`/`USE`, M13) specifically so single-letter names like `T` don't collide with ordinary code (`I` would shadow the loop-index word). Two real bugs surfaced and fixed: the `(` comment-closing footgun a third time (plus a new unclosed-comment variant), and a genuine ~2.5x boot-time regression from a first-draft Forth-level blank-fill loop, fixed by giving `Arena` a native `fillBytes()` and space-filling `BLKS` at bank creation instead — `vitest.config.ts`'s `testTimeout` raised to absorb the remaining, structural self-hosted-compile cost. **Follow-up 1, found immediately:** `EMPTY` silently corrupted `EDITOR`'s own dictionary chain if called while `EDITOR` was still active, since it reset `LATEST` without ever touching `CURRENT-VOCAB` — fixed by having `EMPTY` also force `CURRENT-VOCAB` back to `FORTH`. **Follow-up 2 (§1.60), the next day:** replaced single-pointer `USE` with the real classic `CONTEXT`/`CURRENT-VOCAB` split — browsing a vocabulary no longer redirects where new words compile, fixing the `LOAD`-lands-in-the-wrong-vocabulary concern for good, plus a genuine dead-end design (`FIND`/`WORDS` always dereferencing `CONTEXT`) found and reversed before landing on the right one (compare `CONTEXT` against `CURRENT-VOCAB`, only dereference when they differ). Zero engine changes for either follow-up. | `arena.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `vitest.config.ts`, `screen-editor.test.ts`, `empty.test.ts` |
 | **M49** | Four real self-hosted-only bugs (§1.61), found by Oliver actually using the machine rather than planned review: `DEPTH` (off-by-one, `SP0`/`SP@` pushed in the wrong order), `PICK` (self-referential garbage on `0 PICK`, off-by-one on every other index — transitively fixed `.S`/`2OVER` too, no changes to either), `.S`/`FILL`/`CMOVE` (all three missing the same zero-length `DO`/`LOOP` guard `TYPE` already had), and `WARM` (self-hosted `INTERPRET`'s own live `RSTK` frame makes "reset `RSTK`, then return normally" structurally impossible — reclassified back to native, now throws a dedicated `WarmReset` signal caught by `repl.ts`'s two recovery sites, aligned with classic `WARM`/`QUIT` semantics: abandons the rest of the line instead of the old, already-broken "keeps executing it" contract). All four only ever affected the self-hosted (`system.fth`) definition, never the native primitive underneath — exactly why none of it showed up in the existing native-only tests. Verified live in a real browser for the first time this session, via `chrome-devtools-mcp` and the app's own new WebMCP tools. `spec/04-FORTH-CORE.md` corrected in several places to match (§6.1, §6.3, §6.5, §6.8, §6.12, §2.4). | `system.fth`, `primitives.ts`, `repl.ts`, `stack-arith.test.ts`, `low-level-batch.test.ts`, `warm.test.ts` |
+| **M50** | `BANK-SIZE` (§1.62), the read-only `Bank.size` counterpart `BANK@` never had — and, found by Oliver while looking at the bank monitor, `BANK@` itself switches from `tag` to `name` lookup: a tag-keyed lookup could only ever reach whichever same-tagged bank was created first, silently hiding every other one, once multiple banks could legitimately share a tag (project `DATA` assets today, a future second `BLKS`-tagged bank). Every boot-created system bank gets an explicit `name` matching its `tag` (`SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` previously got auto-generated serials) so existing `BANK@ SYSV`-style lookups are unaffected; the `BLKS` bank (renamed `EDITOR`, same session) is the first real beneficiary — `BANK@ EDITOR`, not `BANK@ BLKS`. `MemoryMap.findBankAddr()` (M20) deleted as dead code once nothing called it. Also renamed the `BLKS`-tagged boot bank's own `name` to `EDITOR` (its only consumer today, the Screen Editor) — tag stays generic/HAL-level, `name` is free to say what a given instance is for. Resize discussed as a future direction; deliberately given no reserved wording, since `spec/02-MEMORY-MODEL.md` §7 already defers it explicitly and the reason is structural (no compaction/relocation), not just unbuilt. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `mmap.ts`, `bank-access.test.ts`, `block-io.test.ts`, `mmap.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

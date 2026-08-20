@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
 
 describe('BANK@ (DEVELOPING.md §10, M18)', () => {
-  it('resolves a known bank tag to the same base address findBank() reports', () => {
+  it('resolves a known bank name to the same base address findBank() reports', () => {
     const m = new Machine();
     const sysv = m.banks.findBank('SYSV')!;
 
@@ -18,28 +18,36 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
     expect(m.stack.toArray()).toEqual([dict.base]);
   });
 
-  it('reaches every bank tag Machine creates, not just a subset', () => {
+  it('reaches every boot-created bank by name, not just a subset', () => {
     for (const bank of new Machine().banks.getAllBanks()) {
       const m = new Machine();
-      m.interpret(`BANK@ ${bank.tag}`);
+      m.interpret(`BANK@ ${bank.name}`);
       expect(m.stack.toArray()).toEqual([bank.base]);
     }
   });
 
-  it('throws on an unknown tag, same convention as \' on an unrecognized word', () => {
+  it('throws on an unknown name, same convention as \' on an unrecognized word', () => {
     const m = new Machine();
     expect(() => m.interpret('BANK@ NOPE')).toThrow('unknown bank: NOPE');
   });
 
-  it('resolves the first-created bank when a tag repeats, matching findBank(tag) semantics', () => {
+  // M50 (found by Oliver): resolves by name now, not tag — name is the
+  // real, uniqueness-backed identity (banks.ts), tag is expected to
+  // repeat once multiple banks share one. Two DATA-tagged banks are
+  // each individually reachable by their own name; a bare tag no longer
+  // resolves at all (it was never a bank's actual identity).
+  it('resolves each bank individually by name even when several share a tag', () => {
     const m = new Machine();
-    m.banks.createBank('DATA', 4096, 'FIRST');
-    m.banks.createBank('DATA', 4096, 'SECOND');
-    const first = m.banks.findBank('DATA')!;
+    const first = m.banks.createBank('DATA', 4096, 'FIRST');
+    const second = m.banks.createBank('DATA', 4096, 'SECOND');
 
-    m.interpret('BANK@ DATA');
-    expect(m.stack.toArray()).toEqual([first.base]);
-    expect(first.name).toBe('FIRST');
+    m.interpret('BANK@ FIRST');
+    expect(m.stack.pop()).toBe(first.base);
+
+    m.interpret('BANK@ SECOND');
+    expect(m.stack.pop()).toBe(second.base);
+
+    expect(() => m.interpret('BANK@ DATA')).toThrow('unknown bank: DATA');
   });
 
   it('reaches a sysvar cell via its known bank base + group/field offset, from pure Forth source', () => {
@@ -63,7 +71,7 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
 });
 
 describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
-  it('resolves a known bank tag to the same size findBank() reports', () => {
+  it('resolves a known bank name to the same size findBank() reports', () => {
     const m = new Machine();
     const sysv = m.banks.findBank('SYSV')!;
 
@@ -79,15 +87,15 @@ describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
     expect(m.stack.toArray()).toEqual([dict.size]);
   });
 
-  it('reaches every bank tag Machine creates, not just a subset', () => {
+  it('reaches every boot-created bank by name, not just a subset', () => {
     for (const bank of new Machine().banks.getAllBanks()) {
       const m = new Machine();
-      m.interpret(`BANK-SIZE ${bank.tag}`);
+      m.interpret(`BANK-SIZE ${bank.name}`);
       expect(m.stack.toArray()).toEqual([bank.size]);
     }
   });
 
-  it('throws on an unknown tag, same convention as BANK@', () => {
+  it('throws on an unknown name, same convention as BANK@', () => {
     const m = new Machine();
     expect(() => m.interpret('BANK-SIZE NOPE')).toThrow('unknown bank: NOPE');
   });
@@ -95,7 +103,7 @@ describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
   it('reports the size class a requested size was rounded up to, not the raw request', () => {
     const m = new Machine();
     m.banks.createBank('DATA', 100, 'SMALL'); // rounds up to XS, 4096
-    m.interpret('BANK-SIZE DATA');
+    m.interpret('BANK-SIZE SMALL');
     expect(m.stack.toArray()).toEqual([4096]);
   });
 });

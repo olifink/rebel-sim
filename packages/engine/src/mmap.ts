@@ -191,20 +191,6 @@ export class MemoryMap {
     return out;
   }
 
-  /** DEVELOPING.md §12: BANK@'s real lookup path — the first active
-   * slot's base address whose tag matches, `undefined` if none.
-   * Matches `BankTable.findBank(tag)`'s own "first bank of this type"
-   * semantics, reading arena bytes instead of a host array. */
-  findBankAddr(tag: string): number | undefined {
-    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
-      const slot = this.getSlot(i);
-      if ((slot.flags & BankFlagActive) && slot.tag === tag) {
-        return slot.base;
-      }
-    }
-    return undefined;
-  }
-
   /** DEVELOPING.md §14, M22: the real allocator — no cached cursor of
    * any kind. Finds the first inactive slot and the real free memory
    * address (`max(base + size)` over every currently-active slot) in

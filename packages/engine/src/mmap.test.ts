@@ -139,35 +139,6 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   });
 });
 
-describe('MemoryMap.findBankAddr (DEVELOPING.md §12, M20) — BANK@\'s real lookup path', () => {
-  it('resolves a known tag to the same base address findBank() reports', () => {
-    const m = new Machine();
-    const dict = m.banks.findBank('DICT')!;
-    expect(m.banks.mmap.findBankAddr('DICT')).toBe(dict.base);
-  });
-
-  it('returns undefined for an unknown tag, not a thrown error', () => {
-    const m = new Machine();
-    expect(m.banks.mmap.findBankAddr('NOPE')).toBeUndefined();
-  });
-
-  it('resolves the first-created bank when a tag repeats, matching findBank(tag) semantics', () => {
-    const banks = new BankTable(new Arena(1 << 16));
-    const first = banks.createBank('DATA', 64, 'FIRST');
-    banks.createBank('DATA', 64, 'SECOND');
-    expect(banks.mmap.findBankAddr('DATA')).toBe(first.base);
-  });
-
-  it('BANK@ itself now resolves through findBankAddr(), not findBank() — same observable result', () => {
-    const m = new Machine();
-    const sysv = m.banks.findBank('SYSV')!;
-    m.interpret('BANK@ SYSV');
-    const result = m.stack.pop();
-    expect(result).toBe(sysv.base);
-    expect(result).toBe(m.banks.mmap.findBankAddr('SYSV'));
-  });
-});
-
 describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank creation, no host round-trip, no cached state', () => {
   // Tags are conventionally exactly 4 characters throughout this
   // codebase (SYSV, DICT, DATA, ...) — the tag field is a fixed 4-byte
@@ -175,12 +146,19 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
   // is deliberately 4 characters, matching real usage, except the one
   // test that specifically demonstrates the truncation edge case.
 
-  it('creates a bank immediately findable via BANK@, at the address CREATE-BANK itself returned', () => {
+  it('creates a bank immediately findable via BANK@, by its real (auto-generated) name', () => {
+    // M50: BANK@ resolves by name now, not tag — "DAT1" here is only
+    // the tag CREATE-BANK parsed (and, per M27 below, deliberately
+    // never what it names the bank), so the real re-lookup has to go
+    // through the auto-generated name, same as any caller genuinely
+    // would (or, more idiomatically, just keep the address CREATE-BANK
+    // already returned).
     const m = new Machine();
     m.interpret('4096 CREATE-BANK DAT1');
     const createdAddr = m.stack.pop();
+    const created = m.banks.findBank('DAT1')!;
 
-    m.interpret('BANK@ DAT1');
+    m.interpret(`BANK@ ${created.name}`);
     expect(m.stack.pop()).toBe(createdAddr);
   });
 
@@ -228,8 +206,10 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     // not the tag — see the "names the bank after an auto-generated
     // serial" test below for why.
     expect(bank!.name).toMatch(/^\d{8}$/);
-    // BANK@ (M20, reads MMAP directly) agrees, as it already did before M22.
-    m.interpret('BANK@ GAP1');
+    // M50: BANK@ resolves by that real name now, not the "GAP1" tag —
+    // reaching it by tag would only ever work by luck (first-match), the
+    // exact ambiguity this change removes.
+    m.interpret(`BANK@ ${bank!.name}`);
     expect(m.stack.pop()).toBe(addr);
   });
 

@@ -220,10 +220,16 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
     this.banks = new BankTable(this.arena);
-    const sysvBank = this.banks.createBank('SYSV', SYSV_BANK_SIZE);
-    const dstkBank = this.banks.createBank('DSTK', DSTK_BANK_SIZE);
-    const rstkBank = this.banks.createBank('RSTK', RSTK_BANK_SIZE);
-    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE);
+    // Named explicitly, matching tag, same as WORK/EDITOR below — BANK@/
+    // BANK-SIZE resolve by name now, not tag (tags are expected to
+    // repeat once multiple banks share one, name is the real unique
+    // identity), so every boot bank needs a real name instead of an
+    // auto-generated serial for `BANK@ SYSV`-style lookups to keep
+    // working at all.
+    const sysvBank = this.banks.createBank('SYSV', SYSV_BANK_SIZE, 'SYSV');
+    const dstkBank = this.banks.createBank('DSTK', DSTK_BANK_SIZE, 'DSTK');
+    const rstkBank = this.banks.createBank('RSTK', RSTK_BANK_SIZE, 'RSTK');
+    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE, 'DICT');
 
     this.sysvars = new Sysvars(this.arena, sysvBank);
     this.sysvars.initHeader();
@@ -249,11 +255,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // run as part of `this.banks = new BankTable(this.arena)` above),
     // arena-bookkeeping rather than Forth-interpreter state.
 
-    const charBank = this.banks.createBank('CHAR', charCols * charRows);
+    const charBank = this.banks.createBank('CHAR', charCols * charRows, 'CHAR');
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
     this.screen.cls();
 
-    const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE);
+    const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE, 'KMAP');
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
     this.channel = options.channel
       ?? (options.remoteChannel

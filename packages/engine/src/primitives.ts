@@ -616,13 +616,21 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.clear();
       throw new Error('ABORT');
 
-    case 99: { // BANK@ ( "tag" -- addr ) — DEVELOPING.md §10/§12, M18/M20
-      const tag = ctx.nextInputToken().toUpperCase();
-      const addr = ctx.banks.mmap.findBankAddr(tag);
-      if (addr === undefined) {
-        throw new Error(`unknown bank: ${tag}`);
+    case 99: { // BANK@ ( "name" -- addr ) — DEVELOPING.md §10/§12, M18/M20.
+      // Resolves by name, not tag (tags repeat by design once multiple
+      // banks share one — findBankByName is the real, uniqueness-backed
+      // lookup; a tag-keyed lookup could only ever reach whichever same-
+      // tagged bank happened to be created first, silently hiding every
+      // other one). Every boot bank now has an explicit name (repl.ts),
+      // so `BANK@ SYSV`-style lookups for the fixed system banks are
+      // unaffected by this — only banks that share a tag (BLKS ->
+      // EDITOR, project DATA assets, ...) need their real name instead.
+      const name = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.findBankByName(name);
+      if (bank === undefined) {
+        throw new Error(`unknown bank: ${name}`);
       }
-      s.push(addr);
+      s.push(bank.base);
       break;
     }
 
@@ -1020,17 +1028,17 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 144: { // BANK-SIZE ( "tag" -- size ) — same tag lookup as
-      // BANK@ (99), same parsed-word convention, same "unknown bank"
-      // error; returns the bank's actual size (already rounded up to
-      // its size class at creation, banks.ts's createBank) rather than
-      // its base. First real consumer: a future capacity display
+    case 144: { // BANK-SIZE ( "name" -- size ) — same name lookup as
+      // BANK@ (99) now, same parsed-word convention, same "unknown
+      // bank" error; returns the bank's actual size (already rounded up
+      // to its size class at creation, banks.ts's createBank) rather
+      // than its base. First real consumer: a future capacity display
       // (e.g. DICT used/free) — see banks.ts/spec/02-MEMORY-MODEL.md §7
       // for why this stays a plain read accessor, not a resize.
-      const tag = ctx.nextInputToken().toUpperCase();
-      const bank = ctx.banks.findBank(tag);
+      const name = ctx.nextInputToken().toUpperCase();
+      const bank = ctx.banks.findBankByName(name);
       if (bank === undefined) {
-        throw new Error(`unknown bank: ${tag}`);
+        throw new Error(`unknown bank: ${name}`);
       }
       s.push(bank.size);
       break;

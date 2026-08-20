@@ -331,9 +331,16 @@ narrow exception, not a precedent for treating other subsystems loosely
   simultaneously-resident banks of the same tag distinguishable, and
   (per `01-HAL.md` §6.3) doubles directly as a saved asset file's
   on-disk basename. **Uniqueness is enforced on `name`, not `tag`** — a
-  lookup-by-tag-alone (e.g. `BANK@`, `04-FORTH-CORE.md`) means "the
-  first bank of this type," not "the" one, once more than one shares a
-  tag; a lookup by name is the real uniqueness-backed identity lookup.
+  lookup-by-tag-alone would mean "the first bank of this type," not
+  "the" one, once more than one shares a tag. **`BANK@`/`BANK-SIZE`
+  (`04-FORTH-CORE.md`) resolve by `name`, not `tag`, for exactly this
+  reason** — found and fixed once `BANK-SIZE` was added and a tag-keyed
+  lookup's silent first-match ambiguity became a real, demonstrated
+  problem (two same-tagged banks, only one ever reachable). Every fixed
+  system bank created at boot has `name == tag` (an implementation
+  choice, not something this spec mandates), so this is invisible for
+  the common case; only banks that genuinely share a tag need their
+  real, distinguishing name instead.
 - **A bank created without an explicit name gets one automatically**: an
   8-digit, zero-padded decimal serial number (e.g. `00000042`), drawn
   from a single monotonically increasing counter. This counter **MUST**

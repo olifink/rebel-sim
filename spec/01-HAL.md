@@ -843,11 +843,13 @@ somewhere, not before:
   them to Forth source is unresolved on every target that might
   eventually support it. Likely a capability-gated mechanism (§2.5)
   when it lands, not assumed universal.
-- **Forth-level bank introspection/creation** (`BANK@`, `CREATE-BANK`).
-  These exist as ordinary Forth primitives — looking up a bank's base
-  address by tag, and carving a new one at runtime — and need no new
-  HAL surface at all: both operate purely on the arena-resident bank
-  table (`02-MEMORY-MODEL.md`), never crossing this boundary. Full
+- **Forth-level bank introspection/creation** (`BANK@`, `BANK-SIZE`,
+  `CREATE-BANK`). These exist as ordinary Forth primitives — looking up
+  a bank's base address/size by name (`02-MEMORY-MODEL.md` §4.7 —
+  `name` is the real, uniqueness-backed identity; `tag` is expected to
+  repeat), and carving a new one at runtime — and need no new HAL
+  surface at all: both operate purely on the arena-resident bank table
+  (`02-MEMORY-MODEL.md`), never crossing this boundary. Full
   primitive semantics are `04-FORTH-CORE.md`'s job, not this
   document's; noted here only so their absence from every list above
   isn't mistaken for an oversight.

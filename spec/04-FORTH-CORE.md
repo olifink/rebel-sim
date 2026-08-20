@@ -917,7 +917,8 @@ the visible screen never goes stale after a project or single-bank
 load. `SAVE` (save every active bank)
 is mechanically "loop over every bank, save it" — if a future revision
 adds a Forth-visible bank-*enumeration* primitive (there isn't one
-today; `BANK@` only looks up by tag, it doesn't walk the table), `SAVE`
+today; `BANK@` only resolves one known name, it doesn't walk the
+table), `SAVE`
 would become expressible as a loop over `BSAVE`-equivalent calls. Not
 recommended as a change on its own — the enumeration primitive isn't
 otherwise needed, and adding one solely to shrink this one word isn't
