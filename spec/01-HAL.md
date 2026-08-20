@@ -517,7 +517,7 @@ it."
 
 ### 6.2 Required HAL surface (Type A)
 
-Exactly four functions, all inherently asynchronous on most real
+Exactly five functions, all inherently asynchronous on most real
 targets (filesystem, USB mass storage, flash) — the **only** part of
 this entire specification permitted to take non-trivial wall-clock
 time, and scoped narrowly so that permission never leaks into the
@@ -531,6 +531,14 @@ void hal_ensure_dir(const char *path);
  * doesn't exist — not an error. */
 string_list hal_list_files(const char *path);
 
+/* Subdirectory names only, one level deep, not filenames — the
+ * "which projects exist" question hal_list_files alone can't answer,
+ * since /PROJECTS/ itself holds one subdirectory per project, not
+ * asset files directly. Bare names, not full paths (matching
+ * hal_list_files' own convention). Empty result if the directory
+ * doesn't exist — not an error. */
+string_list hal_list_dirs(const char *path);
+
 /* Full file contents, or an empty/undefined result if the file doesn't
  * exist — not an error. */
 byte_buffer hal_read_file(const char *path);
@@ -539,7 +547,7 @@ void hal_write_file(const char *path, const uint8_t *bytes, size_t len);
 ```
 
 Paths are POSIX-style, always absolute, e.g.
-`/PROJECTS/REBELDEF/00000000.DAT`. These four functions **MUST** only
+`/PROJECTS/REBELDEF/00000000.DAT`. These five functions **MUST** only
 ever be called from a project open/close orchestration point (or
 equivalent explicit save/load action), never from inside a running
 Forth word's own execution — nothing in the portable storage model
@@ -664,6 +672,11 @@ no special ordering requirement there, only on load) gets exact-layout
 restoration; a target that never does still round-trips correctly, just
 without the layout-fidelity guarantee.
 
+- **`listProjects()`**: every name currently under `/PROJECTS/`, via
+  `hal_list_dirs`. Read-only — touches no arena/bank state, unlike
+  `openProject` — the "what's actually saved" question neither
+  `openProject` nor `saveAsset` alone can answer without already
+  knowing a name to ask about (`04-FORTH-CORE.md`'s `PROJECTS` word).
 - **`openProject(name)`**: implements §6.3.1's two-phase algorithm.
   Lists `/PROJECTS/<name>/`; if an `MMAP` asset is present, restores
   the exact bank table first, then loads matching content into the
@@ -891,6 +904,7 @@ somewhere, not before:
 | `redraw_all` | portable | n/a — never reimplement; storage MUST call it after any direct `CHAR` overwrite | Screen §3.2 |
 | `hal_ensure_dir` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_list_files` | A | **REQUIRED** if storage-capable | Storage §6.2 |
+| `hal_list_dirs` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_read_file` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_write_file` | A | **REQUIRED** if storage-capable | Storage §6.2 |
 | `hal_millis` | A | **REQUIRED** | Timing §7.1 |

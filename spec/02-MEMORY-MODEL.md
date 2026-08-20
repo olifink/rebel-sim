@@ -340,7 +340,11 @@ narrow exception, not a precedent for treating other subsystems loosely
   system bank created at boot has `name == tag` (an implementation
   choice, not something this spec mandates), so this is invisible for
   the common case; only banks that genuinely share a tag need their
-  real, distinguishing name instead.
+  real, distinguishing name instead. A dev-ergonomics `BANKS` word
+  (`04-FORTH-CORE.md`), listing every active bank's `name` the same way
+  `WORDS` lists dictionary entries, is a natural companion to
+  `BANK@`/`BANK-SIZE` — walking `name` rather than `tag` for the same
+  "which specific one" reason.
 - **A bank created without an explicit name gets one automatically**: an
   8-digit, zero-padded decimal serial number (e.g. `00000042`), drawn
   from a single monotonically increasing counter. This counter **MUST**

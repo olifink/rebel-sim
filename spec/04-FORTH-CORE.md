@@ -907,7 +907,7 @@ reference to build against.
 
 | Word | Effect |
 |---|---|
-| `PROJECT` `SAVE` `RESTORE` `BSAVE` `BLOAD` | Direct `01-HAL.md` §6 Storage-module access — naming, saving, and restoring project state. |
+| `PROJECT` `SAVE` `RESTORE` `BSAVE` `BLOAD` `PROJECTS` | Direct `01-HAL.md` §6 Storage-module access — naming, saving, restoring, and listing project state. |
 
 All **KERNEL** — these are the Forth-level surface of the storage HAL
 boundary itself, not derived behavior. `RESTORE`/`BLOAD` call the
@@ -915,14 +915,18 @@ portable `redraw_all()` (`01-HAL.md` §3.2, `REDRAW`'s own underlying
 mechanism, §6.9) whenever the bank they just overwrote is `CHAR`, so
 the visible screen never goes stale after a project or single-bank
 load. `SAVE` (save every active bank)
-is mechanically "loop over every bank, save it" — if a future revision
-adds a Forth-visible bank-*enumeration* primitive (there isn't one
-today; `BANK@` only resolves one known name, it doesn't walk the
-table), `SAVE`
-would become expressible as a loop over `BSAVE`-equivalent calls. Not
-recommended as a change on its own — the enumeration primitive isn't
-otherwise needed, and adding one solely to shrink this one word isn't
-worth it by itself.
+is mechanically "loop over every bank, save it" — a future revision
+could express this as a loop over `BSAVE`-equivalent calls now that a
+Forth-visible bank-*enumeration* word exists (`BANKS`, §7.2 — `BANK@`
+itself still only resolves one known name, it doesn't walk the table).
+Not recommended as a change on its own — `BANKS` prints names for a
+human to read, not a stack-returning iteration primitive `SAVE` could
+call into directly, and the enumeration gap this paragraph originally
+named wasn't otherwise blocking anything. `PROJECTS ( -- )` lists
+every currently-saved project name, space separated — the storage-side
+counterpart to `BANKS`, same "browse what actually exists" motivation,
+reading `01-HAL.md`'s directory-listing HAL function rather than the
+arena.
 
 ### 6.12 System reset
 
@@ -1180,6 +1184,7 @@ than re-specifying byte-for-byte:
 | Word | Contract | Depends on |
 |---|---|---|
 | `WORDS` | `( -- )` — lists every non-`HIDDEN` dictionary entry name, most-recently-defined first. | `LATEST`, `@`, `C@`, `TYPE`, `EMIT` |
+| `BANKS` | `( -- )` — lists every active bank's `name` (`02-MEMORY-MODEL.md` §4.7), space separated, walking `MMAP`'s own fixed-stride slot table directly by raw address arithmetic — the same "it's just arena memory" treatment `WORDS` gives the dictionary chain. `MMAP` itself is always bank 0 at absolute base 0 (`02-MEMORY-MODEL.md` §5), so no lookup primitive is needed to find the table before walking it. | `@`, `C@`, `EMIT` |
 | `>CFA` | `( entry-addr -- cfa )` — computes a dictionary entry's Code Field address from its own address (reads the flags byte, masks the name-length bits, aligns past the name). | `@`, `C@` |
 | `XT-NAME` | `( xt -- )` — reverse of `WORDS`: given a Code Field address, prints the dictionary entry name whose own `>CFA` matches it. | `LATEST`, `>CFA`, `@`, `TYPE` |
 | `SEE` | `( "name" -- )` — decompiles a `DOCOL`-coded colon-definition back to source-ish form, special-casing `LIT`/`(SLIT)`/`BRANCH`/`0BRANCH` as inline data rather than further calls to decompile. Scoped to `DOCOL`-coded words only — `CONSTANT`/`VARIABLE`/`DOES>`'d words report "not supported" rather than guessing wrong. | `'`, `>CFA`, `XT-NAME`, `@` |
