@@ -263,6 +263,10 @@ VARIABLE CURRENT-VOCAB
 ( nothing here needs a variable-length dump yet, and one screenful is )
 ( plenty for now. No bounds checking against the arena's real extent, )
 ( same trust-the-caller precedent raw @/C@ and BANK@ already have. )
+( Leads with a CR, found by Oliver: without it the first row starts )
+( mid-line, right after whatever was already on the current line -- )
+( DUMP itself included, since it echoes back before running -- so )
+( every row but the first looked misaligned against it. )
 
 ( HEXDIGIT n -- : prints one hex digit for 0..15. )
 : HEXDIGIT DUP 10 < IF 48 + ELSE 10 - 65 + THEN EMIT ;
@@ -283,6 +287,7 @@ VARIABLE CURRENT-VOCAB
 ;
 
 : DUMP ( addr -- )
+  CR
   16 0 DO
     DUP I 8 * +
     DUP HEX8 BL EMIT
