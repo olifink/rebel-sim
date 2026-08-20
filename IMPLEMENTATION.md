@@ -3054,6 +3054,60 @@ deleted, two `CREATE-BANK` tests rewritten). `spec/02-MEMORY-MODEL.md`
 name-based lookup; `spec/04-FORTH-CORE.md`'s one stale "`BANK@` only
 looks up by tag" aside corrected.
 
+### 1.63 `BANKS` and `PROJECTS`: dev-ergonomics listing words (M51)
+
+Requested directly by Oliver: a `WORDS`-shaped word for banks, and one
+for saved projects, to browse "what actually exists right now" without
+first knowing a name to ask `BANK@`/`BANK-SIZE`/`RESTORE` about.
+
+**`BANKS ( -- )`, `system.fth`, right after `WORDS`.** Pure Forth, no
+new primitive — `MMAP` is an ordinary arena-resident structure (its
+fixed-stride 64-slot table, `mmap.ts`) just like the dictionary chain
+`WORDS` already walks, so this walks it the same way, printing each
+active slot's name field, space separated. Layout constants (header 16
+bytes, 24 bytes per slot, name field at offset 4 for 8 bytes, `ACTIVE`
+flags bit 4) are hand-copied from `mmap.ts` as plain `CONSTANT`s right
+above the definition, same "no generator yet, a known gap" situation
+`spec/00-OVERVIEW.md` already names. `MMAP`'s own base is a literal
+`0` rather than `BANK@ MMAP` — `BANK@`'s name argument is a *live*
+input token consumed at the moment it runs (`nextInputToken()`, the
+same shared-cursor mechanism `PROJECT`/`CREATE-BANK`/`'` use), so it
+cannot resolve a name embedded in a definition's own source the way a
+compiled literal could; `MMAP` being permanently bank 0 at absolute
+base 0 (`mmap.ts`'s own documented invariant) sidesteps the need
+entirely. The name field is NUL-padded to 8 bytes with only ever
+*trailing* padding (never an embedded gap), so the inner byte loop
+just skips zero bytes rather than needing `LEAVE`, which still doesn't
+exist (`spec/04-FORTH-CORE.md` §9).
+
+**`PROJECTS ( -- )`, primitive 145.** Backed by `storage.ts`'s
+`Storage.listProjects()` — project names live in the host storage
+layer (`StorageHal`), not the arena, so unlike `BANKS` there's no
+in-memory structure for pure Forth source to walk directly. An
+ordinary synchronous primitive, same precedent as `PROJECT`/`SAVE`/
+`RESTORE` (M33): genuinely usable inside a colon-definition or via
+`EXECUTE`, since — unlike `BANK@`/`PROJECT` — it takes no argument at
+all, so the raw-token-consuming-primitives caveat above doesn't apply
+to it.
+
+**A pre-existing doc staleness found while testing `BANKS` against a
+real `CREATE-BANK`'d bank:** `rebel-opcodes.json`'s own note for
+`CREATE-BANK` (100) still described its original M21 design — a
+direct `mmap.allocate()` bypass, "name equals the tag, no auto-serial
+scheme" — which M30 (`PLAN.md`) superseded: `CREATE-BANK` routes
+through `BankTable.createBank()` now, so it *does* get an
+auto-generated serial name, same as any host-side creation. §1.62
+above already relied on the correct (M30) behavior when explaining
+`BANK@`'s narrowed reachability; only the opcode note itself had
+drifted. Corrected in place — see `dictionary.test.ts`'s note-lookup
+tests for why this field is read live rather than duplicated by hand
+anywhere.
+
+*Implementation:* `system.fth` (`BANKS` plus its layout constants),
+`primitives.ts` (case 145), `rebel-opcodes.json` (token 145 added,
+token 100's stale note corrected). *Tests:* `bank-access.test.ts`
+(`BANKS` suite), `project.test.ts` (`PROJECTS` suite).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3208,5 +3262,6 @@ exactly as it would be on the bare-metal target.
 | **M48** | The Screen Editor (§1.59, `FORTH-ARCHITECTURE.md` §7): `LOAD` plus an `EDITOR` vocabulary (`LIST`/`L`/`T`/`TOP`/`CLEAR`) — the core edit/run loop, single-letter fig-FORTH-style names, full classic set (insert/delete/search/`COPY`) deferred. One new native primitive, `(SET-INPUT)` (142) — nothing before this needed to redirect the shared input cursor away from the TIB. `EDITOR` is a real, separate vocabulary (`VOCABULARY`/`USE`, M13) specifically so single-letter names like `T` don't collide with ordinary code (`I` would shadow the loop-index word). Two real bugs surfaced and fixed: the `(` comment-closing footgun a third time (plus a new unclosed-comment variant), and a genuine ~2.5x boot-time regression from a first-draft Forth-level blank-fill loop, fixed by giving `Arena` a native `fillBytes()` and space-filling `BLKS` at bank creation instead — `vitest.config.ts`'s `testTimeout` raised to absorb the remaining, structural self-hosted-compile cost. **Follow-up 1, found immediately:** `EMPTY` silently corrupted `EDITOR`'s own dictionary chain if called while `EDITOR` was still active, since it reset `LATEST` without ever touching `CURRENT-VOCAB` — fixed by having `EMPTY` also force `CURRENT-VOCAB` back to `FORTH`. **Follow-up 2 (§1.60), the next day:** replaced single-pointer `USE` with the real classic `CONTEXT`/`CURRENT-VOCAB` split — browsing a vocabulary no longer redirects where new words compile, fixing the `LOAD`-lands-in-the-wrong-vocabulary concern for good, plus a genuine dead-end design (`FIND`/`WORDS` always dereferencing `CONTEXT`) found and reversed before landing on the right one (compare `CONTEXT` against `CURRENT-VOCAB`, only dereference when they differ). Zero engine changes for either follow-up. | `arena.ts`, `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `vitest.config.ts`, `screen-editor.test.ts`, `empty.test.ts` |
 | **M49** | Four real self-hosted-only bugs (§1.61), found by Oliver actually using the machine rather than planned review: `DEPTH` (off-by-one, `SP0`/`SP@` pushed in the wrong order), `PICK` (self-referential garbage on `0 PICK`, off-by-one on every other index — transitively fixed `.S`/`2OVER` too, no changes to either), `.S`/`FILL`/`CMOVE` (all three missing the same zero-length `DO`/`LOOP` guard `TYPE` already had), and `WARM` (self-hosted `INTERPRET`'s own live `RSTK` frame makes "reset `RSTK`, then return normally" structurally impossible — reclassified back to native, now throws a dedicated `WarmReset` signal caught by `repl.ts`'s two recovery sites, aligned with classic `WARM`/`QUIT` semantics: abandons the rest of the line instead of the old, already-broken "keeps executing it" contract). All four only ever affected the self-hosted (`system.fth`) definition, never the native primitive underneath — exactly why none of it showed up in the existing native-only tests. Verified live in a real browser for the first time this session, via `chrome-devtools-mcp` and the app's own new WebMCP tools. `spec/04-FORTH-CORE.md` corrected in several places to match (§6.1, §6.3, §6.5, §6.8, §6.12, §2.4). | `system.fth`, `primitives.ts`, `repl.ts`, `stack-arith.test.ts`, `low-level-batch.test.ts`, `warm.test.ts` |
 | **M50** | `BANK-SIZE` (§1.62), the read-only `Bank.size` counterpart `BANK@` never had — and, found by Oliver while looking at the bank monitor, `BANK@` itself switches from `tag` to `name` lookup: a tag-keyed lookup could only ever reach whichever same-tagged bank was created first, silently hiding every other one, once multiple banks could legitimately share a tag (project `DATA` assets today, a future second `BLKS`-tagged bank). Every boot-created system bank gets an explicit `name` matching its `tag` (`SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` previously got auto-generated serials) so existing `BANK@ SYSV`-style lookups are unaffected; the `BLKS` bank (renamed `EDITOR`, same session) is the first real beneficiary — `BANK@ EDITOR`, not `BANK@ BLKS`. `MemoryMap.findBankAddr()` (M20) deleted as dead code once nothing called it. Also renamed the `BLKS`-tagged boot bank's own `name` to `EDITOR` (its only consumer today, the Screen Editor) — tag stays generic/HAL-level, `name` is free to say what a given instance is for. Resize discussed as a future direction; deliberately given no reserved wording, since `spec/02-MEMORY-MODEL.md` §7 already defers it explicitly and the reason is structural (no compaction/relocation), not just unbuilt. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `mmap.ts`, `bank-access.test.ts`, `block-io.test.ts`, `mmap.test.ts` |
+| **M51** | `BANKS` and `PROJECTS` (§1.63), requested directly: `WORDS`-shaped dev-ergonomics words to browse what banks/projects actually exist. `BANKS` is pure Forth (`system.fth`), walking `MMAP`'s own fixed-stride slot table directly, the same "it's just arena memory" reasoning `WORDS` already applies to the dictionary chain. `PROJECTS` is one new primitive (145) wrapping `storage.ts`'s `listProjects()`, since project names live in `StorageHal`, not the arena. Found and fixed a real, pre-existing `rebel-opcodes.json` doc staleness along the way: `CREATE-BANK`'s (100) own note still described its pre-M30 design (name==tag, no auto-serial), superseded once M30 routed it through `BankTable.createBank()`. | `system.fth`, `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `project.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

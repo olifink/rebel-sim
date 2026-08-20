@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
+import { bootMachine } from './test-support.js';
 
 describe('BANK@ (DEVELOPING.md §10, M18)', () => {
   it('resolves a known bank name to the same base address findBank() reports', () => {
@@ -105,5 +106,48 @@ describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
     m.banks.createBank('DATA', 100, 'SMALL'); // rounds up to XS, 4096
     m.interpret('BANK-SIZE SMALL');
     expect(m.stack.toArray()).toEqual([4096]);
+  });
+});
+
+describe('BANKS (system.fth, M51)', () => {
+  function screenText(m: Machine): string {
+    const rows: string[] = [];
+    for (let r = 0; r < m.screen.rows; r++) {
+      rows.push(m.screen.readRowText(r));
+    }
+    return rows.join('');
+  }
+
+  it('lists every boot-created bank by name, MMAP itself included', () => {
+    const m = bootMachine();
+    m.interpret('BANKS');
+    const listed = screenText(m);
+    for (const bank of m.banks.getAllBanks()) {
+      expect(listed).toContain(bank.name);
+    }
+    expect(listed).toContain('MMAP'); // bank 0, self-registered, not in getAllBanks()
+  });
+
+  it('a freshly CREATE-BANKed bank shows up too, by its real auto-generated name', () => {
+    const m = bootMachine();
+    m.interpret('64 CREATE-BANK DATA');
+    const addr = m.stack.pop();
+    // CREATE-BANK (primitives.ts case 100, M30) routes through
+    // BankTable.createBank() with no name argument, so the tag typed
+    // at creation ("DATA") is not the bank's real name — it gets an
+    // auto-generated serial instead (banks.ts's generateSerialName()).
+    const created = m.banks.getAllBanks().find((b) => b.base === addr);
+    expect(created).toBeDefined();
+    m.interpret('BANKS');
+    expect(screenText(m)).toContain(created!.name);
+  });
+
+  it('is stack-neutral', () => {
+    const m = bootMachine();
+    m.interpret('DEPTH');
+    const depthBefore = m.stack.pop();
+    m.interpret('BANKS');
+    m.interpret('DEPTH');
+    expect(m.stack.pop()).toBe(depthBefore);
   });
 });

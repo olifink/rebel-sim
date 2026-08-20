@@ -212,6 +212,48 @@ VARIABLE CURRENT-VOCAB
   DROP
 ;
 
+( BANKS, M51: dev-ergonomics sibling to WORDS above, requested by )
+( Oliver -- lists every active bank's name, space separated, same )
+( "browse what actually exists right now" motivation as WORDS. Walks )
+( MMAP's own fixed-stride slot table directly from Forth, since it's )
+( just an ordinary arena-resident structure like anything else -- no )
+( BANK@ MMAP needed to find it, since MMAP is always bank 0 at )
+( absolute base 0, mmap.ts's own documented invariant, and unlike )
+( BANK@/PROJECT -- whose name argument is a *live* input token, )
+( consumed at the moment they run -- MMAP is a fixed, structural )
+( fact, not something to parse, so it's a plain literal 0 below, not )
+( a call. Layout mirrors mmap.ts's real constants exactly, kept in )
+( sync by hand -- nothing generates these yet, a known gap, see )
+( spec/00-OVERVIEW.md. Header is 16 bytes; each of the 64 fixed slots )
+( is 24 bytes -- tag 4 + name 8 + base/size/flags cells; the name )
+( field starts 4 bytes into a slot, NUL-padded to 8; ACTIVE is flags )
+( bit 4, value 16. A name shorter than 8 bytes only ever has )
+( *trailing* NUL padding, never an embedded gap, so skipping zero )
+( bytes while still emitting every nonzero one preserves order )
+( correctly -- no need for LEAVE, which doesn't exist yet anyway, )
+( see spec/04-FORTH-CORE.md section 9. )
+16 CONSTANT MMAP-HDR
+24 CONSTANT MMAP-SLOT
+4  CONSTANT MMAP-NAME
+8  CONSTANT MMAP-NAME-LEN
+20 CONSTANT MMAP-FLAGS
+16 CONSTANT MMAP-ACTIVE
+64 CONSTANT MMAP-SLOTS
+
+: BANKS
+  MMAP-SLOTS 0 DO
+    I MMAP-SLOT * MMAP-HDR +
+    DUP MMAP-FLAGS + @ MMAP-ACTIVE AND IF
+      DUP MMAP-NAME +
+      MMAP-NAME-LEN 0 DO
+        DUP I + C@ DUP IF EMIT ELSE DROP THEN
+      LOOP
+      DROP BL EMIT
+    THEN
+    DROP
+  LOOP
+;
+
 ( SEE support, DEVELOPING.md section 3: decompiling a definition. )
 ( CORE-VOCABULARY.md section 12 itself flagged SEE as the natural )
 ( next step once WORDS proved the chain-walk mechanics work -- )

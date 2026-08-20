@@ -249,3 +249,38 @@ describe('BSAVE / BLOAD (DEVELOPING.md\'s storage section, M33)', () => {
     expect(names).toContain('BLOAD');
   });
 });
+
+describe('PROJECTS (rebel-opcodes.json 145, M51)', () => {
+  function screenText(m: Machine): string {
+    const rows: string[] = [];
+    for (let r = 0; r < m.screen.rows; r++) {
+      rows.push(m.screen.readRowText(r));
+    }
+    return rows.join('');
+  }
+
+  it('lists every saved project name, space separated', () => {
+    const hal = memoryHal();
+    const m = new Machine({ storageHal: hal });
+    m.interpret('PROJECT ALPHA');
+    m.interpret('SAVE');
+    m.interpret('PROJECT BETA');
+    m.interpret('SAVE');
+
+    m.interpret('PROJECTS');
+    const listed = screenText(m);
+    expect(listed).toContain('ALPHA');
+    expect(listed).toContain('BETA');
+  });
+
+  it('prints nothing when no project has ever been saved', () => {
+    const m = new Machine({ storageHal: memoryHal() });
+    m.interpret('PROJECTS');
+    expect(screenText(m).trim()).toBe('');
+  });
+
+  it('is a real dictionary entry, found by tick', () => {
+    const m = new Machine({ storageHal: memoryHal() });
+    expect(() => m.interpret("' PROJECTS DROP")).not.toThrow();
+  });
+});

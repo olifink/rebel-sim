@@ -1044,6 +1044,22 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    case 145: { // PROJECTS ( -- ) prints every project name under
+      // /PROJECTS/ (space separated) — dev-ergonomics sibling to
+      // BANKS (system.fth, M51), same "browse what actually exists"
+      // motivation, but backed by storage.ts's listProjects() instead
+      // of an in-arena table: project names live in the host storage
+      // layer (StorageHal), not the arena, so there's nothing for
+      // pure Forth source to walk directly the way BANKS walks MMAP.
+      for (const name of ctx.storage.listProjects()) {
+        for (const ch of name) {
+          ctx.screen.emit(ch.charCodeAt(0));
+        }
+        ctx.screen.emit(32); // BL, same separator convention as BANKS/WORDS
+      }
+      break;
+    }
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }
