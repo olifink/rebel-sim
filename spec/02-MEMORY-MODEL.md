@@ -345,6 +345,23 @@ narrow exception, not a precedent for treating other subsystems loosely
   `WORDS` lists dictionary entries, is a natural companion to
   `BANK@`/`BANK-SIZE` — walking `name` rather than `tag` for the same
   "which specific one" reason.
+- **`BANK@` MUST be `IMMEDIATE`, dual-mode on `STATE`** (found M53,
+  Oliver, trying `: TESTING BANK@ CHAR ;`): resolve the name at the
+  time `BANK@` itself runs, always — while compiling, that's *now*, at
+  the containing definition's own compile time, and the resolved base
+  address gets compiled in as a `LIT` (`04-FORTH-CORE.md` §5.3's
+  "baked into the definition" pattern, same category as `S"`/`."`/`(`,
+  though those bake in raw text rather than a resolved value); while
+  interpreting, the address is simply pushed, unchanged from before. A
+  plain non-`IMMEDIATE` `BANK@` compiles a call to itself and leaves
+  the *outer compiler's own* token loop to process whatever token
+  follows — which was never meant to be looked up as an ordinary word
+  at all, so compilation fails right there, before the containing
+  definition can ever run. This makes `BANK@`'s resolved address a
+  compile-time constant of the *defining* line, not a fresh per-call
+  lookup — correct for the fixed system banks and any bank already
+  stable when the defining word is compiled, stale if that bank is
+  later dropped and recreated at a new address.
 - **A bank created without an explicit name gets one automatically**: an
   8-digit, zero-padded decimal serial number (e.g. `00000042`), drawn
   from a single monotonically increasing counter. This counter **MUST**

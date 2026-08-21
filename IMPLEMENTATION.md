@@ -3108,6 +3108,74 @@ anywhere.
 token 100's stale note corrected). *Tests:* `bank-access.test.ts`
 (`BANKS` suite), `project.test.ts` (`PROJECTS` suite).
 
+### 1.65 `BANK@` becomes `IMMEDIATE`, dual-mode — usable inside a colon-definition (M53)
+
+Found by Oliver trying `: TESTING BANK@ CHAR ;` — it aborted at
+compile time with `unrecognized word: CHAR`, before `TESTING` ever
+ran. Root cause: `BANK@` (99) was a plain, non-`IMMEDIATE` primitive,
+so `interpretCompiling` (`repl.ts`) just compiled a call to it and
+moved straight on to its *own* next token — `CHAR` — trying to find or
+number-parse *that* as an ordinary word, right there at compile time.
+`BANK@`'s `nextInputToken()` call never got a chance to run; by the
+time `TESTING` itself could execute, the compiler had already choked
+on `CHAR` and the definition never finished.
+
+This is exactly the class of primitive §1.63 already flagged when
+`BANKS` had to fall back to a literal `0` instead of `BANK@ MMAP` for
+the same reason — but `BANK@` is common enough (every "reach a sysvar
+from Forth" idiom, `BANK@ SYSV <offset> + @`, §1.39) that working
+around it felt worse than fixing it, once actually asked.
+
+**Fix: `BANK@` is `IMMEDIATE` now, and dual-mode on `STATE`** — the
+same pattern `S"`/`."` already use (case 68/70), except baking in a
+*resolved value* rather than raw text, since a bank's base address is
+one cell, not a byte run:
+
+```ts
+const name = ctx.nextInputToken().toUpperCase();
+const bank = ctx.banks.findBankByName(name);
+if (bank === undefined) {
+  throw new Error(`unknown bank: ${name}`);
+}
+if (ctx.sysvars.getState() === -1) {
+  compileCell(ctx, findWord(ctx, 'LIT')!.cfa);
+  compileCell(ctx, bank.base);
+} else {
+  s.push(bank.base);
+}
+```
+
+While compiling, the name is resolved *now* — at `BANK@`'s own
+compile-time execution, which `IMMEDIATE` is what makes happen at all
+— and `LIT` + the resolved base address are compiled in, exactly the
+same compiled shape an ordinary numeric literal produces
+(`interpretCompiling`'s own number-parsing path). While interpreting,
+behavior is unchanged: the address is pushed directly. Interactive use
+(`BANK@ SYSV`, `BANKS`' own internals, every existing caller) is
+observably identical either way — only the compiled-into-a-definition
+case changes, from "doesn't work" to "works."
+
+**Tradeoff, stated up front rather than discovered later:** the
+address gets baked in once, at the *defining* line's own compile
+time — correct for the fixed system banks (`SYSV`/`DICT`/`CHAR`/...,
+permanent for a session) and any bank already created and stable when
+the word compiling it is defined, but stale if that bank is later
+dropped and recreated at a new address. No bank-drop primitive exists
+yet, so this is a documented future footgun, not a present one.
+
+**Live-verified** via `chrome-devtools-mcp`: `: TESTING BANK@ CHAR ;`
+now compiles clean (`ok`, no abort); `TESTING .` and `BANK@ CHAR .`
+both print the same address (`81920`); `BANK@ CHAR DUMP` interactively
+still leaves the stack empty afterward.
+
+*Implementation:* `primitives.ts` (case 99), `rebel-opcodes.json`
+(token 99's `immediate` flag + note). *Spec:* `02-MEMORY-MODEL.md`
+§4.7 (the `IMMEDIATE`/dual-mode requirement, stated as a MUST),
+`04-FORTH-CORE.md` §5.3 (moved from the "interactive, not IMMEDIATE"
+list to the "baked into the definition" list, with a note on how it
+differs from `S"`/`."`). *Tests:* `bank-access.test.ts`'s new "`BANK@`
+compiled into a definition (M53)" suite.
+
 ### 1.64 `DUMP`: a classic hex dump (M52)
 
 Requested directly as a follow-on to `BANKS`/`PROJECTS`: 16 rows of 8
@@ -3301,5 +3369,6 @@ exactly as it would be on the bare-metal target.
 | **M50** | `BANK-SIZE` (§1.62), the read-only `Bank.size` counterpart `BANK@` never had — and, found by Oliver while looking at the bank monitor, `BANK@` itself switches from `tag` to `name` lookup: a tag-keyed lookup could only ever reach whichever same-tagged bank was created first, silently hiding every other one, once multiple banks could legitimately share a tag (project `DATA` assets today, a future second `BLKS`-tagged bank). Every boot-created system bank gets an explicit `name` matching its `tag` (`SYSV`/`DSTK`/`RSTK`/`DICT`/`CHAR`/`KMAP` previously got auto-generated serials) so existing `BANK@ SYSV`-style lookups are unaffected; the `BLKS` bank (renamed `EDITOR`, same session) is the first real beneficiary — `BANK@ EDITOR`, not `BANK@ BLKS`. `MemoryMap.findBankAddr()` (M20) deleted as dead code once nothing called it. Also renamed the `BLKS`-tagged boot bank's own `name` to `EDITOR` (its only consumer today, the Screen Editor) — tag stays generic/HAL-level, `name` is free to say what a given instance is for. Resize discussed as a future direction; deliberately given no reserved wording, since `spec/02-MEMORY-MODEL.md` §7 already defers it explicitly and the reason is structural (no compaction/relocation), not just unbuilt. | `repl.ts`, `primitives.ts`, `rebel-opcodes.json`, `mmap.ts`, `bank-access.test.ts`, `block-io.test.ts`, `mmap.test.ts` |
 | **M51** | `BANKS` and `PROJECTS` (§1.63), requested directly: `WORDS`-shaped dev-ergonomics words to browse what banks/projects actually exist. `BANKS` is pure Forth (`system.fth`), walking `MMAP`'s own fixed-stride slot table directly, the same "it's just arena memory" reasoning `WORDS` already applies to the dictionary chain. `PROJECTS` is one new primitive (145) wrapping `storage.ts`'s `listProjects()`, since project names live in `StorageHal`, not the arena. Found and fixed a real, pre-existing `rebel-opcodes.json` doc staleness along the way: `CREATE-BANK`'s (100) own note still described its pre-M30 design (name==tag, no auto-serial), superseded once M30 routed it through `BankTable.createBank()`. | `system.fth`, `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `project.test.ts` |
 | **M52** | `DUMP` (§1.64), a classic hex dump: 16 rows of 8 bytes, 8-digit hex address, space-separated hex bytes, ASCII column with `.` for non-printable. Pure Forth, `system.fth` — no engine changes. New `HEXDIGIT`/`HEX2`/`HEX8` helpers build nibble/byte/cell hex formatting from `/`/`MOD` alone, no native shift primitive needed; `HEX8` extracts all eight nibbles via a `DUP 16 MOD SWAP 16 /` loop and prints them straight off the stack, most-significant-first, since extraction order and LIFO pop order happen to align. | `system.fth`, `dump.test.ts` |
+| **M53** | `BANK@` (§1.65) becomes `IMMEDIATE` and dual-mode on `STATE`, found by Oliver trying `: TESTING BANK@ CHAR ;` — a plain non-`IMMEDIATE` `BANK@` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, since it was never meant to be looked up as an ordinary word. Same `S"`/`."` STATE-dispatch pattern (case 68/70), but bakes in a resolved `LIT` address rather than raw text — the name is resolved at the *defining* word's own compile time now, correct for the fixed system banks and any already-stable bank, stale only if that bank is later dropped and recreated. Interactive behavior (`BANK@ SYSV`, `BANKS`' internals) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -71,6 +71,60 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
   });
 });
 
+// M53 (found by Oliver, trying `: TESTING BANK@ CHAR ;`): BANK@ compiled
+// as a plain non-IMMEDIATE call left the following name token for the
+// compiler's own outer loop to choke on, since it was never meant to be
+// looked up as an ordinary word. Fixed by making BANK@ IMMEDIATE and
+// dual-mode on STATE — same S"/."-style pattern, but baking in a
+// resolved LIT address rather than raw text.
+describe('BANK@ compiled into a definition (M53)', () => {
+  it('resolves the name at compile time and bakes its address in as a literal', () => {
+    const m = new Machine();
+    const sysv = m.banks.findBank('SYSV')!;
+
+    m.interpret(': GET-SYSV BANK@ SYSV ;');
+    m.interpret('GET-SYSV');
+    expect(m.stack.toArray()).toEqual([sysv.base]);
+  });
+
+  it('is stack-neutral at runtime — no leftover input-consumption side effect', () => {
+    const m = new Machine();
+    m.interpret(': GET-DICT BANK@ DICT ;');
+
+    m.interpret('DEPTH');
+    const depthBefore = m.stack.pop();
+
+    m.interpret('GET-DICT');
+    m.stack.pop();
+    m.interpret('DEPTH');
+    expect(m.stack.pop()).toBe(depthBefore);
+  });
+
+  it('still resolves and pushes immediately when used interactively, unaffected by IMMEDIATE', () => {
+    const m = new Machine();
+    const dict = m.banks.findBank('DICT')!;
+
+    m.interpret('BANK@ DICT');
+    expect(m.stack.toArray()).toEqual([dict.base]);
+  });
+
+  it('still throws on an unknown name at compile time, before the definition is even built', () => {
+    const m = new Machine();
+    expect(() => m.interpret(': BAD BANK@ NOPE ;')).toThrow('unknown bank: NOPE');
+  });
+
+  it('composes with arithmetic in the same definition, same as the interactive form', () => {
+    const m = new Machine();
+    const stateAddr = m.sysvars.fieldOffset('FORTH', 'STATE');
+    const sysv = m.banks.findBank('SYSV')!;
+    const offset = stateAddr - sysv.base;
+
+    m.interpret(`: GET-STATE BANK@ SYSV ${offset} + @ ;`);
+    m.interpret('GET-STATE');
+    expect(m.stack.toArray()).toEqual([m.sysvars.getState()]);
+  });
+});
+
 describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
   it('resolves a known bank name to the same size findBank() reports', () => {
     const m = new Machine();

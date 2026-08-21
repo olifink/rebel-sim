@@ -616,7 +616,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.clear();
       throw new Error('ABORT');
 
-    case 99: { // BANK@ ( "name" -- addr ) — DEVELOPING.md §10/§12, M18/M20.
+    case 99: { // BANK@ ( "name" -- addr ) IMMEDIATE, dual-mode — DEVELOPING.md §10/§12, M18/M20.
       // Resolves by name, not tag (tags repeat by design once multiple
       // banks share one — findBankByName is the real, uniqueness-backed
       // lookup; a tag-keyed lookup could only ever reach whichever same-
@@ -625,12 +625,29 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // so `BANK@ SYSV`-style lookups for the fixed system banks are
       // unaffected by this — only banks that share a tag (BLKS ->
       // EDITOR, project DATA assets, ...) need their real name instead.
+      //
+      // IMMEDIATE + dual-mode (Oliver, M53): a plain non-immediate
+      // BANK@ compiled a call to itself into the definition, then left
+      // the compiler's own outer loop to choke on the name token that
+      // was supposed to follow it at runtime ("`: TESTING BANK@ CHAR
+      // ;`" tried to look CHAR up as a word right there at compile
+      // time, long before TESTING ever ran) — same S"/."'s-style fix
+      // (case 68/70): resolve the name right now, at compile time, and
+      // bake the result in as a literal, so the compiled word needs no
+      // further name lookup at runtime. Mirrors S"'s dual dispatch on
+      // STATE, not S"'s inline-bytes mechanism — a bank's address is
+      // one cell, not a byte run, so LIT is the right compiled form.
       const name = ctx.nextInputToken().toUpperCase();
       const bank = ctx.banks.findBankByName(name);
       if (bank === undefined) {
         throw new Error(`unknown bank: ${name}`);
       }
-      s.push(bank.base);
+      if (ctx.sysvars.getState() === -1) {
+        compileCell(ctx, findWord(ctx, 'LIT')!.cfa);
+        compileCell(ctx, bank.base);
+      } else {
+        s.push(bank.base);
+      }
       break;
     }
 

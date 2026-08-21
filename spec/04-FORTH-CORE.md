@@ -463,19 +463,25 @@ typed directly at the prompt.
 
 **Two different consumption patterns follow from this, and conflating
 them is the mistake to avoid.** A defining/utility word invoked
-*interactively* (`CREATE`, `VARIABLE`, `CONSTANT`, `BANK@`,
-`CREATE-BANK`, `PROJECT`, `RESTORE`, `BSAVE`, `BLOAD`, `'` itself, and
-§7.2's `SEE`/`HIDE`/`FORGET`) is correctly **not** `IMMEDIATE` — it's
-meant to consume from whatever line is live *when it runs*, which is
-exactly the caller's own line, whether that word was typed directly or
-reached through any number of ordinary deferred calls (the `CONST`/
-`FIVE` example above). A word whose raw text is meant to be **baked
-into the definition that contains it** (`S"`, `."`, `(`, and the
+*interactively* (`CREATE`, `VARIABLE`, `CONSTANT`, `CREATE-BANK`,
+`PROJECT`, `RESTORE`, `BSAVE`, `BLOAD`, `'` itself, and §7.2's
+`SEE`/`HIDE`/`FORGET`) is correctly **not** `IMMEDIATE` — it's meant to
+consume from whatever line is live *when it runs*, which is exactly
+the caller's own line, whether that word was typed directly or reached
+through any number of ordinary deferred calls (the `CONST`/`FIVE`
+example above). A word whose raw text is meant to be **baked into the
+definition that contains it** (`S"`, `."`, `(`, `BANK@`, and the
 `…-XT`-resolving use of `'` in §6.5's control-flow layer) needs the
 opposite: it must run at *that containing definition's own compile
 time*, which requires `IMMEDIATE` — deferred, it would instead consume
 text from whatever line later calls the containing word. §6.5's note
 and §6.7's `S"`/`."`/`(` rows have the worked-through reasoning.
+`BANK@` (`02-MEMORY-MODEL.md` §4.7) is the odd one out in this second
+group: it bakes in a resolved *value* (the bank's base address,
+compiled as `LIT`), not raw text like `S"`/`."` do — found M53, after
+a plain non-`IMMEDIATE` `BANK@` inside a colon definition left its own
+compiler trying (and failing) to look up the following name token as
+an ordinary word.
 
 ### 5.4 Number parsing
 
