@@ -93,15 +93,15 @@ const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
 // mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
 // ownership: deferred") — Rebel-Sim boots into this mode and stays.
-// EXPERIMENTAL bump 320x240 -> 512x384 (same 4:3 ratio, so nothing
-// aspect-ratio-dependent needs to change) to see whether everything
-// still holds together at a bigger resolution — not yet a settled
-// decision, matching app.ts's FRAMEBUFFER_WIDTH/HEIGHT (kept in sync
-// by hand, no shared constant between the two packages). Tried 640x480
-// first; dialed back to this once bigger-than-needed turned out to be
-// the actual finding, not a rendering problem.
-const DEFAULT_SCREEN_WIDTH = 512;
-const DEFAULT_SCREEN_HEIGHT = 384;
+// 640x480 (80x60 chars at 8x8), settled Oliver, M54: an earlier 320x240
+// -> 512x384 bump was dialed back after 640x480 first read as
+// bigger-than-needed, but 80 columns turned out to suit the editor
+// better than the original 512-wide assumption (which was sized around
+// a full-screen editor matching 1024-byte blocks) — kept, not
+// experimental. Matches app.ts's FRAMEBUFFER_WIDTH/HEIGHT (kept in sync
+// by hand, no shared constant between the two packages).
+const DEFAULT_SCREEN_WIDTH = 640;
+const DEFAULT_SCREEN_HEIGHT = 480;
 const DEFAULT_CHAR_CELL_W = 8; // matches the ZX Spectrum 8x8 font port
 const DEFAULT_CHAR_CELL_H = 8;
 const DEFAULT_INK = 0x00ff00; // green

@@ -22,9 +22,9 @@ import { buildZip } from './zip-writer.js';
 // The real framebuffer resolution (matches repl.ts's DEFAULT_SCREEN_WIDTH/
 // HEIGHT — the engine has no reason to expose these, they're boot-fixed
 // per FORTH-ARCHITECTURE.md's current "no runtime mode change" state).
-// EXPERIMENTAL bump 320x240 -> 512x384 — see repl.ts's own constants.
-const FRAMEBUFFER_WIDTH = 512;
-const FRAMEBUFFER_HEIGHT = 384;
+// 640x480, settled — see repl.ts's own constants for the M54 history.
+const FRAMEBUFFER_WIDTH = 640;
+const FRAMEBUFFER_HEIGHT = 480;
 const TARGET_CSS_WIDTH = 1024; // ~2x at devicePixelRatio 1, same on-screen scale factor as before
 
 @Component({
