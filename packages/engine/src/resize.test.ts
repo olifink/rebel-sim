@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
 import { StorageHal } from './storage.js';
-import { BankSizeL, BankSizeM } from './banks.js';
+import { roundToSizeClass } from './banks.js';
+
+// DICT boots at 65536 (repl.ts's DICT_BANK_SIZE); resizing to 70000
+// rounds up to the next power-of-two class above it (M55's doubling
+// ladder), not the requested value itself.
+const DICT_DEFAULT_SIZE = 65536;
+const DICT_RESIZED = roundToSizeClass(70000)!;
 
 /** Same in-memory StorageHal shape as storage.test.ts's memoryHal() —
  * duplicated rather than shared/exported, matching that file's own
@@ -48,10 +54,10 @@ function memoryHal(): StorageHal {
 describe('BANK-RESIZE (146)', () => {
   it('rounds up to a size class and is visible immediately via a fresh BANK-SIZE query', () => {
     const m = new Machine();
-    expect(m.banks.findBank('DICT')!.size).toBe(BankSizeM);
+    expect(m.banks.findBank('DICT')!.size).toBe(DICT_DEFAULT_SIZE);
     m.interpret('70000 BANK-RESIZE DICT');
     m.interpret('BANK-SIZE DICT');
-    expect(m.stack.pop()).toBe(BankSizeL);
+    expect(m.stack.pop()).toBe(DICT_RESIZED);
   });
 
   it('does not move the bank’s own base', () => {
@@ -141,7 +147,7 @@ describe('resize-triggered restart (Inner’s ‘restart-project’ StepSignal, 
 
     const m2 = new Machine({ storageHal: hal, bootProject: project });
 
-    expect(m2.banks.findBank('DICT')!.size).toBe(BankSizeL);
+    expect(m2.banks.findBank('DICT')!.size).toBe(DICT_RESIZED);
     // Content restored: FOO, defined before the resize, still works.
     m2.interpret('FOO');
     expect(m2.stack.pop()).toBe(42);
@@ -163,7 +169,7 @@ describe('resize-triggered restart (Inner’s ‘restart-project’ StepSignal, 
     const m2 = new Machine({ storageHal: hal, bootProject: m1.pendingRestartProject() });
     const dstkAfter = m2.banks.findBank('DSTK')!;
 
-    expect(dstkAfter.base).toBe(dstkBefore.base + (BankSizeL - BankSizeM));
+    expect(dstkAfter.base).toBe(dstkBefore.base + (DICT_RESIZED - DICT_DEFAULT_SIZE));
   });
 
   it('clears the data/return stacks across the restart, even though only DICT (not DSTK) was resized', () => {
@@ -204,7 +210,7 @@ describe('resize-triggered restart (Inner’s ‘restart-project’ StepSignal, 
 
   it('a bootProject with nothing actually saved boots exactly like an empty Machine', () => {
     const m = new Machine({ storageHal: memoryHal(), bootProject: 'NOSAVE' });
-    expect(m.banks.findBank('DICT')!.size).toBe(BankSizeM);
+    expect(m.banks.findBank('DICT')!.size).toBe(DICT_DEFAULT_SIZE);
     m.interpret('1 2 +');
     expect(m.stack.pop()).toBe(3);
   });

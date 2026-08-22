@@ -1,16 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
-import { BankTable, BankSizeXS, BankSizeS, BankSizeM, roundToSizeClass } from './banks.js';
+import { BankTable, MIN_BANK_SIZE, MAX_BANK_SIZE, roundToSizeClass } from './banks.js';
 
+// M55 (Oliver): size classes double (4 KiB, 8 KiB, 16 KiB, ...) instead
+// of quadrupling — finer-grained rounding, no more per-class names.
 describe('roundToSizeClass', () => {
-  it('rounds up to the smallest class that fits', () => {
-    expect(roundToSizeClass(1)).toBe(BankSizeXS);
-    expect(roundToSizeClass(BankSizeXS)).toBe(BankSizeXS);
-    expect(roundToSizeClass(BankSizeXS + 1)).toBe(BankSizeS);
-    expect(roundToSizeClass(BankSizeS + 1)).toBe(BankSizeM);
+  it('rounds up to the smallest power-of-two class that fits, floored at MIN_BANK_SIZE', () => {
+    expect(roundToSizeClass(1)).toBe(MIN_BANK_SIZE);
+    expect(roundToSizeClass(MIN_BANK_SIZE)).toBe(MIN_BANK_SIZE);
+    expect(roundToSizeClass(MIN_BANK_SIZE + 1)).toBe(MIN_BANK_SIZE * 2);
+    expect(roundToSizeClass(MIN_BANK_SIZE * 2 + 1)).toBe(MIN_BANK_SIZE * 4);
   });
 
-  it('returns undefined when nothing fits', () => {
+  it('is exactly the doubling ladder from 4 KiB to 4 MiB', () => {
+    let expected = MIN_BANK_SIZE;
+    while (expected <= MAX_BANK_SIZE) {
+      expect(roundToSizeClass(expected)).toBe(expected);
+      expected *= 2;
+    }
+  });
+
+  it('returns undefined once the request exceeds MAX_BANK_SIZE', () => {
+    expect(roundToSizeClass(MAX_BANK_SIZE)).toBe(MAX_BANK_SIZE);
+    expect(roundToSizeClass(MAX_BANK_SIZE + 1)).toBeUndefined();
     expect(roundToSizeClass(Number.MAX_SAFE_INTEGER)).toBeUndefined();
   });
 });

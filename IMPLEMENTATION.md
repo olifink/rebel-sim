@@ -108,13 +108,15 @@ name, so they all use auto-generated serials; M5's project-asset banks
 saved file's basename — no separate mapping between "what a bank is
 called" and "what file represents it."
 
-Bank sizes are drawn from a small fixed ladder of **size classes** — XS
-(4 KiB) through XXL (4 MiB), each 4x the previous — rather than
-arbitrary byte counts. Most banks (`SYSV`, `DSTK`, ...) just happen to
-be sized in code to match a class already; the ladder's real payoff is
-loading a file of unknown length (§1.22): round its size up to the
-smallest class that fits, and that's the bank's size — a lookup, not a
-calculation.
+Bank sizes are drawn from a fixed ladder of **size classes** — every
+power of two from 4 KiB (`MIN_BANK_SIZE`) through 4 MiB
+(`MAX_BANK_SIZE`), M55 — rather than arbitrary byte counts. (An earlier
+revision used six named classes, `XS` through `XXL`, each 4x the
+previous, with no class in between; §1.67 covers why that changed.)
+Most banks (`SYSV`, `DSTK`, ...) just happen to be sized in code to
+match a class already; the ladder's real payoff is loading a file of
+unknown length (§1.22): round its size up to the smallest class that
+fits, and that's the bank's size — a lookup, not a calculation.
 
 *Implementation:* `BankTable` (`banks.ts`) — `createBank(tag, size,
 name?)` / `findBank(tag, name?)` / `findBankByName(name)` /
@@ -3286,6 +3288,66 @@ nothing was resized, and the full resize round trip: restart detection,
 size/base re-derivation, stack clearing, and a dynamic bank surviving
 the restart).
 
+### 1.67 Size classes double instead of quadrupling, and lose their letter names (M55, Oliver's idea)
+
+Prompted by using the resize mechanism (§1.66) for the first time:
+"this almost feels elegantly simple and restrained" about the resize
+itself, followed immediately by "I think we need to think about the
+allocation size classes ... the jumps we have are a bit big and
+unpredictable." Fair — the old ladder (`XS` 4 KiB, `S` 16 KiB, `M`
+64 KiB, `L` 256 KiB, `XL` 1 MiB, `XXL` 4 MiB) grew 4x per step, so a
+request just over a class boundary could round up by nearly 4x. The
+explicit original goal of having size classes at all — banks are
+handed out from a small fixed ladder specifically so `BANK-RESIZE`/
+`CREATE-BANK` can't degrade into arbitrary-sized `malloc()`-style
+allocations — still holds; only the ladder's *granularity* needed
+revisiting.
+
+**Fix: plain doubling, no named classes.** `roundToSizeClass(bytes)`
+computes the next power of two directly (a `while` loop doubling from
+`MIN_BANK_SIZE`) instead of scanning a lookup array of six named
+constants:
+
+```ts
+export const MIN_BANK_SIZE = 4 * 1024;
+export const MAX_BANK_SIZE = 4 * 1024 * 1024;
+
+export function roundToSizeClass(bytes: number): number | undefined {
+  if (bytes > MAX_BANK_SIZE) return undefined;
+  let size = MIN_BANK_SIZE;
+  while (size < bytes) size *= 2;
+  return size;
+}
+```
+
+This halves worst-case rounding waste (under 2x instead of under 4x)
+while *removing* code rather than adding it — no maintained
+`SIZE_CLASSES` array, and no more `BankSizeXS`/`S`/`M`/`L`/`XL`/`XXL`
+constants to keep in sync across every consumer. A bank's size class is
+simply its own rounded byte count now; nothing else names it.
+
+**A satisfying, unplanned consequence:** every bank size chosen before
+this change (4096, 65536, ...) was already a power of two — the old
+4x-per-step classes were exactly the *even* powers of two (2^12, 2^14,
+2^16, ...), and this ladder just fills in the odd ones between them
+(2^13, 2^15, ...). So no existing bank's actual byte size changes; only
+a *new*, in-between request (like `BANK-RESIZE`'s own `70000 BANK-RESIZE
+DICT` in §1.66's live check, which now rounds to 131072 instead of the
+old scheme's 262144) rounds more tightly.
+
+*Implementation:* `banks.ts` (`MIN_BANK_SIZE`/`MAX_BANK_SIZE` replace
+the six named constants and `SIZE_CLASSES`; `roundToSizeClass`
+rewritten), `index.ts` (re-export list updated), `mmap.ts` (comments
+only — no behavior change, `MMAP_SIZE` is still 4096). *Spec:*
+`02-MEMORY-MODEL.md` §4.3 (the doubling rule replaces the six-class
+table), §5.3/§5.4 (letter references removed, worked-example table
+loses its Class column — no bank's Base/Size numbers change),
+`03-SYSVARS.md` (two "XS class" mentions reworded). *Tests:*
+`banks.test.ts`'s `roundToSizeClass` suite rewritten for the new
+ladder; `resize.test.ts`/`bank-access.test.ts`/`storage.test.ts`/
+`mmap.test.ts` comments and imports updated, no test *behavior*
+changes beyond `roundToSizeClass`'s own new rounding points.
+
 ### 1.64 `DUMP`: a classic hex dump (M52)
 
 Requested directly as a follow-on to `BANKS`/`PROJECTS`: 16 rows of 8
@@ -3403,7 +3465,7 @@ exactly as it would be on the bare-metal target.
 | **Project** | A folder of asset files — one file per bank, each an exact byte dump. Editable, in-progress material (as opposed to a cart). |
 | **Cart** | A single flat baked binary, meant only to be run, not edited. Baking (producing one from a project) isn't built yet. |
 | **Asset file** | One project file, always `<bank-name>.<extension>` — the extension maps to the bank's `tag` (`DATA`↔`.DAT`, etc.), preceded by a small 6-byte sanity header. |
-| **Size class** | One of a fixed ladder of bank sizes (XS 4 KiB through XXL 4 MiB, each 4x the previous). A loaded file's bank size is looked up (round up to the smallest class that fits), not calculated. |
+| **Size class** | One of a fixed ladder of bank sizes — every power of two from 4 KiB through 4 MiB (M55; an earlier revision used six named classes, each 4x the previous). A loaded file's bank size is looked up (round up to the smallest class that fits), not calculated. |
 | **`StorageHal`** | Rebel-Sim's HAL interface for project/cart file I/O: synchronous `ensureDir`/`listFiles`/`readFile`/`writeFile` (M33 — originally `Promise`-based). Backed by `localStorage` in `packages/app`; defaults to a no-op (`NULL_STORAGE_HAL`) so engine tests don't need a real browser environment. |
 | **Generator (JS)** | A function that can pause itself mid-execution (`yield`) and be resumed later exactly where it left off, with its local variables intact. What `executeXT` is built on (§1.23) — the mechanism blocking `KEY` needs. |
 | **`StepSignal`** | What `executeXT`'s generator yields on every pause: `'progress'` (one step completed, likely more to do) or `'blocked'` (waiting on the bound `Channel`, the same point will be retried on resume). |
@@ -3481,5 +3543,6 @@ exactly as it would be on the bare-metal target.
 | **M52** | `DUMP` (§1.64), a classic hex dump: 16 rows of 8 bytes, 8-digit hex address, space-separated hex bytes, ASCII column with `.` for non-printable. Pure Forth, `system.fth` — no engine changes. New `HEXDIGIT`/`HEX2`/`HEX8` helpers build nibble/byte/cell hex formatting from `/`/`MOD` alone, no native shift primitive needed; `HEX8` extracts all eight nibbles via a `DUP 16 MOD SWAP 16 /` loop and prints them straight off the stack, most-significant-first, since extraction order and LIFO pop order happen to align. | `system.fth`, `dump.test.ts` |
 | **M53** | `BANK@` (§1.65) becomes `IMMEDIATE` and dual-mode on `STATE`, found by Oliver trying `: TESTING BANK@ CHAR ;` — a plain non-`IMMEDIATE` `BANK@` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, since it was never meant to be looked up as an ordinary word. Same `S"`/`."` STATE-dispatch pattern (case 68/70), but bakes in a resolved `LIT` address rather than raw text — the name is resolved at the *defining* word's own compile time now, correct for the fixed system banks and any already-stable bank, stale only if that bank is later dropped and recreated. Interactive behavior (`BANK@ SYSV`, `BANKS`' internals) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 | **M54** | Bank resizing (§1.66), Oliver's idea: `BANK-RESIZE` edits a bank's `MMAP` size field only, inert until a `RESTORE` that detects the saved size no longer matches what the running `Machine` actually booted with (`bootBankSize`, not a live re-read, which would always agree with a just-edited `MMAP` cell) triggers a full restart instead of an in-place patch — `inner.ts`'s `dispatch()` special-cases `RESTORE` the same way `COLD` already is, yielding a new `'restart-project'` `StepSignal`/`StepStatus` the host (`app.ts`) reboots into via `Machine`'s new `bootProject` option, which re-derives every bank's base from the saved sizes through the ordinary bump allocator before restoring content. `DSTK`/`RSTK` are unconditionally cleared across that restart — their live `SP`/`RP` are high-end-relative absolute addresses a relayout can silently invalidate even when their own size didn't change, a correctness trap found while designing this. Reordering `DICT` right after `SYSV` (this same session, just before M54) is what keeps `DICT`'s own base pinned regardless of how many times it's resized. | `mmap.ts`, `banks.ts`, `storage.ts`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `resize.test.ts` |
+| **M55** | Size classes double instead of quadrupling, and lose their letter names (§1.67), Oliver's idea, prompted right after using M54's resize mechanism for the first time: the old 4x-per-step ladder (`XS`..`XXL`) could round a request up by nearly 4x; plain doubling from `MIN_BANK_SIZE` (4 KiB) to `MAX_BANK_SIZE` (4 MiB) halves that worst case while removing the maintained `SIZE_CLASSES` lookup array and its six named constants entirely — `roundToSizeClass` is now a direct power-of-two computation, no table. Every bank size chosen before this change was already a power of two (the old classes were exactly the even powers of two), so no existing bank's actual byte size changes — only new, in-between requests round more tightly now. | `banks.ts`, `index.ts`, `mmap.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `banks.test.ts`, `resize.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `mmap.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -13,7 +13,7 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
     expect(mmapBank.flags).toBe(BankFlagResident | BankFlagActive);
   });
 
-  it('is exactly one XS size class (4096 bytes), no longer an exception to the size-class rule (spec §5.3)', () => {
+  it('is exactly one 4 KiB size class, no longer an exception to the size-class rule (spec §5.3)', () => {
     // Comfortably covers the default 64-slot table's raw 1552-byte
     // requirement (16-byte header + 64 * 24-byte slots) — the
     // module-load-time assertion in mmap.ts is what actually guards
@@ -38,7 +38,7 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
     const banks = new BankTable(new Arena(1 << 16));
     const a = banks.createBank('DSTK', 64);
     // 4 KiB-aligned (spec/02-MEMORY-MODEL.md §4.4) — trivially exact
-    // now that MMAP_SIZE (4096, XS-class, §5.3) is itself already a
+    // now that MMAP_SIZE (4096, MIN_BANK_SIZE-class, §5.3) is itself already a
     // 4 KiB multiple; the `& ~4095` mask is a no-op here, kept so this
     // assertion still documents the real rule rather than a coincidence.
     expect(a.base).toBe((MMAP_SIZE + 4095) & ~4095);
@@ -172,7 +172,7 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     expect(addr).toBe(expectedBase);
 
     // A second creation lands right after the first, no gap — right
-    // after SCR1's *rounded* size class (XS, 4096), not its raw
+    // after SCR1's *rounded* size class (4096), not its raw
     // requested 256 bytes (spec/02-MEMORY-MODEL.md §4.3).
     m.interpret('64 CREATE-BANK SCR2');
     const addr2 = m.stack.pop();
@@ -199,7 +199,7 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     expect(bank).toMatchObject({
       tag: 'GAP1',
       base: addr,
-      size: 4096, // rounded up from the requested 128 (spec/02-MEMORY-MODEL.md §4.3, XS class)
+      size: 4096, // rounded up from the requested 128 (spec/02-MEMORY-MODEL.md §4.3)
       flags: BankFlagResident | BankFlagActive,
     });
     // M27, DEVELOPING.md §20: named after an auto-generated serial now,

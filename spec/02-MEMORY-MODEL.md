@@ -153,17 +153,27 @@ Flag bits (bit-for-bit stable across every conformant target — a target
 ### 4.3 Standard size classes
 
 Every **carved** bank (§4.4 — i.e. every bank that isn't external, §4.5,
-or the bank table itself, §5) **MUST** occupy exactly one of six fixed
-size classes, each 4× the previous:
+or the bank table itself, §5) **MUST** occupy exactly one size class: the
+smallest power of two, no smaller than `MIN_BANK_SIZE` (4 KiB — ARM's
+native page size, a nod to alignment rather than an MMU-paging
+requirement) and no larger than `MAX_BANK_SIZE` (4 MiB), that fits the
+requested size. This is a doubling ladder — 4 KiB, 8 KiB, 16 KiB, 32
+KiB, 64 KiB, 128 KiB, 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB — eleven
+classes total, each exactly twice the one below it.
 
-| Class | Size | Typical use |
-|---|---|---|
-| XS | 4 KiB | Sysvars, small control/state tables, small per-arena scratch regions |
-| S | 16 KiB | Small sprite sets, glyph subsets, dictionary chunks |
-| M | 64 KiB | Font banks, working dictionary space |
-| L | 256 KiB | Screen/display buffers at typical low-resolution modes |
-| XL | 1 MiB | Larger screen modes, sprite sheets, cart payloads |
-| XXL | 4 MiB | Large carts, asset-heavy banks |
+[Revised M55, Oliver: "the jumps we have are a bit big and
+unpredictable"] An earlier revision of this section specified six named
+classes (`XS` 4 KiB through `XXL` 4 MiB), each **4×** the previous, with
+no class in between. That was replaced by the doubling ladder above for
+one reason: a request just over a class boundary used to round up by as
+much as 4×; doubling bounds that same worst case at under 2×. No class
+carries a separate name any more — a bank's size class is simply its
+own rounded byte count, not a lookup against a maintained table. Every
+bank size chosen under the old rule (4096, 65536, ...) was already a
+power of two — the old classes were exactly the *even* powers of two;
+this ladder just fills in the odd ones between them — so nothing that
+already existed needs to change size under this revision, only new,
+in-between requests round more tightly now.
 
 **There is no path to an arbitrary exact byte size for a carved bank.**
 A subsystem whose natural content is smaller than a class (a character
@@ -174,18 +184,19 @@ uniform and every bank's footprint predictable from its class alone,
 and the wasted space is intentionally not worth optimizing away (§1's
 "about feel, not efficiency" framing: Pi-class and RP2350-class targets
 both have orders of magnitude more memory than this costs). A subsystem
-needing more space than the largest single class (`XXL`) takes
-**multiple banks**, never a special oversized allocation — there is no
-seventh class and no escape hatch.
+needing more space than the largest single class (`MAX_BANK_SIZE`,
+4 MiB) takes **multiple banks**, never a special oversized allocation —
+there is no class above that and no escape hatch.
 
 This rule applies uniformly to every source of a bank-size request,
 including a Forth-level or host-level dynamic bank-creation
 call (`04-FORTH-CORE.md`'s `CREATE-BANK`-equivalent primitive, if a
-target implements one): such a call takes a *requested* byte count and
-**MUST** round it up to the smallest class that fits before carving
-anything, exactly like loading an oversized project asset already does
-(`01-HAL.md` §6.3). It **MUST NOT** honor an arbitrary caller-supplied
-byte count as the bank's actual size.
+target implements one), and to a resize of an *existing* bank (§4.8):
+such a call takes a *requested* byte count and **MUST** round it up to
+the smallest class that fits before carving anything, exactly like
+loading an oversized project asset already does (`01-HAL.md` §6.3). It
+**MUST NOT** honor an arbitrary caller-supplied byte count as the
+bank's actual size.
 
 ### 4.4 Allocation: a 4 KiB-aligned bump allocator
 
@@ -520,10 +531,10 @@ fits, exactly like any other carved bank's content-driven request
 bank-size request" already covered this case; `MMAP` was simply never
 routed through it). With the recommended default of `MAX_SLOTS = 64`,
 the raw requirement is 1552 bytes, comfortably inside the smallest
-class, **XS (4 KiB)** — so `MMAP`'s declared size is 4096 bytes, not
-1552. A target with a larger `MAX_SLOTS` recomputes the same way; only
-a `MAX_SLOTS` whose raw requirement exceeds 4 KiB (more than roughly
-169 slots) would round to a larger class instead.
+class, **`MIN_BANK_SIZE` (4 KiB)** — so `MMAP`'s declared size is 4096
+bytes, not 1552. A target with a larger `MAX_SLOTS` recomputes the same
+way; only a `MAX_SLOTS` whose raw requirement exceeds 4 KiB (more than
+roughly 169 slots) would round to a larger class instead.
 
 There is now no exception left in this section at all: `MMAP`'s
 placement still goes through the ordinary 4 KiB-aligned allocator
@@ -537,22 +548,22 @@ anything anywhere in the sequence (§5.4).
 ### 5.4 Worked example
 
 The bank sequence below (`MMAP` implicitly first, then `SYSV`, `DSTK`,
-`RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`, all XS-class except `DICT`
-at M-class) is exactly the kind of arena an implementation this suite
-governs produces, computed per §4.3/§4.4/§5.3 with `MAX_SLOTS = 64`
-(`MMAP`'s raw requirement, `16 + 64×24 = 1552` bytes, rounds up to the
-XS class, 4096 bytes — §5.3):
+`RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`, all at the minimum size class
+except `DICT`) is exactly the kind of arena an implementation this
+suite governs produces, computed per §4.3/§4.4/§5.3 with
+`MAX_SLOTS = 64` (`MMAP`'s raw requirement, `16 + 64×24 = 1552` bytes,
+rounds up to the minimum class, 4096 bytes — §5.3):
 
-| Bank | Base | Size | Class |
-|---|---|---|---|
-| `MMAP` | `0x00000` (0) | 4096 | XS (§5.3) |
-| `SYSV` | `0x01000` (4096) | 4096 | XS |
-| `DSTK` | `0x02000` (8192) | 4096 | XS |
-| `RSTK` | `0x03000` (12288) | 4096 | XS |
-| `DICT` | `0x04000` (16384) | 65536 | M |
-| `CHAR` | `0x14000` (81920) | 4096 | XS |
-| `KMAP` | `0x15000` (86016) | 4096 | XS |
-| `WORK` | `0x16000` (90112) | 4096 | XS |
+| Bank | Base | Size |
+|---|---|---|
+| `MMAP` | `0x00000` (0) | 4096 (§5.3) |
+| `SYSV` | `0x01000` (4096) | 4096 |
+| `DSTK` | `0x02000` (8192) | 4096 |
+| `RSTK` | `0x03000` (12288) | 4096 |
+| `DICT` | `0x04000` (16384) | 65536 |
+| `CHAR` | `0x14000` (81920) | 4096 |
+| `KMAP` | `0x15000` (86016) | 4096 |
+| `WORK` | `0x16000` (90112) | 4096 |
 
 Every base lands pre-aligned with no rounding step actually doing
 anything anywhere in this sequence — the direct consequence of every
@@ -560,7 +571,7 @@ bank, `MMAP` included now, always being an exact 4 KiB-multiple size
 class (§4.4). **[Revised]** an earlier version of this table had `MMAP`
 at its old, non-class-sized 1552 bytes, which meant `SYSV`'s placement
 right after it was the one spot the round-up step actually did
-something; with `MMAP` itself now XS-class-sized, that was the last
+something; with `MMAP` itself now size-class-rounded, that was the last
 remaining case where rounding had real work to do, and it's gone too —
 every bank in a conformant target's sequence, this one included,
 already lands on a 4 KiB boundary without the allocator needing to
@@ -734,7 +745,7 @@ one becomes real and load-bearing somewhere, not before:
 | Cell is exactly 32-bit, little-endian, signed/unsigned by operation | §2 |
 | Addresses are per-arena offsets; a raw host pointer never becomes a Forth cell value | §3 |
 | A single arena never addresses ≥ 2^32 bytes | §3, §6.3 |
-| Every carved bank, including `MMAP` itself, occupies exactly one size class (XS–XXL); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
+| Every carved bank, including `MMAP` itself, occupies exactly one size class (a power of two, 4 KiB–4 MiB); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
 | Bump allocator 4 KiB-aligns every carved bank's base, including absolute-address alignment if the arena's own allocation might not already be page-aligned | §4.4 |
 | External banks are registered, don't consume the free cursor, and don't need a size class | §4.5 |
 | `@`/`!` resolution reaches an `EXTERNAL` bank's real backing store (not just the arena's own buffer) on any target where the two aren't automatically the same memory | §4.5 |

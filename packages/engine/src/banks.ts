@@ -45,17 +45,23 @@ export const BANK_NAME_LEN = 8;
 
 const DEFAULT_FLAGS = BankFlagResident | BankFlagActive;
 
-/** Standard bank size classes (docs/MEMORY-MODEL.md §3.1): each 4x the
- * previous. XS matches ARM's native page size — a nod to alignment, not
- * an MMU-paging requirement. */
-export const BankSizeXS = 4 * 1024;
-export const BankSizeS = 16 * 1024;
-export const BankSizeM = 64 * 1024;
-export const BankSizeL = 256 * 1024;
-export const BankSizeXL = 1024 * 1024;
-export const BankSizeXXL = 4096 * 1024;
-
-const SIZE_CLASSES = [BankSizeXS, BankSizeS, BankSizeM, BankSizeL, BankSizeXL, BankSizeXXL];
+/** M55 (spec/02-MEMORY-MODEL.md §4.3): a bank's size class is the next
+ * power of two, floored at `MIN_BANK_SIZE` (ARM's native page size — a
+ * nod to alignment, not an MMU-paging requirement) and capped at
+ * `MAX_BANK_SIZE` (needing more than that takes multiple banks, not one
+ * bigger one). Replaces the earlier six *named* classes (`XS`..`XXL`,
+ * each 4x the previous, Oliver: "the jumps we have are a bit big and
+ * unpredictable") — doubling instead of quadrupling halves worst-case
+ * rounding waste (under 2x instead of under 4x) while dropping the
+ * maintained lookup table and its per-class names entirely: a bank's
+ * size class is simply its own rounded byte count, nothing else names
+ * it. Every bank size chosen before this change (4096/65536/...) was
+ * already a power of two under the old 4x-per-step ladder too (the old
+ * classes were exactly the *even* powers of two — this just fills in
+ * the odd ones between them), so no existing bank's actual byte size
+ * changes; only new, in-between requests round more tightly now. */
+export const MIN_BANK_SIZE = 4 * 1024;
+export const MAX_BANK_SIZE = 4 * 1024 * 1024;
 
 /** FORTH-ARCHITECTURE.md §7: the fixed unit `hal_block_read`/
  * `hal_block_write` (primitives.ts's `(BLOCK-READ)`/`(BLOCK-WRITE)`, 140/
@@ -71,7 +77,14 @@ export const BLOCK_SIZE = 1024;
  * (`CStorageModule::LoadAssetFile` skips such a file rather than
  * crashing — same contract here). */
 export function roundToSizeClass(bytes: number): number | undefined {
-  return SIZE_CLASSES.find((size) => bytes <= size);
+  if (bytes > MAX_BANK_SIZE) {
+    return undefined;
+  }
+  let size = MIN_BANK_SIZE;
+  while (size < bytes) {
+    size *= 2;
+  }
+  return size;
 }
 
 export interface Bank {
@@ -107,10 +120,10 @@ export class BankTable {
   }
 
   /** `size` is a *requested* byte count, not the bank's actual size —
-   * every carved bank MUST occupy exactly one of the six fixed size
-   * classes (spec/02-MEMORY-MODEL.md §4.3), so this rounds `size` up to
-   * the smallest class that fits before carving anything, uniformly
-   * for every caller (host-side creation here, and the Forth-level
+   * every carved bank MUST occupy exactly one power-of-two size class
+   * (spec/02-MEMORY-MODEL.md §4.3), so this rounds `size` up to the
+   * smallest class that fits before carving anything, uniformly for
+   * every caller (host-side creation here, and the Forth-level
    * `CREATE-BANK` primitive, which routes through this same method —
    * §4.3 names both explicitly: "this rule applies uniformly to every
    * source of a bank-size request"). `MMAP` itself is never created
@@ -118,12 +131,12 @@ export class BankTable {
    * (`BankTable`'s own constructor) — but not because it's exempt from
    * size-class rounding: §5.3 (M34) closed that old exemption, so
    * `MMAP_SIZE` (mmap.ts) is itself already a fixed, asserted-correct
-   * XS-class constant, computed the same way this method would round
-   * it if it went through here. */
+   * `MIN_BANK_SIZE`-class constant, computed the same way this method
+   * would round it if it went through here. */
   createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {
     const roundedSize = roundToSizeClass(size);
     if (roundedSize === undefined) {
-      throw new Error(`requested bank size ${size} exceeds the largest size class (XXL, ${BankSizeXXL} bytes)`);
+      throw new Error(`requested bank size ${size} exceeds the maximum bank size (${MAX_BANK_SIZE} bytes)`);
     }
     const bankName = (name ?? this.generateSerialName()).slice(0, BANK_NAME_LEN);
     if (this.findBankByName(bankName)) {
@@ -162,7 +175,7 @@ export class BankTable {
     }
     const roundedSize = roundToSizeClass(size);
     if (roundedSize === undefined) {
-      throw new Error(`requested bank size ${size} exceeds the largest size class (XXL, ${BankSizeXXL} bytes)`);
+      throw new Error(`requested bank size ${size} exceeds the maximum bank size (${MAX_BANK_SIZE} bytes)`);
     }
     const index = this.mmap.findSlotIndex(name);
     if (index === undefined) {

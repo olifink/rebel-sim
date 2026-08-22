@@ -157,7 +157,7 @@ describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
 
   it('reports the size class a requested size was rounded up to, not the raw request', () => {
     const m = new Machine();
-    m.banks.createBank('DATA', 100, 'SMALL'); // rounds up to XS, 4096
+    m.banks.createBank('DATA', 100, 'SMALL'); // rounds up to 4096 (MIN_BANK_SIZE)
     m.interpret('BANK-SIZE SMALL');
     expect(m.stack.toArray()).toEqual([4096]);
   });

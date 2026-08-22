@@ -65,11 +65,11 @@ import {
 } from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
-const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/SYSVARS.md §1)
+const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's minimum size class (docs/SYSVARS.md §1)
 const DSTK_BANK_SIZE = 4096; // 1024 cells
 const RSTK_BANK_SIZE = 4096; // 1024 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
-const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's XS size class (docs/KEYBOARD.md §6); table itself is 512 bytes
+const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's minimum size class (docs/KEYBOARD.md §6); table itself is 512 bytes
 // spec/04-FORTH-CORE.md §5.3/§6.13: the TIB now has to physically hold
 // every line fed to the outer interpreter (WORD scans real arena bytes,
 // not a JS string) — bumped from 128 once system.fth's own longest line
@@ -80,13 +80,13 @@ const PAD_SIZE = 128; // DEVELOPING.md §7, M16: interpreted-mode S" scratch tex
 // M31: both are logical sub-region sizes within one WORK bank now, not
 // independent bank-size requests — createBank() rounds the *combined*
 // request up to a size class (spec/02-MEMORY-MODEL.md §4.3), same as
-// it would for either alone, so merging them costs one XS class
+// it would for either alone, so merging them costs one size class
 // instead of two.
 const WORK_BANK_SIZE = TIB_SIZE + PAD_SIZE;
 // FORTH-ARCHITECTURE.md §7: generic 1024-byte-block-addressable storage
 // (renamed from SCRS 2026-08-18) — (BLOCK-READ)/(BLOCK-WRITE) (140/141,
 // primitives.ts) are the only primitives that touch it directly. 16
-// blocks rounds to exactly the S size class, no rounding waste.
+// blocks rounds to exactly a size class (16 KiB), no rounding waste.
 const BLKS_BANK_SIZE = 16 * BLOCK_SIZE; // 16 KiB
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 
@@ -194,7 +194,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   private readonly inner: Inner;
   // M31 (spec/02-MEMORY-MODEL.md §4.6): TIB and PAD share one WORK
   // bank, at fixed sub-offsets, rather than each independently
-  // rounding up to its own XS size class — both are small, transient,
+  // rounding up to its own size class — both are small, transient,
   // per-line scratch text, so co-locating them costs one class instead
   // of two. tibBase/tibSize replace what used to be a standalone
   // `tibBank: Bank` field; padBase/padSize are unchanged in shape,

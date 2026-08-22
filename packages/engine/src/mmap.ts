@@ -72,8 +72,8 @@ const MMAP_RAW_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
  * exemption is gone — MMAP now conforms to the same size-class rule
  * (§4.3) as every other bank, for consistency, at the cost of a real,
  * accepted breaking change for any already-saved project (no real
- * project data exists yet to migrate). 4096 (XS, `BankSizeXS` in
- * banks.ts — not imported here, same avoid-a-circular-dependency
+ * project data exists yet to migrate). 4096 (`MIN_BANK_SIZE` in
+ * banks.ts, M55 — not imported here, same avoid-a-circular-dependency
  * reason as NAME_SIZE above) comfortably covers the 64-slot default's
  * 1552-byte raw requirement; a build with a much larger MAX_SLOTS
  * would need to round to a bigger class instead — this constant is
@@ -83,7 +83,7 @@ export const MMAP_SIZE = 4096;
 
 if (MMAP_RAW_SIZE > MMAP_SIZE) {
   throw new Error(
-    `MMAP's raw content requirement (${MMAP_RAW_SIZE} bytes) no longer fits its declared XS-class size (${MMAP_SIZE} bytes) — MAX_SLOTS grew too far; round MMAP_SIZE up to the next size class.`,
+    `MMAP's raw content requirement (${MMAP_RAW_SIZE} bytes) no longer fits its declared size class (${MMAP_SIZE} bytes) — MAX_SLOTS grew too far; round MMAP_SIZE up to the next size class.`,
   );
 }
 
@@ -229,7 +229,7 @@ export class MemoryMap {
    * The computed free-cursor position is then rounded up to the next
    * 4 KiB boundary (spec/02-MEMORY-MODEL.md §4.4) before anything gets
    * placed there — every size class is itself already a multiple of
-   * 4 KiB, and (since MMAP itself became XS-class-sized too, spec
+   * 4 KiB, and (since MMAP itself became size-class-rounded too, spec
    * §5.3) so is MMAP now, so in practice no placement ever needs real
    * rounding — every bank already lands pre-aligned regardless. Applied
    * unconditionally anyway, including for `MMAP`'s own self-registration

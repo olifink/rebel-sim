@@ -64,7 +64,7 @@ describe('Storage', () => {
     expect(loaded).toHaveLength(1);
     expect(loaded[0].tag).toBe('DATA');
     expect(loaded[0].name).toBe('MYASSET');
-    // The reloaded bank is rounded up to a size class (XS, 4 KiB) — only
+    // The reloaded bank is rounded up to a size class (4 KiB) — only
     // the original 64-byte payload should match; the rest is legitimate
     // zero-filled slack, not part of the round-trip contract.
     expect(loaded[0].size).toBe(4096);
@@ -205,13 +205,13 @@ describe('Storage', () => {
     const bigArena = new Arena(1 << 20);
     const bigBanks = new BankTable(bigArena);
     const bigStorage = new Storage(bigArena, bigBanks, hal);
-    const bigBank = bigBanks.createBank('DATA', 16 * 1024, 'BIGONE'); // S class
+    const bigBank = bigBanks.createBank('DATA', 16 * 1024, 'BIGONE'); // 16 KiB class
     bigStorage.saveAsset('P', bigBank);
 
     const smallArena = new Arena(1 << 16);
     const smallBanks = new BankTable(smallArena);
     const smallStorage = new Storage(smallArena, smallBanks, hal);
-    const smallBank = smallBanks.createBank('DATA', 4096, 'BIGONE'); // XS class — too small
+    const smallBank = smallBanks.createBank('DATA', 4096, 'BIGONE'); // 4 KiB class — too small
     expect(() => smallStorage.loadAsset('P', smallBank)).toThrow(/too large/);
   });
 
@@ -240,7 +240,7 @@ describe('Storage', () => {
     const before = arena.readByte(0);
     const assets = storage.listProjectAssets('INTROPRJ');
     // bank.size, not the 64 requested — createBank() already rounded up
-    // to the XS size class, and the saved payload is the bank's real
+    // to the 4 KiB size class, and the saved payload is the bank's real
     // (rounded) size, not the raw request.
     expect(assets).toEqual([{ tag: 'DATA', name: 'MYASSET', size: bank.size }]);
     expect(arena.readByte(0)).toBe(before); // read-only — nothing written into this arena

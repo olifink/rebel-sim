@@ -2,7 +2,7 @@
 
 **Version 1.0.** See `00-OVERVIEW.md` for normative-language definitions
 and suite scope. Builds directly on `02-MEMORY-MODEL.md`'s `SYSV` bank
-(tag `SYSV`, size class XS — 4 KiB, §4.3 there) — this document is
+(tag `SYSV`, minimum size class — 4 KiB, §4.3 there) — this document is
 purely about what lives *inside* that bank: its header, its grouped
 layout, field encoding, naming, and the convention a target uses to
 signal which optional fields it actually populates.
@@ -149,7 +149,7 @@ is the one group that doesn't use the 64-byte default (§4.1) — fixed at
 that size for continuity with already-shipped code on every known
 reference implementation; every group after it uses the default.
 
-A `SYSV` bank sized at 4 KiB (`02-MEMORY-MODEL.md` §4.3's XS class)
+A `SYSV` bank sized at 4 KiB (`02-MEMORY-MODEL.md` §4.3's minimum size class)
 leaves `4096 − (16 + 48 + 64×6) = 3632` bytes genuinely unreserved past
 `FORTH`'s end — real headroom for a future group, not slack to be
 nervous about spending (§1's "about feel, not efficiency" framing
