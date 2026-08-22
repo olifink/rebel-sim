@@ -120,16 +120,41 @@ export const NULL_STORAGE_HAL: StorageHal = {
   writeFile(): void {},
 };
 
+function projectDir(projectName: string): string {
+  return `${PROJECTS_ROOT}/${projectName}`;
+}
+
+/** One project's saved banks, by tag/name/payload size — read-only,
+ * touches no arena/bank state. A standalone function (not a `Storage`
+ * method) because M54's resize-triggered `Machine` reconstruction
+ * (`repl.ts`'s `bootProject` option) needs this *before* any bank —
+ * `Storage` itself included, since it's constructed from `BankTable` —
+ * exists yet, to know what size to create each fixed system bank at.
+ * `Storage.listProjectAssets()` below just delegates to this. */
+export function peekProjectAssets(
+  hal: StorageHal,
+  projectName: string,
+): { tag: string; name: string; size: number }[] {
+  const dir = projectDir(projectName);
+  const assets: { tag: string; name: string; size: number }[] = [];
+  for (const file of hal.listFiles(dir)) {
+    const dot = file.lastIndexOf('.');
+    if (dot < 0) continue;
+    const tag = EXTENSION_TO_TAG[file.slice(dot + 1).toUpperCase()];
+    if (!tag) continue;
+    const bytes = hal.readFile(`${dir}/${file}`);
+    if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue;
+    assets.push({ tag, name: file.slice(0, dot).toUpperCase(), size: bytes.length - ASSET_HEADER_SIZE });
+  }
+  return assets;
+}
+
 export class Storage {
   constructor(
     private readonly arena: Arena,
     private readonly banks: BankTable,
     private readonly hal: StorageHal = NULL_STORAGE_HAL,
   ) {}
-
-  private projectDir(projectName: string): string {
-    return `${PROJECTS_ROOT}/${projectName}`;
-  }
 
   private cartPath(cartName: string): string {
     return `${CARTS_ROOT}/${cartName}.CRT`;
@@ -149,20 +174,11 @@ export class Storage {
    * (`DEVELOPING.md`'s storage section), but never touches the arena or
    * creates/overwrites a single bank; a file skipped there (unrecognized
    * extension, too short to hold the asset header) is skipped here too,
-   * for the same reasons. */
+   * for the same reasons. Delegates to the standalone `peekProjectAssets`
+   * above (M54) so `repl.ts` can call the exact same logic before a
+   * `Storage` instance exists yet. */
   listProjectAssets(projectName: string): { tag: string; name: string; size: number }[] {
-    const dir = this.projectDir(projectName);
-    const assets: { tag: string; name: string; size: number }[] = [];
-    for (const file of this.hal.listFiles(dir)) {
-      const dot = file.lastIndexOf('.');
-      if (dot < 0) continue;
-      const tag = EXTENSION_TO_TAG[file.slice(dot + 1).toUpperCase()];
-      if (!tag) continue;
-      const bytes = this.hal.readFile(`${dir}/${file}`);
-      if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue;
-      assets.push({ tag, name: file.slice(0, dot).toUpperCase(), size: bytes.length - ASSET_HEADER_SIZE });
-    }
-    return assets;
+    return peekProjectAssets(this.hal, projectName);
   }
 
   /** Every raw file currently saved under one project's directory,
@@ -176,7 +192,7 @@ export class Storage {
    * this synchronous single-writer engine can hit itself) is silently
    * skipped rather than represented as a hole. */
   listProjectFiles(projectName: string): { filename: string; bytes: Uint8Array }[] {
-    const dir = this.projectDir(projectName);
+    const dir = projectDir(projectName);
     const files: { filename: string; bytes: Uint8Array }[] = [];
     for (const filename of this.hal.listFiles(dir)) {
       const bytes = this.hal.readFile(`${dir}/${filename}`);
@@ -214,27 +230,42 @@ export class Storage {
    * Files with an unrecognized extension, or a payload too large for
    * any size class in the fresh-create fallback, are skipped rather
    * than aborting the whole open (matches `LoadAssetFile`). Returns
-   * every bank it created or restored, MMAP first when restored. */
-  openProject(projectName: string): Bank[] {
-    const dir = this.projectDir(projectName);
+   * every bank it created or restored, MMAP first when restored.
+   *
+   * `skipLayoutRestore` (M54): set by `repl.ts`'s `bootProject` boot
+   * path, whose caller (a resize-triggered restart) already created
+   * every fixed bank at its own freshly-correct, possibly-resized base
+   * and size *before* this ever runs — copying the OLD saved MMAP
+   * snapshot's raw bytes over them here would undo that re-layout and
+   * put every base right back where a stale, no-longer-accurate save
+   * left it. Phase 1 (the MMAP raw-byte copy) is skipped entirely in
+   * that mode; phase 2 (content-only, matched by name) still runs
+   * exactly as it does today — a fresh boot's own banks already carry
+   * the right names, so matching still finds them, and a truly-extra
+   * saved bank (e.g. a `CREATE-BANK`'d one from before) still falls
+   * through to the same fresh-create fallback either way. */
+  openProject(projectName: string, skipLayoutRestore = false): Bank[] {
+    const dir = projectDir(projectName);
     const files = this.hal.listFiles(dir);
     const loaded: Bank[] = [];
 
     const mmapExt = TAG_TO_EXTENSION[MMAP_TAG];
     const mmapFile = files.find((f) => f.toUpperCase() === `${MMAP_TAG}.${mmapExt}`);
-    const mmapBank = mmapFile ? this.banks.findBank(MMAP_TAG, MMAP_TAG) : undefined;
-    let mmapRestored = false;
+    let mmapRestored = skipLayoutRestore;
 
-    if (mmapFile && mmapBank) {
-      const bytes = this.hal.readFile(`${dir}/${mmapFile}`);
-      if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
-        const payload = bytes.subarray(ASSET_HEADER_SIZE);
-        if (payload.length <= mmapBank.size) {
-          for (let i = 0; i < mmapBank.size; i++) {
-            this.arena.writeByte(mmapBank.base + i, i < payload.length ? payload[i] : 0);
+    if (!skipLayoutRestore) {
+      const mmapBank = mmapFile ? this.banks.findBank(MMAP_TAG, MMAP_TAG) : undefined;
+      if (mmapFile && mmapBank) {
+        const bytes = this.hal.readFile(`${dir}/${mmapFile}`);
+        if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
+          const payload = bytes.subarray(ASSET_HEADER_SIZE);
+          if (payload.length <= mmapBank.size) {
+            for (let i = 0; i < mmapBank.size; i++) {
+              this.arena.writeByte(mmapBank.base + i, i < payload.length ? payload[i] : 0);
+            }
+            mmapRestored = true;
+            loaded.push(mmapBank);
           }
-          mmapRestored = true;
-          loaded.push(mmapBank);
         }
       }
     }
@@ -289,7 +320,7 @@ export class Storage {
       throw new Error(`no known asset file extension for bank tag ${bank.tag}`);
     }
 
-    const dir = this.projectDir(projectName);
+    const dir = projectDir(projectName);
     this.hal.ensureDir(dir);
 
     const bytes = new Uint8Array(ASSET_HEADER_SIZE + bank.size);
@@ -322,7 +353,7 @@ export class Storage {
     if (!ext) {
       throw new Error(`no known asset file extension for bank tag ${bank.tag}`);
     }
-    const dir = this.projectDir(projectName);
+    const dir = projectDir(projectName);
     const bytes = this.hal.readFile(`${dir}/${bank.name}.${ext}`);
     if (!bytes || bytes.length < ASSET_HEADER_SIZE) {
       return false;

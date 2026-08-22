@@ -3176,6 +3176,116 @@ list to the "baked into the definition" list, with a note on how it
 differs from `S"`/`."`). *Tests:* `bank-access.test.ts`'s new "`BANK@`
 compiled into a definition (M53)" suite.
 
+### 1.66 `BANK-RESIZE` and a resize-triggered restart (M54, Oliver's idea)
+
+Oliver's idea, working from two observations: `DICT` is the bank most
+likely to ever need resizing (a project outgrowing its dictionary
+capacity is a real, expected failure mode; the others less so), and
+moving `DICT` right after `SYSV` (this same session, just before) keeps
+its own base pinned regardless of how many times it's resized, since
+neither it nor `SYSV` ever shift due to a *later* bank's resize.
+
+**The mechanism, in three parts:**
+
+1. **`BANK-RESIZE ( new-size "name" -- )`** (146) edits a bank's own
+   `size` field in `MMAP` directly (`mmap.ts`'s `setSlotSize()`, reached
+   through `banks.ts`'s `resizeBank()`), rounded to a size class the
+   same way `CREATE-BANK` rounds. No bytes move, no other bank's base
+   changes. Deliberately inert for the *currently running* `Machine`:
+   `DataStack`, `dictionary.ts`'s `HERE`-overflow check, `Screen`, and
+   `Keyboard` all captured their own bank's descriptor once, at
+   construction time — a live `MMAP` edit doesn't reach any of them. A
+   fresh `BANK@`/`BANK-SIZE` query *does* see the new size immediately
+   (both always read `MMAP` fresh) — the split precisely between "read"
+   and "the running subsystems that actually bounds-check against it"
+   is what makes this safe to do mid-session at all.
+2. **`RESTORE` (128) detects a pending resize before doing anything.**
+   Comparing the project's saved sizes against `Machine.dictBank.size`-
+   style live descriptors would be wrong — those already reflect any
+   `BANK-RESIZE` edit, so they'd always agree with what was just saved.
+   Comparison is instead against a new snapshot, `Machine`'s
+   `bootBankSizes` map, captured once right after every bank is created
+   in the constructor — the size each bank *actually* booted with,
+   untouched by anything that runs afterward. Any saved size differing
+   from that snapshot means reopening this project needs a different
+   bank layout than the one currently running.
+3. **A mismatch reboots instead of patching in place** — the same
+   structural reason `COLD` already reboots rather than resetting a
+   `Machine`'s readonly fields: `inner.ts`'s `dispatch()` special-cases
+   the `RESTORE` token (never reaches `executePrimitive`'s switch, same
+   tier as `COLD`/`ACCEPT`/`EXECUTE`), yielding a new `'restart-project'`
+   `StepSignal` (`Inner.restartAtProject` carries the project name,
+   mirroring `pausedAtXt`) instead of running `restoreProject()`. The
+   host (`app.ts`'s `tick()`) treats it exactly like `'cold'` — discard
+   `this.machine`, construct a fresh one — except `performBoot()` now
+   takes an optional project name, threaded into `Machine`'s new
+   `bootProject` option.
+
+**`bootProject` in `Machine`'s constructor** peeks the project's saved
+bank sizes (`storage.ts`'s `peekProjectAssets()`, a standalone function
+— no `Storage` instance exists yet at this point in the constructor,
+since `Storage` itself is built from `BankTable`) *before* creating a
+single bank, using a saved size in place of the hardcoded default
+wherever one exists. Every `createBank()` call in the constructor
+already ran in a fixed order (`SYSV`, `DICT`, `DSTK`, `RSTK`, `CHAR`,
+`KMAP`, `WORK`, `BLKS`) — feeding a bigger `DICT` size into that same
+sequence makes the bump allocator naturally push `DSTK`/`RSTK`/`CHAR`/
+`KMAP`/`WORK`/`BLKS` forward by exactly the growth, with zero bespoke
+relocation logic. Content is restored afterward via
+`Storage.openProject()`'s existing by-name matching (a new
+`skipLayoutRestore` parameter skips only the raw `MMAP.MAP` byte copy,
+which would otherwise stomp the freshly-correct bases with the OLD
+saved snapshot — everything else, including the fresh-create fallback
+for a genuinely-extra `CREATE-BANK`'d project bank, is unchanged).
+
+**A correctness trap found while designing this, not by testing
+afterward:** `DSTK`/`RSTK` are stack-shaped — their "how full" state
+(`SP`/`RP`, live `SYSV` cells) is an absolute address measured from
+`base + size`, the *high* end. `DICT`'s own `HERE`/`LATEST` are safe
+regardless of `DICT`'s own resize (they're low-end-relative, and
+`DICT`'s base never shifts — the whole reason for pinning it right
+after `SYSV`), but restoring a saved `SP` value verbatim after *any*
+earlier bank's resize shifted `DSTK`'s base would silently misplace the
+stack's top by exactly the shift, without erroring — `DEPTH` would
+overreport by that many phantom cells, and `DROP`/arithmetic would
+consume garbage before reaching anything genuinely pushed. Fix: a
+resize-triggered restart unconditionally clears both stacks
+(`this.stack.clear()`/`this.rstack.clear()`, the same `WARM` already
+does on a soft reset) after content-restore — data/return stack
+contents were never expected to survive a structural relayout like
+this anyway.
+
+**Live-verified** via `chrome-devtools-mcp` against the real app:
+pushed `11 22 33`, `70000 BANK-RESIZE DICT` (`DICT` 65536 → 262144
+bytes), `PROJECT`/`SAVE`, then `RESTORE` — the screen showed a full
+reboot (a fresh `Rebel Forth vX.Y.Z` banner, `RESTORE`'s own `ok` never
+printed, same as `COLD` never lets the rest of its line run). Post-
+reboot `read_banks` confirmed `DICT` at the new size, every later bank
+shifted forward by exactly the growth (`DSTK` `73728` → `270336`, a
+196608-byte shift matching `262144 - 65536`), the stack empty, and a
+follow-up `SAVE` still succeeding (the project name round-tripped
+through `SYSV`'s ordinary, unrelated content-restore).
+
+*Implementation:* `mmap.ts` (`findSlotIndex`/`setSlotSize`), `banks.ts`
+(`resizeBank`), `storage.ts` (`peekProjectAssets` extracted standalone,
+`openProject`'s `skipLayoutRestore`), `primitives.ts` (case 146,
+`restoreProject`/`projectNeedsRestart` extracted from the old case
+128, `PrimitiveContext.bootBankSize`), `inner.ts` (`RESTORE` special-
+cased in `dispatch()`, new `'restart-project'` `StepSignal`,
+`Inner.restartAtProject`), `repl.ts` (`bootBankSizes` snapshot,
+`bootBankSize()`, `bootProject` option, `'restart-project'`
+`StepStatus`), `app.ts` (`resetUiSnapshotsForReboot()` extracted,
+`'restart-project'` handling, `performBoot`/`constructMachine` take an
+optional project name). *Spec:* `02-MEMORY-MODEL.md` §4.8 (new — the
+resize mechanism itself, target-neutral) and §7 (the old "no richer
+resize model" deferral narrowed to what's still actually undesigned:
+reclaim, relocation-outside-a-full-re-derivation, compaction).
+*Tests:* `resize.test.ts` (new — 13 tests: `BANK-RESIZE` rounding/
+inertness/guardrails, unchanged in-place `RESTORE` behavior when
+nothing was resized, and the full resize round trip: restart detection,
+size/base re-derivation, stack clearing, and a dynamic bank surviving
+the restart).
+
 ### 1.64 `DUMP`: a classic hex dump (M52)
 
 Requested directly as a follow-on to `BANKS`/`PROJECTS`: 16 rows of 8
@@ -3370,5 +3480,6 @@ exactly as it would be on the bare-metal target.
 | **M51** | `BANKS` and `PROJECTS` (§1.63), requested directly: `WORDS`-shaped dev-ergonomics words to browse what banks/projects actually exist. `BANKS` is pure Forth (`system.fth`), walking `MMAP`'s own fixed-stride slot table directly, the same "it's just arena memory" reasoning `WORDS` already applies to the dictionary chain. `PROJECTS` is one new primitive (145) wrapping `storage.ts`'s `listProjects()`, since project names live in `StorageHal`, not the arena. Found and fixed a real, pre-existing `rebel-opcodes.json` doc staleness along the way: `CREATE-BANK`'s (100) own note still described its pre-M30 design (name==tag, no auto-serial), superseded once M30 routed it through `BankTable.createBank()`. | `system.fth`, `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `project.test.ts` |
 | **M52** | `DUMP` (§1.64), a classic hex dump: 16 rows of 8 bytes, 8-digit hex address, space-separated hex bytes, ASCII column with `.` for non-printable. Pure Forth, `system.fth` — no engine changes. New `HEXDIGIT`/`HEX2`/`HEX8` helpers build nibble/byte/cell hex formatting from `/`/`MOD` alone, no native shift primitive needed; `HEX8` extracts all eight nibbles via a `DUP 16 MOD SWAP 16 /` loop and prints them straight off the stack, most-significant-first, since extraction order and LIFO pop order happen to align. | `system.fth`, `dump.test.ts` |
 | **M53** | `BANK@` (§1.65) becomes `IMMEDIATE` and dual-mode on `STATE`, found by Oliver trying `: TESTING BANK@ CHAR ;` — a plain non-`IMMEDIATE` `BANK@` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, since it was never meant to be looked up as an ordinary word. Same `S"`/`."` STATE-dispatch pattern (case 68/70), but bakes in a resolved `LIT` address rather than raw text — the name is resolved at the *defining* word's own compile time now, correct for the fixed system banks and any already-stable bank, stale only if that bank is later dropped and recreated. Interactive behavior (`BANK@ SYSV`, `BANKS`' internals) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
+| **M54** | Bank resizing (§1.66), Oliver's idea: `BANK-RESIZE` edits a bank's `MMAP` size field only, inert until a `RESTORE` that detects the saved size no longer matches what the running `Machine` actually booted with (`bootBankSize`, not a live re-read, which would always agree with a just-edited `MMAP` cell) triggers a full restart instead of an in-place patch — `inner.ts`'s `dispatch()` special-cases `RESTORE` the same way `COLD` already is, yielding a new `'restart-project'` `StepSignal`/`StepStatus` the host (`app.ts`) reboots into via `Machine`'s new `bootProject` option, which re-derives every bank's base from the saved sizes through the ordinary bump allocator before restoring content. `DSTK`/`RSTK` are unconditionally cleared across that restart — their live `SP`/`RP` are high-end-relative absolute addresses a relayout can silently invalidate even when their own size didn't change, a correctness trap found while designing this. Reordering `DICT` right after `SYSV` (this same session, just before M54) is what keeps `DICT`'s own base pinned regardless of how many times it's resized. | `mmap.ts`, `banks.ts`, `storage.ts`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `resize.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

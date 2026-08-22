@@ -382,6 +382,54 @@ narrow exception, not a precedent for treating other subsystems loosely
   convention (`01-HAL.md` §6.3) never needs arena-scoping to stay
   collision-free.
 
+### 4.8 Resizing an existing bank
+
+An existing bank's `size` field **MAY** be patched after creation, the
+same "ordinary write to a known structure" way §4.7 already allows for
+`name` — no special resize operation, just a direct write into the
+descriptor. Unlike a `name` edit, though, a `size` edit **MUST NOT** be
+treated as taking effect immediately, for a structural reason `name`
+doesn't share: `size` is read by every bounds check at both ends of a
+bank's arena footprint, and by the placement of *every later-created
+bank in the same arena* (§4.4's allocator places each new bank at the
+current free bank's end). A running implementation's own in-memory
+representation of an already-created bank (whatever local structure a
+target's bank-table consumers hold onto once they've resolved one) is
+free to cache that descriptor rather than re-reading the table on every
+access — §4.4's own "a bank's address is fixed once created" guarantee
+depends on exactly that being safe to assume within one boot. A `size`
+edit therefore has **no observable effect within the arena's current
+session**: nothing shifts, nothing overlaps, because nothing besides
+the one edited cell changed. The edit becomes real only the next time
+this arena's bank table is read fresh from a cold start (a reboot, or
+loading a saved bank table on project restore) — at that point the
+allocator (§4.4) re-derives every bank's base in creation order from
+the table's now-edited sizes, naturally pushing every bank created
+after the resized one forward by however much it grew (or back,
+if shrunk).
+
+A target that persists per-arena state expecting to resume mid-session
+(§7's project-save/restore model) **MUST** treat any such resize as
+invalidating whatever *absolute addresses* it may have separately
+persisted into a bank whose own capacity is measured from its high end
+rather than its low end (a stack-shaped bank, growing down from
+`base + size`) — a live stack pointer captured before the resize points
+into the wrong place relative to a table re-derived after it, by
+exactly however much size changed, even if that specific bank's own
+size didn't change (an *earlier* bank growing already shifted its
+base). A bank whose consumers only ever address it relative to its own
+`base` (dictionary-shaped growth from the low end, fixed-offset
+sub-regions, block-indexed storage) needs no such correction — nothing
+about it depends on where its own high end sits.
+
+No compaction, no reclaiming a bank that shrank, no relocating a bank
+independently of a full table re-derivation: this section only allows
+growing or shrinking a bank's *own* claimed capacity, applied uniformly
+at the one point (§4.4's allocator, re-run from a freshly-loaded table)
+where every base can be recomputed together, consistently, in the same
+pass — never a standalone move of one bank while everything else stays
+put.
+
 ## 5. `MMAP`: the arena-resident bank table
 
 Each arena's own bank table is itself a bank — tag `MMAP`, **always the
@@ -650,8 +698,12 @@ one becomes real and load-bearing somewhere, not before:
 - **Bounds checking / memory protection.** Not planned at all within an
   arena — intentional (§3), not a gap.
 - **Dynamic bank allocation beyond a single `CREATE-BANK`-equivalent
-  primitive.** No richer resize/reallocate/free-and-reclaim model is
-  specified.
+  primitive, plus the one resize mechanism §4.8 now specifies** (a
+  size-field edit, taking effect only on the next cold table
+  re-derivation — never in-place). Still explicitly undesigned beyond
+  that: reclaiming a shrunk bank's freed space, relocating a bank
+  independently of a full re-derivation, and any free-list/compaction
+  model.
 - **Concurrent/multicore arena execution.** This version runs exactly
   one arena's Forth task at a time (attached, foreground); every other
   arena is suspended. Real concurrent execution across cores is a

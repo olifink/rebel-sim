@@ -204,19 +204,43 @@ export class App implements AfterViewInit, OnDestroy {
     await this.loadVocabularyAndStartRepl();
   }
 
+  /** Clears every polled "last*" UI-diff snapshot (`tick()`'s own
+   * change-detection guards) and the paused-breakpoint signal, ahead of
+   * discarding `this.machine` for a freshly-constructed one — shared by
+   * `tick()`'s `'cold'` and `'restart-project'` (M54) branches, both of
+   * which replace the Machine outright rather than resuming it. Without
+   * this, the fresh machine's first real state would be masked by a
+   * stale comparison against the one that just got replaced. */
+  private resetUiSnapshotsForReboot(): void {
+    this.pumping = false;
+    this.lastStackSnapshot = [];
+    this.lastRStackSnapshot = [];
+    this.lastLatestAddr = -1;
+    this.lastBankCount = 0;
+    this.lastBreakpointWords = new Set();
+    this.lastProjectNames = [];
+    this.lastSysvarsSnapshot = [];
+    this.zone.run(() => this.pausedWord.set(undefined));
+  }
+
   /** Constructs a fresh `Machine` and publishes its initial bank/arena
    * signals — the synchronous half of booting. Split out from
    * `performBoot()` so `ngAfterViewInit` can run this (and everything
    * else that doesn't need the system vocabulary yet) before its own
    * first `await`; see that method's comment for why the ordering
-   * matters. */
-  private constructMachine(): void {
+   * matters. `bootProject` (M54): threaded straight into `Machine`'s own
+   * option of the same name — set only by `tick()`'s `'restart-project'`
+   * branch, when a resize-triggered restart needs the fresh `Machine` to
+   * boot straight back into the project whose saved sizes triggered it,
+   * rather than empty. */
+  private constructMachine(bootProject?: string): void {
     const storageHal = createLocalStorageHalIfSupported();
     this.machine = new Machine({
       screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
       storageHal,
       timingHal: PERFORMANCE_TIMING_HAL,
       remoteChannel: this.remoteChannel,
+      bootProject,
     });
     // Zone-wrapped (unlike the original inline ngAfterViewInit code) since
     // this also runs from tick()'s 'cold' branch, which is already
@@ -263,15 +287,17 @@ export class App implements AfterViewInit, OnDestroy {
    * Called from `tick()` whenever `step()` reports the `'cold'` status
    * (`COLD`, rebel-opcodes.json 132) — the Forth-to-host signal the
    * engine sends because a full reset can't happen in place (`Machine`'s
-   * memory-holding fields are readonly, repl.ts). The old `Machine`/
-   * session, if any, is simply dropped — it holds no listeners or timers
-   * of its own, so plain GC is enough; nothing here needs to explicitly
-   * tear it down. Unlike `ngAfterViewInit`, this has no
-   * whenStable()-observing caller to worry about, so `constructMachine()`
-   * and the async half don't need to be kept either side of any
-   * particular `await`. */
-  private async performBoot(): Promise<void> {
-    this.constructMachine();
+   * memory-holding fields are readonly, repl.ts) — or the `'restart-
+   * project'` status (M54's resize-triggered restart, same reason, with
+   * `bootProject` set so the fresh `Machine` reopens where the old one
+   * left off instead of booting empty). The old `Machine`/session, if
+   * any, is simply dropped — it holds no listeners or timers of its
+   * own, so plain GC is enough; nothing here needs to explicitly tear it
+   * down. Unlike `ngAfterViewInit`, this has no whenStable()-observing
+   * caller to worry about, so `constructMachine()` and the async half
+   * don't need to be kept either side of any particular `await`. */
+  private async performBoot(bootProject?: string): Promise<void> {
+    this.constructMachine(bootProject);
     await this.loadVocabularyAndStartRepl();
   }
 
@@ -793,20 +819,23 @@ export class App implements AfterViewInit, OnDestroy {
       // executePrimitive ever runs) — reconstructing the Machine is
       // entirely this host's job. The old Machine/session is abandoned
       // here, not resumed; performBoot() replaces this.machine and
-      // restarts the pump once the fresh one is ready. Every polled
-      // "last*" snapshot below is reset first, so the fresh machine's
-      // state is picked up on its own first tick instead of being masked
-      // by a stale comparison against the machine that just got replaced.
-      this.pumping = false;
-      this.lastStackSnapshot = [];
-      this.lastRStackSnapshot = [];
-      this.lastLatestAddr = -1;
-      this.lastBankCount = 0;
-      this.lastBreakpointWords = new Set();
-      this.lastProjectNames = [];
-      this.lastSysvarsSnapshot = [];
-      this.zone.run(() => this.pausedWord.set(undefined));
+      // restarts the pump once the fresh one is ready.
+      this.resetUiSnapshotsForReboot();
       void this.performBoot();
+      return;
+    }
+    if (status === 'restart-project') {
+      // M54: a BANK-RESIZE (146) that was SAVEd left the running Machine
+      // with a bank layout that no longer matches what's on disk —
+      // RESTORE (128) detected the mismatch and, rather than patching
+      // bytes into a Machine whose readonly fields can't actually move,
+      // asked for the same "throw this one away" reboot COLD gets, this
+      // time with pendingRestartProject() as bootProject so the fresh
+      // Machine re-derives every bank's base/size from what was actually
+      // saved and reopens straight back into it.
+      const project = this.machine.pendingRestartProject();
+      this.resetUiSnapshotsForReboot();
+      void this.performBoot(project);
       return;
     }
     if (this.presentCtx) {

@@ -50,7 +50,7 @@ import { PrimitiveContext, WarmReset } from './primitives.js';
 import { Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
-import { Storage, StorageHal } from './storage.js';
+import { NULL_STORAGE_HAL, peekProjectAssets, Storage, StorageHal } from './storage.js';
 import { NULL_TIMING_HAL, TimingHal } from './timing.js';
 import { Inner, StepSignal } from './inner.js';
 import {
@@ -133,6 +133,25 @@ export interface MachineOptions {
    * reads elapsed time yet, so this only establishes the HAL contract for
    * a future consumer (e.g. a `DELAY` word) to build against. */
   timingHal?: TimingHal;
+  /** M54: boot straight into a previously-saved project, using *its*
+   * recorded bank sizes (a `BANK-RESIZE`, 146, that was `SAVE`d) in
+   * place of the hardcoded defaults below wherever a saved asset exists
+   * for a given bank name — the mechanism a resize-triggered restart
+   * (`RESTORE`, via `Inner`'s `'restart-project'` `StepSignal`) needs,
+   * since a `Machine`'s memory-holding fields are readonly and can't
+   * pick up a new bank layout in place, same "throw the old one away,
+   * build a fresh one" shape `COLD` already established. Content is
+   * restored from the project's saved assets only *after* every bank is
+   * created at its correct (possibly-resized) size and base —
+   * `MMAP.MAP`'s own raw bytes are deliberately never copied in this
+   * mode (`Storage.openProject`'s `skipLayoutRestore`), since the bases
+   * this boot just derived are already correct; copying the OLD saved
+   * snapshot back over them would undo the very re-layout this option
+   * exists to perform. A project name with nothing actually saved for
+   * it (or that was never saved at all) is harmless here — every bank
+   * just falls back to its ordinary hardcoded default, identical to an
+   * empty boot. */
+  bootProject?: string;
 }
 
 /** `step()`'s return: `'idle'` — no session in flight, nothing to do.
@@ -152,8 +171,13 @@ export interface MachineOptions {
  * (rebel-opcodes.json 132): `COLD` was just executed — the engine itself
  * makes no state change for this (see inner.ts's `dispatch()`); the host
  * is expected to discard this `Machine` and construct a fresh one
- * (PORTING-WEB.md). */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold';
+ * (PORTING-WEB.md). `'restart-project'` (M54): `RESTORE` found a bank
+ * whose saved size (a pending `BANK-RESIZE`, 146, that was `SAVE`d)
+ * differs from what's live right now — same "the engine makes no state
+ * change, the host must reconstruct" shape as `'cold'`, except the host
+ * should pass `pendingRestartProject()` as `MachineOptions.bootProject`
+ * to the fresh `Machine` instead of booting empty. */
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold' | 'restart-project';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -217,19 +241,42 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   private inputPos = 0;
   private inputEnd = 0;
 
+  /** M54: each fixed bank's size as it actually was the moment this
+   * `Machine` finished booting — snapshotted once, right after every
+   * `createBank()` call below and before anything (a `BANK-RESIZE`,
+   * primitives.ts case 146) could edit MMAP's live cell out from under
+   * it. `PrimitiveContext.bootBankSize()`'s backing store; see that
+   * interface field's own comment for why this can't just be
+   * `banks.findBank(name)?.size` read on demand. */
+  private readonly bootBankSizes = new Map<string, number>();
+
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
     this.banks = new BankTable(this.arena);
+
+    // M54: a `bootProject` peeks that project's saved bank sizes (a
+    // pending `BANK-RESIZE` that was `SAVE`d) *before* creating a single
+    // bank, using `peekProjectAssets` directly — a `Storage` instance
+    // doesn't exist yet at this point (it's built from `this.banks`,
+    // below), and doesn't need to: this reads straight through the HAL,
+    // same as `Storage.listProjectAssets()` itself does. A name with no
+    // saved override (or no `bootProject` at all) falls back to the
+    // hardcoded default below, unchanged.
+    const savedSizes = options.bootProject
+      ? new Map(peekProjectAssets(options.storageHal ?? NULL_STORAGE_HAL, options.bootProject).map((a) => [a.name, a.size]))
+      : undefined;
+    const sizeFor = (name: string, fallback: number): number => savedSizes?.get(name) ?? fallback;
+
     // Named explicitly, matching tag, same as WORK/EDITOR below — BANK@/
     // BANK-SIZE resolve by name now, not tag (tags are expected to
     // repeat once multiple banks share one, name is the real unique
     // identity), so every boot bank needs a real name instead of an
     // auto-generated serial for `BANK@ SYSV`-style lookups to keep
     // working at all.
-    const sysvBank = this.banks.createBank('SYSV', SYSV_BANK_SIZE, 'SYSV');
-    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE, 'DICT');
-    const dstkBank = this.banks.createBank('DSTK', DSTK_BANK_SIZE, 'DSTK');
-    const rstkBank = this.banks.createBank('RSTK', RSTK_BANK_SIZE, 'RSTK');
+    const sysvBank = this.banks.createBank('SYSV', sizeFor('SYSV', SYSV_BANK_SIZE), 'SYSV');
+    this.dictBank = this.banks.createBank('DICT', sizeFor('DICT', DICT_BANK_SIZE), 'DICT');
+    const dstkBank = this.banks.createBank('DSTK', sizeFor('DSTK', DSTK_BANK_SIZE), 'DSTK');
+    const rstkBank = this.banks.createBank('RSTK', sizeFor('RSTK', RSTK_BANK_SIZE), 'RSTK');
 
     this.sysvars = new Sysvars(this.arena, sysvBank);
     this.sysvars.initHeader();
@@ -255,11 +302,11 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // run as part of `this.banks = new BankTable(this.arena)` above),
     // arena-bookkeeping rather than Forth-interpreter state.
 
-    const charBank = this.banks.createBank('CHAR', charCols * charRows, 'CHAR');
+    const charBank = this.banks.createBank('CHAR', sizeFor('CHAR', charCols * charRows), 'CHAR');
     this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
     this.screen.cls();
 
-    const kmapBank = this.banks.createBank('KMAP', KMAP_BANK_SIZE, 'KMAP');
+    const kmapBank = this.banks.createBank('KMAP', sizeFor('KMAP', KMAP_BANK_SIZE), 'KMAP');
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
     this.channel = options.channel
       ?? (options.remoteChannel
@@ -288,7 +335,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     // M31: TIB and PAD as fixed sub-offsets within one WORK bank —
     // see the field-declaration comment above for why.
-    const workBank = this.banks.createBank('WORK', WORK_BANK_SIZE, 'WORK');
+    const workBank = this.banks.createBank('WORK', sizeFor('WORK', WORK_BANK_SIZE), 'WORK');
     this.tibBase = workBank.base;
     this.tibSize = TIB_SIZE;
     this.acceptCfa = findWord(this, 'ACCEPT')!.cfa;
@@ -312,7 +359,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // this boot-time default (RESTORE replaces the whole bank table
     // from the save file itself) — only a project saved after this
     // change gets the new 'EDITOR.BLK' asset basename.
-    const blksBank = this.banks.createBank('BLKS', BLKS_BANK_SIZE, 'EDITOR');
+    const blksBank = this.banks.createBank('BLKS', sizeFor('EDITOR', BLKS_BANK_SIZE), 'EDITOR');
     // Screen Editor follow-up: space-filled, not the zero bytes a fresh
     // bank would otherwise hold — NUL isn't BL, so the outer
     // interpreter's own BL-delimited WORD scan (system.fth's LOAD/LIST)
@@ -321,12 +368,53 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // native fillBytes() call here is instant; doing this in Forth via
     // 16 screens' worth of DO/LOOP-driven FILL calls (tried first) added
     // over a second to every boot — negligible content, real dispatch
-    // cost, times 16 KiB of individual token-threaded steps.
-    this.arena.fillBytes(blksBank.base, BLKS_BANK_SIZE, SPACE_CHAR_CODE);
+    // cost, times 16 KiB of individual token-threaded steps. Fills the
+    // bank's own actual (possibly-resized) size, not the hardcoded
+    // constant — content-restore below overwrites this anyway whenever
+    // `bootProject` actually finds a saved BLKS asset to copy in.
+    this.arena.fillBytes(blksBank.base, blksBank.size, SPACE_CHAR_CODE);
+
+    // M54: snapshot every bank's real, currently-operative size —
+    // before the content-restore below runs (it never changes any
+    // size), and long before any BANK-RESIZE could possibly run (pure
+    // Forth code, only reachable once this constructor has returned).
+    for (const bank of this.banks.getAllBanks()) {
+      this.bootBankSizes.set(bank.name, bank.size);
+    }
+
+    // M54: content-only restore, now that every bank above was created
+    // at its correct (possibly-resized) size and base — MMAP.MAP's own
+    // raw bytes are deliberately not copied (`skipLayoutRestore`), since
+    // that would overwrite the bases just derived with the OLD saved
+    // snapshot. DSTK/RSTK are then unconditionally reset to empty: their
+    // live SP/RP sysvar cells (just overwritten by SYSV's own restored
+    // content) are absolute addresses computed against whatever base/
+    // size those two banks had at the *previous* boot — if resizing
+    // *any* earlier-created bank shifted a later bank's base (the bump
+    // allocator's normal effect of a bigger DICT, say), or DSTK/RSTK's
+    // own size itself changed, that restored SP/RP would silently
+    // misplace the stack's top by however much shifted, not point past
+    // it. Data/return stack contents were never expected to survive a
+    // structural relayout like this — same as WARM already resets both
+    // on a soft reset — so this trades "resume exactly" for "starts
+    // clean," only on the one restart path where the old absolute
+    // addresses can't be trusted anyway.
+    if (options.bootProject) {
+      this.storage.openProject(options.bootProject, true);
+      this.screen.redrawAll();
+      this.stack.clear();
+      this.rstack.clear();
+    }
   }
 
   getBase(): number {
     return this.sysvars.getBase();
+  }
+
+  /** M54: `PrimitiveContext.bootBankSize()` — see that interface field's
+   * own comment. */
+  bootBankSize(name: string): number | undefined {
+    return this.bootBankSizes.get(name);
   }
 
   /** spec/04-FORTH-CORE.md §6.13's `WORD` contract, and the single real
@@ -452,6 +540,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         if (value === 'cold') {
           return 'cold';
         }
+        if (value === 'restart-project') {
+          return 'restart-project';
+        }
       }
       return 'more-to-run';
     } catch (err) {
@@ -511,6 +602,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       return undefined;
     }
     return listDictionaryEntries(this).find((e) => e.cfa === xt)?.name;
+  }
+
+  /** M54: the project name `step()`'s `'restart-project'` status wants
+   * the host to reboot into (`Inner.restartAtProject`) — mirrors
+   * `pausedAtWord()`'s exact shape. Only meaningful immediately after
+   * `step()` returns `'restart-project'`. */
+  pendingRestartProject(): string | undefined {
+    return this.inner.restartAtProject;
   }
 
   /** Convenience wrapper preserving the pre-M7 synchronous contract:

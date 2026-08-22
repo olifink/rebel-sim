@@ -94,6 +94,16 @@ export interface PrimitiveContext extends DictionaryContext {
    * `WORD`/`FIND`/`NUMBER`/`INTERPRET` machinery an ordinary typed line
    * uses. */
   setInput(addr: number, len: number): void;
+  /** M54: the size a named bank actually had the moment this `Machine`
+   * finished booting — *not* `banks.findBank(name)?.size`, which reads
+   * MMAP fresh and so would already reflect a `BANK-RESIZE` (146) that
+   * hasn't taken effect yet. `projectNeedsRestart()` below needs the
+   * real, currently-operative size (what `DataStack`/`dictionary.ts`/
+   * `Screen`/`Keyboard` actually bounds-check against) to tell "this
+   * session already matches what's saved" apart from "a pending resize
+   * makes them differ." `undefined` for a name this `Machine` never
+   * booted with at all. */
+  bootBankSize(name: string): number | undefined;
 }
 
 /** Truncate a JS number to a signed 32-bit Forth cell. */
@@ -159,6 +169,54 @@ function interpretStringLiteral(ctx: PrimitiveContext): void {
   }
   ctx.stack.push(ctx.padBase);
   ctx.stack.push(text.length);
+}
+
+/** `RESTORE`'s (128) actual open-and-repaint logic — a plain exported
+ * function, not a switch case, because M54 (`inner.ts`'s `dispatch()`)
+ * special-cases the `RESTORE` token entirely, the same way `COLD`/
+ * `ACCEPT`/`EXECUTE` already are: a resize-triggered restart needs to
+ * yield a `StepSignal` *instead of* running this, which a plain
+ * `executePrimitive` switch case has no way to express. Never reaches
+ * `executePrimitive`'s own switch — see `projectNeedsRestart()` below
+ * for the other half of the decision `dispatch()` makes first. */
+export function restoreProject(ctx: PrimitiveContext, project: string): void {
+  ctx.sysvars.setProjectName(project);
+  const restored = ctx.storage.openProject(project);
+  // openProject() treats a missing project directory as "empty, not
+  // an error" (§6.2's own hal_list_files contract) — correct at
+  // that layer, but silent at this one leaves RESTORE looking like
+  // it worked. Zero banks restored only happens for a directory
+  // that doesn't exist or was never actually saved — a real SAVE
+  // always writes MMAP plus 8 standard banks, so an existing
+  // project can never legitimately restore to nothing.
+  if (restored.length === 0) {
+    throw new Error(`project '${project}' not found`);
+  }
+  ctx.screen.redrawAll();
+}
+
+/** M54 (spec/02-MEMORY-MODEL.md §7): does reopening `project` need a
+ * fresh `Machine` rather than `restoreProject()`'s in-place raw-byte
+ * restore? True the moment *any* bank this session actually booted with
+ * was saved at a different size than that — a `BANK-RESIZE` (146) that
+ * was `SAVE`d but never yet applied. Deliberately compares against
+ * `ctx.bootBankSize()`, not `ctx.banks.findBank()`/`getAllBanks()`:
+ * those read MMAP fresh, which already reflects any `BANK-RESIZE` edit
+ * immediately — comparing "saved" against "live MMAP" would always
+ * agree right after one, since both are the same edited cell, and this
+ * check would never fire. A project that was never saved at all
+ * (nothing for `RESTORE` to find) reports no mismatch here — that's
+ * `restoreProject()`'s own "project not found" error to raise, not a
+ * restart-worthy one. */
+export function projectNeedsRestart(ctx: PrimitiveContext, project: string): boolean {
+  const saved = ctx.storage.listProjectAssets(project);
+  if (saved.length === 0) {
+    return false;
+  }
+  return saved.some((asset) => {
+    const bootSize = ctx.bootBankSize(asset.name);
+    return bootSize !== undefined && bootSize !== asset.size;
+  });
 }
 
 export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
@@ -833,27 +891,12 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 128: { // RESTORE ( "name" -- ) — Storage.openProject()'s
-      // MMAP-first two-phase restore (§6.3.1), then repaint the visible
-      // screen: a restore overwrites CHAR bytes directly, bypassing the
-      // normal per-character HAL write-through screen.ts otherwise
-      // always goes through, so nothing else would trigger a redraw.
-      const project = ctx.nextInputToken().toUpperCase();
-      ctx.sysvars.setProjectName(project);
-      const restored = ctx.storage.openProject(project);
-      // openProject() treats a missing project directory as "empty, not
-      // an error" (§6.2's own hal_list_files contract) — correct at
-      // that layer, but silent at this one leaves RESTORE looking like
-      // it worked. Zero banks restored only happens for a directory
-      // that doesn't exist or was never actually saved — a real SAVE
-      // always writes MMAP plus 8 standard banks, so an existing
-      // project can never legitimately restore to nothing.
-      if (restored.length === 0) {
-        throw new Error(`project '${project}' not found`);
-      }
-      ctx.screen.redrawAll();
-      break;
-    }
+    // RESTORE (128) is NOT a case here — M54: inner.ts's dispatch()
+    // special-cases the token entirely (same tier as COLD/ACCEPT/
+    // EXECUTE below it), since a resize-triggered restart needs to
+    // yield a StepSignal instead of running restoreProject() in place.
+    // See that special case, and restoreProject()/projectNeedsRestart()
+    // above, for the actual logic this case used to hold directly.
 
     case 129: { // BSAVE ( "tag" -- ) — save just one already-existing
       // bank, resolved by tag the same way BANK@ (case 99) does: "the
@@ -1074,6 +1117,24 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
         }
         ctx.screen.emit(32); // BL, same separator convention as BANKS/WORDS
       }
+      break;
+    }
+
+    case 146: { // BANK-RESIZE ( new-size "name" -- ) M54: overwrites the
+      // named bank's own MMAP size field only — see banks.ts's
+      // resizeBank() for why this is deliberately inert for the
+      // currently-running Machine (no bytes move, nothing else shifts)
+      // and only takes effect across a save/restart cycle (SAVE, then a
+      // RESTORE that finds the mismatch and restarts, projectNeedsRestart/
+      // restoreProject above). Same parsed-name/uppercase/"unknown bank"
+      // convention as BANK@ (99)/BANK-SIZE (144); rounds to a size class
+      // the same way CREATE-BANK (100) does, so a later BANK-SIZE on the
+      // same name reports what SAVE will actually persist. Not IMMEDIATE
+      // — an action, not something a colon-definition needs to bake an
+      // address into (unlike BANK@).
+      const newSize = s.pop();
+      const name = ctx.nextInputToken().toUpperCase();
+      ctx.banks.resizeBank(name, newSize);
       break;
     }
 

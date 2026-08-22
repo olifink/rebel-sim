@@ -136,6 +136,42 @@ export class BankTable {
     return this.mmap.allocate(tag, bankName, roundedSize, flags);
   }
 
+  /** M54 (spec/02-MEMORY-MODEL.md §7): overwrites an existing bank's own
+   * `size` field in MMAP with a new, size-class-rounded value — no bytes
+   * moved, no other bank touched, this bank's own `base` unchanged.
+   * `MMAP` itself can never be resized (its size is a fixed, asserted
+   * cross-target layout constant, `mmap.ts`'s `MMAP_SIZE`).
+   *
+   * Deliberately does *not* take effect for the currently-running
+   * `Machine`: every consumer holding this bank's descriptor
+   * (`DataStack`, `dictionary.ts`'s HERE-overflow check, `Screen`,
+   * `Keyboard`, ...) captured an immutable snapshot at construction
+   * time, and a bigger claimed region here would physically overlap
+   * whichever bank happens to sit right after it in memory today, since
+   * nothing shifts. The resize becomes real only across a save/restart
+   * cycle — `SAVE` (127) persists this MMAP edit, and a `RESTORE` (128)
+   * that finds a saved size differing from what's live now triggers a
+   * fresh `Machine` construction (`Inner`'s `'restart-project'`
+   * `StepSignal`, mirroring `COLD`'s own "throw this one away, build a
+   * fresh one" shape), which re-derives every bank's base from these
+   * (possibly-edited) sizes via the normal bump allocator — the only
+   * point a resize can safely relocate whatever comes after it. */
+  resizeBank(name: string, size: number): Bank {
+    if (name === MMAP_TAG) {
+      throw new Error('MMAP itself cannot be resized — its size is a fixed cross-target layout constant');
+    }
+    const roundedSize = roundToSizeClass(size);
+    if (roundedSize === undefined) {
+      throw new Error(`requested bank size ${size} exceeds the largest size class (XXL, ${BankSizeXXL} bytes)`);
+    }
+    const index = this.mmap.findSlotIndex(name);
+    if (index === undefined) {
+      throw new Error(`unknown bank: ${name}`);
+    }
+    this.mmap.setSlotSize(index, roundedSize);
+    return this.mmap.getSlot(index);
+  }
+
   /** "A bank of this type" (tags repeat) when called with one argument;
    * "the bank with this tag and name" when called with both. */
   findBank(tag: string, name?: string): Bank | undefined {

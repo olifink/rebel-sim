@@ -191,6 +191,33 @@ export class MemoryMap {
     return out;
   }
 
+  /** The slot index of the active bank named `name`, or `undefined` if
+   * none matches — `getAllSlots()`'s read-only scan returns descriptors
+   * with no notion of "which slot," which `setSlotSize()` below needs to
+   * target the right cell. */
+  findSlotIndex(name: string): number | undefined {
+    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
+      const slot = this.getSlot(i);
+      if (slot.flags & BankFlagActive && slot.name === name) {
+        return i;
+      }
+    }
+    return undefined;
+  }
+
+  /** M54 (spec/02-MEMORY-MODEL.md §7): overwrites just one slot's `size`
+   * cell in place — no other slot moves, no arena bytes beyond this one
+   * cell are touched. `BankTable.resizeBank()` is the only caller; see
+   * its own comment for why this is deliberately inert for the
+   * currently-running `Machine` and only takes effect across a
+   * save/restart cycle. */
+  setSlotSize(index: number, newSize: number): void {
+    if (index < 0 || index >= MMAP_MAX_SLOTS) {
+      throw new RangeError(`MMAP slot ${index} out of range`);
+    }
+    this.arena.writeCellUnsigned(this.slotOffset(index) + SLOT_SIZE_OFFSET, newSize);
+  }
+
   /** DEVELOPING.md §14, M22: the real allocator — no cached cursor of
    * any kind. Finds the first inactive slot and the real free memory
    * address (`max(base + size)` over every currently-active slot) in

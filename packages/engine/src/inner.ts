@@ -70,7 +70,7 @@
 import { Arena, alignCell, CELL_SIZE as CELL } from './arena.js';
 import { DataStack } from './stack.js';
 import { NAME_LEN_MASK } from './dictionary.js';
-import { executePrimitive, PrimitiveContext } from './primitives.js';
+import { executePrimitive, PrimitiveContext, projectNeedsRestart, restoreProject } from './primitives.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 const DOCOL = opcodes.docolTokenId;
@@ -87,6 +87,7 @@ const DOES_TOKEN = opcodes.primitives.find((p) => p.name === '(DOES>)')!.id;
 const SLIT_TOKEN = opcodes.primitives.find((p) => p.name === '(SLIT)')!.id;
 const EXECUTE_TOKEN = opcodes.primitives.find((p) => p.name === 'EXECUTE')!.id;
 const COLD_TOKEN = opcodes.primitives.find((p) => p.name === 'COLD')!.id;
+const RESTORE_TOKEN = opcodes.primitives.find((p) => p.name === 'RESTORE')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
@@ -97,7 +98,7 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold';
+export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold' | 'restart-project';
 
 export class Inner {
   /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
@@ -107,6 +108,14 @@ export class Inner {
    * only read this while genuinely paused (`step()` just returned
    * `'breakpoint'`). */
   pausedAtXt: number | undefined;
+
+  /** M54: set right before a `'restart-project'` yield — the project
+   * name a resize-triggered `RESTORE` needs the host to reboot straight
+   * back into (`Machine.pendingRestartProject()`), same "payload lives
+   * on `Inner`, not the `StepSignal` itself" shape as `pausedAtXt`
+   * above. Stale once a fresh `Machine` exists; only meaningful
+   * immediately after `step()` returns `'restart-project'`. */
+  restartAtProject: string | undefined;
 
   constructor(
     private readonly arena: Arena,
@@ -269,6 +278,24 @@ export class Inner {
       // actual reconstruction; this token never reaches executePrimitive,
       // same shape as ACCEPT/EXECUTE below.
       yield 'cold';
+      return;
+    }
+    if (token === RESTORE_TOKEN) {
+      // M54: RESTORE ( "name" -- ) special-cased for the same structural
+      // reason COLD is above — a resize-triggered restart needs a brand
+      // new Machine (readonly fields, built once), which nothing this
+      // dispatcher or executePrimitive could arrange in place. The
+      // project name is consumed here, once, regardless of which branch
+      // follows — projectNeedsRestart()/restoreProject() (primitives.ts)
+      // never re-consume it themselves.
+      const project = this.ctx.nextInputToken().toUpperCase();
+      if (projectNeedsRestart(this.ctx, project)) {
+        this.restartAtProject = project;
+        yield 'restart-project';
+        return;
+      }
+      restoreProject(this.ctx, project);
+      yield 'progress';
       return;
     }
     if (token === ACCEPT_TOKEN) {
