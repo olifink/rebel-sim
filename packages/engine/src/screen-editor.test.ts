@@ -187,7 +187,6 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
     m.interpret('USE EDITOR');
     m.interpret('9 CLEAR');
     m.interpret('0 T MARKER-NINE');
-    m.interpret('CLS'); // wipe the visible screen so L's own output is unambiguous
     m.interpret('L');
 
     const rows: string[] = [];
@@ -195,6 +194,23 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
       rows.push(m.screen.readRowText(r));
     }
     expect(rows.join('\n')).toContain('MARKER-NINE');
+  });
+
+  it('L CLSes first, so it owns the whole display rather than appending after whatever was already there', () => {
+    const m = bootMachine();
+    m.interpret('USE EDITOR');
+    m.interpret('9 CLEAR');
+    m.interpret('0 T MARKER-NINE');
+    m.screen.writeChar(0, 0, 'X'.charCodeAt(0)); // stray content L must clear away, not print after
+    m.interpret('L');
+
+    const rows: string[] = [];
+    for (let r = 0; r < m.screen.rows; r++) {
+      rows.push(m.screen.readRowText(r));
+    }
+    const full = rows.join('\n');
+    expect(full).toContain('MARKER-NINE');
+    expect(m.screen.readChar(0, 0)).not.toBe('X'.charCodeAt(0));
   });
 
   it('TOP jumps to and displays screen 0 regardless of which screen was current', () => {

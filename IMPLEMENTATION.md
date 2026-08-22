@@ -3348,6 +3348,156 @@ ladder; `resize.test.ts`/`bank-access.test.ts`/`storage.test.ts`/
 `mmap.test.ts` comments and imports updated, no test *behavior*
 changes beyond `roundToSizeClass`'s own new rounding points.
 
+### 1.68 The remaining core screen-editor commands (M56)
+
+M48 (§1.65's predecessor milestone) shipped only "the core edit/run
+loop" — `LIST`/`L`, `T`, `LOAD`, `TOP`/`CLEAR` — deliberately deferring
+the rest of `inspiration/figforth_editor_screens.txt`'s own six-screen
+word set. Requested directly: "let's implement the remaining core
+editor commands," followed by "everything" (line editing, search/
+replace, and `COPY`) once asked how much to build in one pass, and
+"keep classic name I" once asked about the one real naming collision
+(`I` shadows `DO`/`LOOP`'s own loop index inside `EDITOR`, the same
+reason `EDITOR` needed its own vocabulary in the first place).
+
+**Cursor tracking (`R#`, `#LOCATE`, `#LEAD`, `#LAG`, `M`).** Classic
+Forth's own `R#` is an absolute byte offset (0..1023) within the
+current screen, ported faithfully as a plain `VARIABLE`. `#LOCATE`
+splits it into `(col, line#)` via `/MOD`; `#LEAD`/`#LAG` are the
+addr/len spans before and after the cursor on its own line; `M ( n -- )`
+advances `R#` by `n` and redraws that line with a printed underscore
+marking the cursor, classic Forth's live "you are here" feedback every
+command below calls at the end. `LINE ( line# -- addr )`, a new shared
+helper, factors out the address arithmetic `T` used to inline directly
+and adds the bounds check classic's own `LINE` had and this project's
+`T` never did — `T` itself was touched only to route through `LINE`
+and to set `R#` first (`DUP C/L * R# !`), so a `T` immediately followed
+by a cursor-relative command like `F`/`N` acts on the line just typed
+rather than wherever the cursor last happened to be. `L`/`LIST`/`TOP`/
+`CLEAR` themselves are otherwise untouched — none of them needed `R#`
+to already work correctly.
+
+**Line editing (`TEXT`, `-MOVE`, `H`, `E`, `S`, `D`, `R`, `P`, `I`).**
+`TEXT` is `T`'s own delimiter-one `WORD` idiom factored out, reading
+free-form typed text into `PAD` — the shared scratch buffer `S"`/`."`
+already established `PAD`'s "no reentrancy, overwritten unconditionally
+on next use" contract for (`rebel-opcodes.json`'s own `PAD` note); a
+new `TEXT-LEN` records how many real, non-padded characters were
+actually read, since this project's `PAD` holds no leading count byte
+the way classic's own counted-string convention does. `-MOVE`/`H`/`E`/
+`S`/`D` are classic exactly (decimal instead of classic's own hex),
+each adapted only for the addr/len-not-counted-string PAD convention.
+A genuinely satisfying discovery while tracing classic `D`'s own dense
+stack code by hand: `D` calls `H` first not for tidiness but as a
+deliberate cut — the deleted line's content lands in `PAD`, so an
+`I` (insert) immediately afterward pastes it straight back, live-
+verified end to end (delete line 1, insert at line 1, the exact
+original three-line layout reappears). `R ( line# -- )` replaces a
+line wholesale with whatever's in `PAD`; `P ( line# -- )` is `TEXT R`,
+the everyday retype-this-line command; `I ( line# -- )` is `S R`,
+classic's own name kept per Oliver's explicit choice — safe because
+every `EDITOR` word defined before it that needs a loop index (`S`,
+`D`) is already compiled with the real loop-index `I` baked into its
+own body; nothing defined after `I` may write a bare `DO...I...LOOP`
+inside `EDITOR` again. `PAD` itself gets a one-time space-fill right
+after `CLEAR`'s own definition — unlike `BLKS`, nothing native pre-
+fills it, and `I` can paste `PAD`'s content into a screen line without
+ever calling `TEXT` first (classic's own paste-whatever-was-last-held
+behavior, not a bug) if nothing was ever typed.
+
+**`COPY ( source target -- )`** duplicates one screen into another.
+Classic's own version scales for multiple disk buffers per screen
+(`B/SCR`); this project's `BLOCK-SIZE` already matches one screen to
+one buffer exactly, so it collapses to a single `BLOCK-SIZE CMOVE`
+between the two screens' resident buffers, `UPDATE`, `FLUSH` — no
+`DO`/`LOOP` at all, so (unlike `S`/`D`) its position relative to `I`
+doesn't actually matter for the loop-index reason, though it's kept
+grouped with the other line-editing words above `I` regardless.
+
+**Search and replace (`-TEXT`, `1LINE`, `FIND`, `DELETE`, `N`, `F`,
+`B`, `X`, `TILL`, `C`).** Classic's own versions (screens 4-6) are
+dense, register-starved stack code — `MATCH` alone chains `>R >R 2DUP
+R> R> 2SWAP` before its search even starts — written for hardware this
+project has no reference implementation of to test transcription
+against, and built on a `LEAVE` this project's `DO`/`LOOP` doesn't have
+(spec/04-FORTH-CORE.md §9). Reimplemented instead with named scratch
+`VARIABLE`s (the same clarity-over-density choice `T-LINE` already
+established) and `BEGIN`/`WHILE`/`REPEAT` loops, preserving every
+classic name and role: `-TEXT ( addr1 addr2 len -- flag )` byte-
+compares; `1LINE ( -- flag )` searches the current line from the
+cursor onward for `PAD`'s `TEXT-LEN` bytes, advancing `R#` *past* a
+match (or to the line's end on failure); `FIND ( -- flag )` calls
+`1LINE` across the whole screen, wrapping once at the screen's end;
+`DELETE ( n -- )` shifts `n` bytes out of the *flat* 1024-byte buffer
+at the cursor, spanning line boundaries freely, not the sixteen-line
+display grid (confirmed live: deleting mid-line-0 text pulls line 1's
+own leading characters into line 0's now-shorter tail — a real,
+documented consequence of the block being one flat buffer, not a
+bug). `N`/`F`/`B`/`X`/`TILL`/`C` are classic exactly in role: `F`
+reads a new pattern and searches forward; `N` repeats the last one;
+`B` backs up by exactly the pattern's own length, undoing one `1LINE`
+advance; `X` finds and deletes a match; `TILL` deletes from the cursor
+through a match on the current line only; `C` overwrites from the
+cursor with fresh text, capped to whatever room is left on the line.
+
+**One deliberate scope cut: `TS` is not ported.** Classic's own
+interactive multi-line entry (`10 0 DO ... T LOOP`, screen 6) depends
+on a blocking terminal read — each loop iteration's `T` call genuinely
+pauses for the *next* line the user types. This project's `WORD`
+(`T`'s own delimiter-one scan) never blocks: it returns immediately
+with nothing found once the current input line runs out
+(spec/04-FORTH-CORE.md §6.13's own contract). A literal port would
+silently blank fifteen lines instead of prompting for each one — real
+support would need `WORD` to suspend and resume the way `ACCEPT`
+already does (`inner.ts`), a genuine engine change, not an
+`EDITOR`-vocabulary word, so it's left as a documented gap rather than
+shipped broken.
+
+**Three real bugs found and fixed while building this, all caught by
+either hand-tracing the stack effects or the test suite before this
+ever reached the live app:**
+1. A Forth `( ... )` comment doesn't nest — an inner `(` closes the
+   comment at the *first* following `)`, dumping the rest of that
+   prose line as code. Every multi-line explanatory comment in this
+   section was first drafted with ordinary nested parentheses (English
+   asides), which aborted `system.fth`'s own load the instant it hit
+   one; rewritten throughout using em-dashes/commas instead, and
+   caught immediately by loading the file line-by-line the same way
+   `test-support.ts`'s `bootMachine()` does before any of this reached
+   a real test.
+2. `TEXT` was declared to set `TEXT-LEN` (needed by the search words
+   added afterward) but the actual `DUP TEXT-LEN !` line never got
+   added to `TEXT`'s own body in the first editing pass — `TEXT-LEN`
+   silently stayed 0 forever, making every search "match" trivially at
+   the cursor's current position without moving it. Caught by
+   instrumenting `-TEXT`/`1LINE` directly rather than trusting the
+   higher-level `F`/`N` output, which just looked like "nothing
+   happened" without explaining why.
+3. `-TEXT`'s first draft used `2DUP` assuming it would duplicate the
+   two *address* arguments — it actually duplicates whatever's
+   currently on top, which by that point in the word was `(addr2,
+   len)`, not `(addr1, addr2)`. Rewritten with its own named scratch
+   variables instead of relying on stack position at all, the same
+   fix direction as `1LINE`'s design from the start. A related but
+   separate bug in `FIND`'s own give-up path — leaving `R#` at exactly
+   `BLOCK-SIZE` (one past the last valid byte) when a bounded search
+   found nothing, which `M`'s subsequent `LINE` call then rejected —
+   was fixed by factoring the wrap check into its own `WRAP-R#` word
+   and calling it from both the loop's top *and* the early exit path.
+
+**Live-verified** via `chrome-devtools-mcp` against the real app: `F`/
+`B` landing and un-landing a match precisely; `X`/`TILL` deleting
+exactly the intended span (including `X`'s own flat-buffer ripple into
+the following line); `D` then `I` restoring an exact three-line
+layout via the cut-to-`PAD` behavior; `COPY` duplicating a whole
+screen.
+
+*Implementation:* `system.fth` only — no engine changes this time.
+*Tests:* `screen-editor-commands.test.ts` (new, 19 tests) covering
+`LINE`'s bounds check, the cursor words, every line-editing command
+including the `D`→`I` cut/paste round trip, `COPY`, and the full
+search/replace set including `FIND`'s bounded not-found termination.
+
 ### 1.64 `DUMP`: a classic hex dump (M52)
 
 Requested directly as a follow-on to `BANKS`/`PROJECTS`: 16 rows of 8
@@ -3544,5 +3694,6 @@ exactly as it would be on the bare-metal target.
 | **M53** | `BANK@` (§1.65) becomes `IMMEDIATE` and dual-mode on `STATE`, found by Oliver trying `: TESTING BANK@ CHAR ;` — a plain non-`IMMEDIATE` `BANK@` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, since it was never meant to be looked up as an ordinary word. Same `S"`/`."` STATE-dispatch pattern (case 68/70), but bakes in a resolved `LIT` address rather than raw text — the name is resolved at the *defining* word's own compile time now, correct for the fixed system banks and any already-stable bank, stale only if that bank is later dropped and recreated. Interactive behavior (`BANK@ SYSV`, `BANKS`' internals) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 | **M54** | Bank resizing (§1.66), Oliver's idea: `BANK-RESIZE` edits a bank's `MMAP` size field only, inert until a `RESTORE` that detects the saved size no longer matches what the running `Machine` actually booted with (`bootBankSize`, not a live re-read, which would always agree with a just-edited `MMAP` cell) triggers a full restart instead of an in-place patch — `inner.ts`'s `dispatch()` special-cases `RESTORE` the same way `COLD` already is, yielding a new `'restart-project'` `StepSignal`/`StepStatus` the host (`app.ts`) reboots into via `Machine`'s new `bootProject` option, which re-derives every bank's base from the saved sizes through the ordinary bump allocator before restoring content. `DSTK`/`RSTK` are unconditionally cleared across that restart — their live `SP`/`RP` are high-end-relative absolute addresses a relayout can silently invalidate even when their own size didn't change, a correctness trap found while designing this. Reordering `DICT` right after `SYSV` (this same session, just before M54) is what keeps `DICT`'s own base pinned regardless of how many times it's resized. | `mmap.ts`, `banks.ts`, `storage.ts`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `resize.test.ts` |
 | **M55** | Size classes double instead of quadrupling, and lose their letter names (§1.67), Oliver's idea, prompted right after using M54's resize mechanism for the first time: the old 4x-per-step ladder (`XS`..`XXL`) could round a request up by nearly 4x; plain doubling from `MIN_BANK_SIZE` (4 KiB) to `MAX_BANK_SIZE` (4 MiB) halves that worst case while removing the maintained `SIZE_CLASSES` lookup array and its six named constants entirely — `roundToSizeClass` is now a direct power-of-two computation, no table. Every bank size chosen before this change was already a power of two (the old classes were exactly the even powers of two), so no existing bank's actual byte size changes — only new, in-between requests round more tightly now. | `banks.ts`, `index.ts`, `mmap.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `banks.test.ts`, `resize.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `mmap.test.ts` |
+| **M56** | The remaining core screen-editor commands (§1.68), completing what M48 deliberately deferred: cursor tracking (`R#`/`#LOCATE`/`#LEAD`/`#LAG`/`M`), line editing (`TEXT`/`-MOVE`/`H`/`E`/`S`/`D`/`R`/`P`/`I`, `I` kept as classic's own name per Oliver's explicit call despite shadowing `DO`/`LOOP`'s loop index), `COPY`, and search/replace (`-TEXT`/`1LINE`/`FIND`/`DELETE`/`N`/`F`/`B`/`X`/`TILL`/`C`) — all ported from `inspiration/figforth_editor_screens.txt`, reimplemented with named scratch variables and `BEGIN`/`WHILE`/`REPEAT` instead of classic's own dense stack code and `DO`-loop-plus-`LEAVE` (this project has no `LEAVE`). `TS` deliberately not ported — depends on a blocking terminal read this project's `WORD` doesn't have. Three real bugs found and fixed while hand-tracing the port: a nested-paren Forth comment aborting the whole file's load, `TEXT-LEN` never actually getting wired into `TEXT`'s own body, and `-TEXT`'s first draft using `2DUP` on the wrong two stack items (fixed, like `1LINE`, with named variables instead of positional stack tricks). | `system.fth`, `screen-editor-commands.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
