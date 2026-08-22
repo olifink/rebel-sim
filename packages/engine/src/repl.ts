@@ -227,9 +227,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // auto-generated serial for `BANK@ SYSV`-style lookups to keep
     // working at all.
     const sysvBank = this.banks.createBank('SYSV', SYSV_BANK_SIZE, 'SYSV');
+    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE, 'DICT');
     const dstkBank = this.banks.createBank('DSTK', DSTK_BANK_SIZE, 'DSTK');
     const rstkBank = this.banks.createBank('RSTK', RSTK_BANK_SIZE, 'RSTK');
-    this.dictBank = this.banks.createBank('DICT', DICT_BANK_SIZE, 'DICT');
 
     this.sysvars = new Sysvars(this.arena, sysvBank);
     this.sysvars.initHeader();
