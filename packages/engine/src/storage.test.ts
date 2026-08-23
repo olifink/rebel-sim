@@ -343,7 +343,7 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
     expect(m2Extra!.tag).toBe('DATA');
     expect(m2.arena.readByte(m2Extra!.base)).toBe(77);
 
-    for (const tag of ['SYSV', 'DSTK', 'RSTK', 'DICT', 'CHAR', 'KMAP', 'WORK', 'MMAP']) {
+    for (const tag of ['SYSV', 'DSTK', 'RSTK', 'DICT', 'CHAR', 'KMAP', 'FONT', 'WORK', 'MMAP']) {
       const original = m1.banks.findBank(tag);
       const reloaded = m2.banks.findBank(tag);
       expect(reloaded!.base).toBe(original!.base);

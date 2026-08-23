@@ -267,6 +267,33 @@ indexed/palette display mode is out of this version's scope (§9) —
 raise it against this document rather than inventing a local
 extension.
 
+### 3.7 Sysvar contract — `FONT` group
+
+Whether a target has a Forth-addressable font bank at all is target
+discretion, not required by this document — `hal_blit_glyph` (§3.3)
+stays opaque about *how* a `char_code` resolves to pixels, so a target
+whose font stays entirely HAL-side, compiled-in, host-owned state (no
+`FONT` bank, no field below) is fully conformant. Rebel-ROM's own font
+system is exactly this: compiled-in `TFont` structs chosen once at
+boot, no arena-resident bank, no runtime switching yet
+(`rebel-rom/docs/FONT-SYSTEM.md` §6).
+
+A target that *does* expose a Forth-addressable font bank — Rebel-Sim
+does, as of M59 — **MUST** name the field below, at this position, so a
+portable tool (an inspector, a font-editing word) can find it uniformly
+on any target that has one at all:
+
+| Field | Meaning |
+|---|---|
+| `FONT-BASE` | Arena address of the currently-active `FONT`-tagged bank (`02-MEMORY-MODEL.md` §4.6). Switching fonts is repointing this at a different `FONT`-tagged bank — no separate switching mechanism is defined or needed. |
+
+Glyph geometry (cell width/height, first/last character code, bytes per
+row) is deliberately not a sysvar here — every target that has shipped
+one so far uses a single fixed geometry decided at build time (Rebel-Sim:
+8×8, 256 chars, 1 byte/row), so there's no concrete cross-target need to
+make it runtime-inspectable yet. Revisit if a target's font ever needs
+to vary at runtime.
+
 ---
 
 ## 4. Keyboard / Input
@@ -873,8 +900,9 @@ somewhere, not before:
   primitive semantics are `04-FORTH-CORE.md`'s job, not this
   document's; noted here only so their absence from every list above
   isn't mistaken for an oversight.
-- **`FONT`/`SPRITE` sysvar groups and any HAL surface for them.** No
-  target has a Forth-addressable font or sprite bank yet.
+- **`SPRITE` sysvar group and any HAL surface for it.** No target has a
+  Forth-addressable sprite bank yet. (`FONT` is no longer deferred — see
+  §3.7, added M59 once Rebel-Sim actually had one.)
 - **Per-channel-type configuration** (§5). A future non-keyboard channel
   with real configuration needs — a radio link's frequency/spreading-
   factor parameters, for instance — will need somewhere to hold that

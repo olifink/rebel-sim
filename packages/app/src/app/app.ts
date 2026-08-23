@@ -235,13 +235,19 @@ export class App implements AfterViewInit, OnDestroy {
    * rather than empty. */
   private constructMachine(bootProject?: string): void {
     const storageHal = createLocalStorageHalIfSupported();
+    const canvasScreenHal = this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined;
     this.machine = new Machine({
-      screenHal: this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined,
+      screenHal: canvasScreenHal,
       storageHal,
       timingHal: PERFORMANCE_TIMING_HAL,
       remoteChannel: this.remoteChannel,
       bootProject,
     });
+    // M59: CanvasScreenHal reads glyph data from the arena's FONT bank
+    // (FONT-BASE sysvar) on every blit, but it's constructed before the
+    // Machine that owns that arena — attach() supplies the reference
+    // now that one exists, before anything can possibly blitGlyph().
+    canvasScreenHal?.attach(this.machine.arena, this.machine.sysvars);
     // Zone-wrapped (unlike the original inline ngAfterViewInit code) since
     // this also runs from tick()'s 'cold' branch, which is already
     // outside the Angular zone — signals set from there need an explicit
@@ -266,7 +272,12 @@ export class App implements AfterViewInit, OnDestroy {
     // REPL starts accepting input, so it's available from the very first
     // prompt. An interim host-text-file step, not the eventual
     // portable-screens answer (§4).
-    await this.loadSystemVocabulary();
+    // M59: the default font loads in parallel — independent fetches,
+    // nothing here depends on font content — but both are awaited
+    // before VERSION/startRepl() below, so no glyph is ever blitted
+    // before real font bytes exist in the FONT bank (the same ordering
+    // guarantee this method already gave system.fth).
+    await Promise.all([this.loadSystemVocabulary(), this.loadDefaultFont()]);
 
     // M7a: the outer loop lives entirely in the engine now — prompt,
     // ACCEPT a line onto the screen, interpret, repeat, forever. The app
@@ -325,6 +336,28 @@ export class App implements AfterViewInit, OnDestroy {
         this.machine.interpret(line);
       }
     });
+  }
+
+  // M59: the default system font — same "fetched public asset, offline-
+  // precached by the service worker for free" treatment as
+  // loadSystemVocabulary()'s system.fth (see that method's own comment).
+  // Not wrapped in try/catch, same reasoning: a missing/broken bundled
+  // font is a bug in our own build, not a recoverable runtime condition,
+  // and should fail loudly rather than silently boot with blank glyphs.
+  // Writes straight into the arena at FONT-BASE (set by the engine at
+  // Machine construction, repl.ts) — no Storage/project-asset framing
+  // involved, this is the app's own bundled default, not a saved
+  // project asset.
+  private async loadDefaultFont(): Promise<void> {
+    const response = await fetch('rebel.FNT');
+    if (!response.ok) {
+      throw new Error(`failed to fetch rebel.FNT: ${response.status} ${response.statusText}`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const fontBase = this.machine.sysvars.get('FONT', 'FONT-BASE');
+    for (let i = 0; i < bytes.length; i++) {
+      this.machine.arena.writeByte(fontBase + i, bytes[i]);
+    }
   }
 
   ngOnDestroy(): void {

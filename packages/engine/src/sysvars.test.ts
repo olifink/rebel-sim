@@ -62,8 +62,9 @@ describe('listSysvars (web-only monitor-panel support)', () => {
 
     // FORTH.STATE is a real, populated field.
     expect(entries.some((e) => e.group === 'FORTH' && e.field === 'STATE')).toBe(true);
-    // FONT and SPRITE are reserved with no fields yet (rebel-opcodes.json).
-    expect(entries.some((e) => e.group === 'FONT')).toBe(false);
+    // FONT.FONT-BASE is real now too (M59) — SPRITE is still reserved
+    // with no fields yet (rebel-opcodes.json).
+    expect(entries.some((e) => e.group === 'FONT' && e.field === 'FONT-BASE')).toBe(true);
     expect(entries.some((e) => e.group === 'SPRITE')).toBe(false);
   });
 

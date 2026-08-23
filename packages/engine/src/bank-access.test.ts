@@ -32,6 +32,16 @@ describe('BANK@ (DEVELOPING.md §10, M18)', () => {
     expect(() => m.interpret('BANK@ NOPE')).toThrow('unknown bank: NOPE');
   });
 
+  // M59: the engine creates the FONT bank and points FONT-BASE at it —
+  // the host (app.ts) fills the real glyph bytes in afterward, but the
+  // bank/sysvar wiring itself is engine-owned and boot-time.
+  it('creates a FONT bank at boot and points FONT.FONT-BASE at it', () => {
+    const m = new Machine();
+    const fontBank = m.banks.findBank('FONT')!;
+    expect(fontBank.size).toBe(2048);
+    expect(m.sysvars.get('FONT', 'FONT-BASE')).toBe(fontBank.base);
+  });
+
   // M50 (found by Oliver): resolves by name now, not tag — name is the
   // real, uniqueness-backed identity (banks.ts), tag is expected to
   // repeat once multiple banks share one. Two DATA-tagged banks are

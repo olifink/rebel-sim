@@ -226,10 +226,17 @@ Base `0x080`, 64 bytes reserved. Field meanings: `01-HAL.md` §4.6.
 
 ## 8. `FONT`
 
-Base `0x0C0`, 64 bytes reserved. Fully reserved, no fields defined in
-this version — no known target has a Forth-addressable font bank yet
-(`01-HAL.md` §10). Populate when one actually does; do not speculate
-ahead of that need.
+Base `0x0C0`, 64 bytes. [Revised M59] Populated for real once Rebel-Sim
+actually had a Forth-addressable font bank to point at — field meanings:
+`01-HAL.md` §3.7. Fully reserved before this (no fields defined; no
+known target had one yet); still OPTIONAL group-wide, per §3.7 — a
+target with no Forth-addressable font bank at all (Rebel-ROM's own font
+system stays HAL-side compiled-in structs, `rebel-rom/docs/FONT-SYSTEM.md`
+§6) simply doesn't populate this group.
+
+| Offset | Field | Required? |
+|---|---|---|
+| 0 | `FONT-BASE` | REQUIRED if the target has a Forth-addressable font bank at all |
 
 ## 9. `SPRITE`
 

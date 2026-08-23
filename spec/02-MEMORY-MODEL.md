@@ -346,6 +346,7 @@ to it — it is not exhaustive by design (§7).
 | `MMAP` | The arena's own bank table (§5) | Per-arena (each arena owns and describes only its own banks) |
 | `SCRN` | Display framebuffer | **Shared** — one physical/simulated screen, never duplicated |
 | `KMAP` | Active keymap translation table (`01-HAL.md` §4) | **Shared** — host/hardware keyboard-layout configuration, not per-program state |
+| `FONT` | Active glyph bitmap data, address tracked in the `FONT` sysvar group's `FONT-BASE` field (`01-HAL.md` §3.7, `03-SYSVARS.md` §8) | **Shared** — one physical/simulated rendering resource, same reasoning as `KMAP`, not per-program state. OPTIONAL: a target's font MAY instead stay entirely HAL-side, never a bank at all (`01-HAL.md` §3.7) — Rebel-ROM's own font system currently does. |
 
 **Per-arena** means: each isolated arena that creates one gets its own,
 private copy — every running Forth machine has its own dictionary and
@@ -355,9 +356,10 @@ is currently attached (§6). Stack growth direction and overflow
 handling **MUST** be identical across targets: down-growing within each
 stack's own bank, bounds-checked against that bank's own recorded size.
 
-`SCRN` and `KMAP` staying shared rather than duplicated is a deliberate,
-narrow exception, not a precedent for treating other subsystems loosely
-— see §6 for why exactly these two, and no others, stay singular.
+`SCRN`, `KMAP`, and `FONT` staying shared rather than duplicated is a
+deliberate, narrow exception, not a precedent for treating other
+subsystems loosely — see §6 for why exactly these, and no others, stay
+singular.
 
 ### 4.7 Naming: `tag` vs. `name`
 
@@ -652,6 +654,9 @@ deliberately separate:**
 - **`SCRN`** — inherently singular hardware/host resource (one screen).
   Never duplicated; whichever arena is attached gets its contents
   rendered from it (via that arena's own `CHAR`, below).
+- **`FONT`** (on a target that has one at all, `01-HAL.md` §3.7) — same
+  reasoning as `KMAP`: which glyphs render is a rendering-resource
+  concern, not per-program state.
 - **Any singular input/storage controller** — arenas don't each get
   their own; only the attached arena receives routed input.
 
@@ -780,4 +785,4 @@ one becomes real and load-bearing somewhere, not before:
 | Bank `name` uniqueness is global across every arena, not per-arena | §4.7, §6.5 |
 | Auto-generated bank names share one counter (`MMAP`'s own header), regardless of creation path | §4.7, §5.1 |
 | A Forth task is bound to exactly one arena for its whole lifetime; only the *attached* arena is runtime-switchable | §6.1 |
-| `SCRN`/`KMAP` stay singular/shared; every other known bank tag is per-arena | §4.6, §6.2 |
+| `SCRN`/`KMAP`/`FONT` stay singular/shared; every other known bank tag is per-arena | §4.6, §6.2 |

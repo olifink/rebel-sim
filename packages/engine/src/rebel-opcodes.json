@@ -177,6 +177,7 @@
     "CHAR": "character-code grid, per-arena, 1 byte per cell, write-through into the framebuffer via ScreenHal (in use since M3, matches Rebel-ROM's CHAR bank exactly — docs/SCREEN-MODULE.md §3)",
     "SCRN": "pixel framebuffer — NOT an arena bank in Rebel-Sim (matches Rebel-ROM: externally-backed, outside the arena's own memory accounting, excluded from the portable-dump claim per FORTH-ARCHITECTURE.md §8). Rebel-Sim's analog is the host-supplied ScreenHal implementation drawing to a <canvas>, never arena-resident memory.",
     "KMAP": "raw-usage-code -> character translation table, u8[2][256] (unshifted/shifted planes), in use since M4 (docs/KEYBOARD.md §6). CLAUDE.md lists KMAP as shared/singular rather than per-arena like SCRN — Rebel-Sim only has one arena today (no multi-arena isolation yet), so it's allocated inside that arena like CHAR; the shared/singular distinction becomes visible once multi-arena support lands.",
+    "FONT": "glyph bitmap data (256 chars x 8 bytes, one row per byte, MSB = leftmost pixel), in use since M59 — loaded at boot from packages/app/public/rebel.FNT, address tracked in the FONT sysvar group's FONT-BASE field (spec/03-SYSVARS.md §8) rather than hardcoded, so a future font switch is just repointing that sysvar at a different FONT-tagged bank. Shared/singular like KMAP/SCRN, same reasoning (one physical rendering resource, not per-program state) and same one-arena-today caveat. Rebel-ROM's own font system stays compiled-in TFont structs with no Forth-addressable bank yet (docs/FONT-SYSTEM.md §6) — Rebel-Sim is ahead here, not matching an existing rebel-rom mechanism.",
     "TIB": "Terminal Input Buffer, per-arena, in use since M7a — the resident scratch region ACCEPT reads a REPL line into. Not a Rebel-ROM-derived tag (no shipped Rebel-ROM Phase 11 yet, same status as Rebel-Sim-only DATA/FORTH group precedent) and not a persistable project-asset bank — Storage never touches it.",
     "PAD": "Scratch text region, per-arena, in use since M16 (DEVELOPING.md §7) — holds the text S\" copies in while interpreting, so its addr/len can be pushed and used immediately (e.g. by TYPE) without needing dictionary space. Rebel-Sim-only, no Rebel-ROM Phase 11 precedent yet, same status as TIB. Deliberately not reused for anything else (no reentrancy/nesting support) — overwritten unconditionally on each S\" call, a documented footgun matching real Forth's own PAD semantics. Not a persistable project-asset bank — Storage never touches it.",
     "BLKS": "Generic 1024-byte-block-addressable storage, per-arena, fixed at 16 blocks (16 KiB, exactly one size class, no rounding waste) — FORTH-ARCHITECTURE.md §7's `hal_block_read`/`hal_block_write` porting note (renamed from `SCRS` 2026-08-18: the bank carries no screen/text assumption; classic Forth source-editing screens are its first consumer, not its definition). `(BLOCK-READ)`/`(BLOCK-WRITE)` (140/141) are the only primitives that touch it directly — plain memcpy against `BLKS-base + n*1024`, bounds-checked against the 16-block capacity. A persistable project-asset bank like any other (`.BLK` extension, storage.ts's TAG_TO_EXTENSION) — SAVE/RESTORE/BSAVE/BLOAD round-trip it whole; FLUSHing a dirty in-Forth buffer into it (once BLOCK/BUFFER/UPDATE/FLUSH exist in system.fth) is a separate, smaller act from persisting the whole bank to disk."
@@ -218,8 +219,13 @@
     },
     "FONT": {
       "baseOffset": 192,
-      "note": "matches src/sysvars.h's SYSVARS_FONT_OFFSET (0x0C0), Rebel-ROM's Phase 6 font-blob system. Rebel-Sim doesn't have a Forth-addressable FONT bank — M3's glyph bitmap is a static host-side asset in packages/app, not arena memory — so this group stays reserved/empty rather than reimplemented.",
-      "fields": {},
+      "note": "matches src/sysvars.h's SYSVARS_FONT_OFFSET (0x0C0). M59: Rebel-Sim now has a real, arena-resident FONT bank (packages/app's rebel.FNT loaded at boot) — FONT-BASE tracks its address. Rebel-ROM's own Phase 6 font system stays compiled-in TFont structs with no Forth-addressable bank or runtime switching yet (docs/FONT-SYSTEM.md §6), so this is Rebel-Sim genuinely ahead here, not parity with an existing rebel-rom field.",
+      "fields": {
+        "FONT-BASE": {
+          "offset": 0,
+          "note": "arena address of the currently-active FONT-tagged bank (spec/03-SYSVARS.md §8). Set once at boot to the default FONT bank's base; repointing it at a different FONT-tagged bank is how a future font switch would work — no new mechanism needed for that."
+        }
+      },
       "groupSizeBytes": 64
     },
     "SPRITE": {

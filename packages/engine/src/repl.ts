@@ -86,6 +86,10 @@ const DICT_BANK_SIZE = 1 << 16; // 64 KiB
 // cross-target-divergence note applies, docs/KEYBOARD.md §6); table
 // itself is 512 bytes (KMAP_TABLE_SIZE, keyboard.ts).
 const KMAP_BANK_SIZE = 2048;
+// M59: 256 chars x 8 bytes/glyph — the real content size of
+// packages/app/public/rebel.FNT exactly, and MIN_BANK_SIZE (M58) to
+// the byte, so no rounding waste either.
+const FONT_BANK_SIZE = 2048;
 // spec/04-FORTH-CORE.md §5.3/§6.13: the TIB now has to physically hold
 // every line fed to the outer interpreter (WORD scans real arena bytes,
 // not a JS string) — bumped from 128 once system.fth's own longest line
@@ -324,6 +328,17 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     const kmapBank = this.banks.createBank('KMAP', sizeFor('KMAP', KMAP_BANK_SIZE), 'KMAP');
     this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
+
+    // M59: the engine creates the container and points FONT-BASE at it,
+    // same "engine owns the bank, host fills the content" split DICT/
+    // system.fth already establishes — no bundled font data ships in
+    // this package (PORTING-WEB.md: stay host-agnostic). The host (the
+    // app's CanvasScreenHal) writes the real glyph bytes in after boot
+    // and reads through FONT-BASE on every blit, so a future font
+    // switch is just repointing this sysvar at a different FONT-tagged
+    // bank — no new mechanism needed for that.
+    const fontBank = this.banks.createBank('FONT', sizeFor('FONT', FONT_BANK_SIZE), 'FONT');
+    this.sysvars.set('FONT', 'FONT-BASE', fontBank.base);
     this.channel = options.channel
       ?? (options.remoteChannel
             ? new CompositeChannel([new KeyboardChannel(this.keyboard), options.remoteChannel])
