@@ -275,6 +275,23 @@ VARIABLE CURRENT-VOCAB
 ( DUMP itself included, since it echoes back before running -- so )
 ( every row but the first looked misaligned against it. )
 
+( DUMP-NEXT, M61 -- Oliver's idea: an address-less DUMP continues )
+( right where the last one left off, monitor-style paging -- plain )
+( DUMP alone shows the next 128 bytes, no need to track/retype an )
+( address by hand. An ordinary visible VARIABLE, not hidden internal )
+( plumbing like HEX8's own scratch words -- poking it directly to )
+( jump elsewhere works exactly as well as giving DUMP an explicit )
+( address does, both update it the same way. Detects "no address )
+( given" via DEPTH rather than a sentinel value, since any real cell )
+( value is a legitimate address to dump -- a real limitation, not )
+( just a theoretical one: called from inside another word with an )
+( unrelated value already on the stack, DEPTH can't tell that value )
+( apart from a deliberately-supplied address. Fine for what DUMP )
+( actually is -- an interactive top-level inspection word, always )
+( typed directly, never a building block other definitions call. )
+VARIABLE DUMP-NEXT
+0 DUMP-NEXT !
+
 ( HEXDIGIT n -- : prints one hex digit for 0..15. )
 : HEXDIGIT DUP 10 < IF 48 + ELSE 10 - 65 + THEN EMIT ;
 
@@ -293,7 +310,9 @@ VARIABLE CURRENT-VOCAB
   HEXDIGIT HEXDIGIT HEXDIGIT HEXDIGIT
 ;
 
-: DUMP ( addr -- )
+: DUMP ( addr | -- )
+  DEPTH 0= IF DUMP-NEXT @ THEN
+  DUP 128 + DUMP-NEXT !
   CR
   16 0 DO
     DUP I 8 * +

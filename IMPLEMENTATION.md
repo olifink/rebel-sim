@@ -3861,6 +3861,46 @@ colon-definition split across five block lines actually runs and
 produces the right answer, and bare values on separate lines don't
 corrupt a following `LOAD`.
 
+### 1.73 `DUMP-NEXT`: an address-less `DUMP` pages forward (M61, Oliver's idea)
+
+`DUMP` (§1.64) always needed an explicit address. Requested directly:
+"store the next address to dump to a variable and use that if no
+address is given on the stack" — classic-monitor "page forward" by
+just typing `DUMP` again, no need to track or retype an address by
+hand.
+
+`DEPTH 0= IF DUMP-NEXT @ THEN` at the top decides which form was used
+— any real cell value is a legitimate address, so there's no sentinel
+to distinguish "no address" from "address 0" other than actually
+checking how many things are on the stack. `DUP 128 + DUMP-NEXT !`
+right after resolves and stores the *next* start address unconditionally,
+before the existing 16-row body runs unchanged — so both forms
+(explicit-address and bare) always leave `DUMP-NEXT` advanced by 128
+for the following call, and the two compose naturally: dump a specific
+spot once, then keep paging forward from there with bare `DUMP` calls.
+
+**A real, accepted limitation, not a bug:** `DEPTH`-based detection
+can't tell a deliberately-supplied address apart from an unrelated
+value already on the stack if `DUMP` were ever called from inside
+another definition with something else sitting underneath. Not a
+concern for what `DUMP` actually is — an interactive top-level
+inspection word, always typed directly, never a building block other
+definitions call.
+
+`DUMP-NEXT` is left as an ordinary, visible `VARIABLE` (not `HIDE`n
+like `HEX8`'s own internal scratch words) — poking it directly to jump
+elsewhere works exactly as well as giving `DUMP` an explicit address,
+consistent with this project's "just memory, no hidden magic" sysvar/
+scratch-variable philosophy elsewhere (`HERE`/`LATEST`/`STATE`, `SCR`,
+`R#`).
+
+*Implementation:* `system.fth` (`DUMP-NEXT`, `DUMP`). *Tests:*
+`dump.test.ts` — five new cases: first bare `DUMP` starts at 0, an
+explicit-address `DUMP` sets up a following bare one correctly, two
+consecutive bare `DUMP`s page forward 128 bytes at a time, writing
+`DUMP-NEXT` directly redirects the next bare `DUMP`, and the
+address-less form is stack-neutral too.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4025,5 +4065,6 @@ exactly as it would be on the bare-metal target.
 | **M58** | `MIN_BANK_SIZE` drops 4 KiB → 2 KiB (§1.70), Oliver's idea, prompted by auditing how much of the 4 KiB floor `MMAP`/`KMAP`/`WORK`/`SYSV` actually used (well under half each). Bump-allocator alignment (`mmap.ts`) now derives from `MIN_BANK_SIZE` instead of a hardcoded 4095/`~4095` mask, preserving the doubling ladder's zero-padding property at the new floor. `DSTK`/`RSTK` deliberately cut from 1024 cells to 512 (a real capacity decision, not a side effect — confirmed with Oliver, since unlike the other four banks they weren't rounded-up-from-smaller in the first place). `SYSV`/`KMAP` now diverge from `rebel-rom`'s still-4-KiB-floor bank sizing — flagged in code comments as a widening of an already-existing ladder mismatch (`rebel-rom` never adopted M55's doubling ladder either), not a new problem. `CHAR`/`DICT`/`BLKS` unaffected — already above the new floor. | `banks.ts`, `mmap.ts`, `repl.ts`, `02-MEMORY-MODEL.md`, `banks.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `strings.test.ts` |
 | **M59** | Arena-resident `FONT` bank (§1.71), loaded by default from the user's own `rebel.FNT` (packages/app/public), resolving `spec/03-SYSVARS.md` §8's long-reserved `FONT` group for real. `repl.ts` creates the bank and points the new `FONT.FONT-BASE` sysvar at it; `app.ts` fetches `rebel.FNT` and writes it into the arena in parallel with `system.fth`, before anything can render. `CanvasScreenHal` now reads glyphs from the arena via `FONT-BASE` instead of importing a compiled-in font (`font-zxspectrum.ts` deleted) — `attach(arena, sysvars)` solves the ordering problem of the HAL being constructed before the `Machine` that owns what it needs to read. Confirmed with Oliver: iteration is edit-the-file-then-refresh, same as `system.fth` already works, no dedicated live-reload tool built. Flagged, not hidden: `rebel-rom`'s own font system stays entirely HAL-side with no Forth-addressable bank or runtime switching (`docs/FONT-SYSTEM.md` §6) — this makes Rebel-Sim genuinely ahead here, and `01-HAL.md` §3.7 makes the whole `FONT` bank/sysvar group OPTIONAL for exactly that reason. | `rebel-opcodes.json`, `repl.ts`, `canvas-screen-hal.ts`, `app.ts`, `01-HAL.md`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `bank-access.test.ts`, `sysvars.test.ts`, `storage.test.ts` |
 | **M60** | `LOAD` stack-safety bug (§1.72), found live by Oliver: a colon-definition with `DO`/`LOOP` split across block lines threw `? ABORT` on `LOAD`, working fine on one line. Root cause: `LOAD` kept the block's base address live on the *data* stack across its whole 16-line loop, re-`DUP`-ing it each iteration — `DO`'s own compile-time backpatch address, still pending on that same stack until its matching `LOOP` (a later block line) consumed it, got re-`DUP`-ed instead, corrupting every subsequent line's computed address. Isolated in a fresh `Machine` (not the live session) to a general case: any interpreted line leaving anything on the data stack, not just `DO`, breaks it — confirmed with two bare unconsumed numbers split across lines, no colon-definition involved. Fixed with two dedicated variables (`LOAD-ADDR`/`LOAD-CONTEXT`) instead of leaving state live on the data stack, matching `R#`/`SCR`/`T-LINE`'s own established pattern. | `system.fth`, `screen-editor.test.ts` |
+| **M61** | Address-less `DUMP` (§1.73), Oliver's idea: a bare `DUMP` continues from wherever the last one left off, monitor-style paging, instead of always needing an explicit address. `DEPTH 0= IF DUMP-NEXT @ THEN` decides which form was used; `DUP 128 + DUMP-NEXT !` right after unconditionally advances the next start address, so explicit-address and bare calls compose naturally. `DUMP-NEXT` stays an ordinary visible `VARIABLE`, pokeable directly, not hidden internal plumbing. | `system.fth`, `dump.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
