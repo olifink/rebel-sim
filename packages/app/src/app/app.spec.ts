@@ -81,7 +81,6 @@ describe('App', () => {
 
   it('typing a line on the keyboard and pressing Enter interprets it', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
 
@@ -112,7 +111,6 @@ describe('App', () => {
   // they do underneath.
   it('a breakpoint holds the REPL until resumed, matching debug_continue', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
@@ -157,7 +155,6 @@ describe('App', () => {
 
   it('clicking a breakable dictionary word arms a breakpoint, shown in the breakpoints section', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
@@ -191,7 +188,6 @@ describe('App', () => {
   // never has one), keep the original breakpoint-oriented text.
   it('the dictionary hover tooltip shows a primitive\'s note when it has one, falling back to the breakpoint hint otherwise', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
@@ -213,7 +209,6 @@ describe('App', () => {
 
   it('WARM clears the stack but leaves the dictionary untouched', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
@@ -246,7 +241,6 @@ describe('App', () => {
   // touching this test at all.
   it('COLD reconstructs the Machine — the dictionary resets to boot + system.fth vocabulary', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
@@ -268,7 +262,6 @@ describe('App', () => {
 
   it('the left-side sysvars panel lists live FORTH.STATE/.BASE values and updates as they change', async () => {
     const fixture = TestBed.createComponent(App);
-    fixture.detectChanges();
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
     const app = fixture.componentInstance as unknown as {
