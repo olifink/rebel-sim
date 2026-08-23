@@ -780,6 +780,42 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     Full derivation and the mechanism Rebel-Sim uses (a dedicated
     signal unwinding the call chain, distinct from an ordinary error):
     `spec/04-FORTH-CORE.md` §6.12.
+17. **[NEW]** What a blocking `KEY` (and more generally, any blocking
+    terminal-input primitive, e.g. a target whose `WORD` needs to read
+    past the end of the current line) is actually *built from* on a
+    target with no underlying cooperative scheduler. §7a's own
+    `hal_get_key()` porting note already names the shape of the
+    problem for Rebel-Board — "a wait-for-flag/interrupt primitive
+    appropriate to that board's own concurrency model (**no Circle
+    scheduler there**...)" — but never says what fills that gap, and
+    it isn't listed as an open decision until now. Found concretely,
+    Rebel-Sim M56: `TS` (`inspiration/figforth_editor_screens.txt`
+    screen 6, classic's interactive multi-line screen-editor entry)
+    was left unported specifically because it needs its own `WORD` to
+    suspend mid-scan and resume once more input arrives, the same
+    shape `KEY`/`ACCEPT` already need — Rebel-Sim has that (a JS
+    generator `yield 'blocked'`, `inner.ts`), Rebel-ROM has it too
+    (Circle's `CScheduler` — a Forth `CTask` just blocks on a sync
+    primitive and the scheduler runs whatever else is ready, `docs/
+    EXECUTION-LOOP.md` §1, no bespoke redesign needed there), but
+    **Rebel Machine MkI (bare-metal RP2350, no Circle) and Headless
+    Rebel firmware (RP2350/RP2040, UART-driven) have neither, and
+    don't exist in code yet to have settled it implicitly.** Two
+    answers are both legitimate, and this spec shouldn't assume one:
+    (a) genuinely blocking, single-tasking — spin or interrupt-wake
+    with nothing else running meanwhile, exactly like classic 8-bit
+    fig-FORTH, acceptable rather than a fallback if nothing on that
+    target needs to keep running during the wait (no animated cursor,
+    no background audio); or (b) a minimal hand-rolled cooperative
+    mini-scheduler, only actually needed once something *does* need to
+    keep ticking concurrently — real design work, not free the way
+    Circle's `CScheduler` is. Whichever a given bare-metal target
+    picks, the already-settled part of the contract still holds
+    unchanged: the raw ring-buffer read (`hal_key_pressed?`/
+    `hal_get_key`) stays non-blocking always; only the optional
+    blocking layer built on top of it is target-specific. UEFI, further
+    out and even less scoped, inherits the same open question with no
+    lean either way yet.
 
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 
