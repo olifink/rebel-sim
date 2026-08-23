@@ -78,6 +78,48 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
     m.interpret('USE FORTH');
     expect(findable(m, 'LOADED-WORD')).toBe(true);
   });
+
+  // Found live (Oliver): a DO...LOOP colon-definition split across
+  // block lines threw "? ABORT" on LOAD, but the identical source on
+  // one line worked fine. Root cause was LOAD itself (M60): it kept
+  // the block's base address live on the data stack, re-DUPing it
+  // each of its 16 iterations — anything an interpreted line left on
+  // the stack (DO's own compile-time backpatch address, here) got
+  // re-DUPed instead on the next iteration, producing a garbage
+  // per-line address and feeding INTERPRET unrelated arena memory.
+  // Fixed by moving the block address (and the saved CONTEXT) into
+  // dedicated variables, matching this file's own R#/SCR/T-LINE
+  // convention for exactly this kind of loop-persistent state.
+  it('a colon-definition with DO...LOOP split across block lines loads and runs correctly', () => {
+    const m = bootMachine();
+    m.interpret('USE EDITOR');
+    m.interpret('5 CLEAR');
+    m.interpret('0 T : SUM3');
+    m.interpret('1 T   0');
+    m.interpret('2 T   3 0 DO');
+    m.interpret('3 T     I +');
+    m.interpret('4 T   LOOP ;');
+    expect(() => m.interpret('5 LOAD')).not.toThrow();
+
+    m.interpret('USE FORTH');
+    m.interpret('SUM3');
+    expect(m.stack.pop()).toBe(3); // 0+1+2
+  });
+
+  // The general case behind the DO/LOOP symptom above: *any* value an
+  // interpreted line leaves on the data stack, not just DO's own
+  // backpatch address, used to corrupt LOAD's next iteration — even
+  // with no colon-definition or control-flow word involved at all.
+  it('bare, uncomsumed values split across block lines do not corrupt later lines', () => {
+    const m = bootMachine();
+    m.interpret('USE EDITOR');
+    m.interpret('6 CLEAR');
+    m.interpret('0 T 42');
+    m.interpret('1 T 99');
+    expect(() => m.interpret('6 LOAD')).not.toThrow();
+
+    expect(m.stack.toArray()).toEqual([99, 42]); // top of stack first — 99 pushed last
+  });
 });
 
 describe('EDITOR vocabulary isolation (VOCABULARY/DEFINITIONS/USE, DEVELOPING.md §8, revised for the CONTEXT/CURRENT split)', () => {

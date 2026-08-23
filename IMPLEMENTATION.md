@@ -3804,6 +3804,63 @@ base), `sysvars.test.ts` (`listSysvars` now finds a real `FONT.FONT-BASE`
 field, not an empty reserved group), `storage.test.ts` (`FONT` added to
 the standard-bank round-trip-determinism check).
 
+### 1.72 `LOAD`'s own stack-safety bug: a colon-definition split across block lines could `ABORT` (M60)
+
+Found live, by Oliver, using the app directly: a `: HELLO ... ;` with
+`DO`/`LOOP` written one clause per block line (via `T`) threw `? ABORT`
+on `LOAD` — but the identical source typed as one interactive line
+worked fine. `LOAD` (§1.4, `system.fth`) kept the block's base address
+live on the *data* stack for its whole 16-line loop, re-`DUP`-ing it
+each iteration:
+
+```forth
+: LOAD ( n -- )
+  ...
+  SWAP BLOCK
+  L/SCR 0 DO
+    DUP I C/L * + C/L (SET-INPUT)
+    INTERPRET
+  LOOP
+  DROP ...
+```
+
+`DO`, `IMMEDIATE`, pushes its own backpatch address onto that *same*
+data stack at compile time, popped only once its matching `LOOP` runs.
+With `DO` on one block-line and `LOOP` on a later one, that pending
+value was still sitting there when the next iteration's `DUP` ran —
+dup-ing the wrong thing, computing a garbage line address, and feeding
+`INTERPRET` unrelated arena memory as if it were Forth source (usually
+non-text bytes, which fail `NUMBER`'s validation and hit `NUM-ABORT` —
+explaining the reported symptom exactly: a big gap of invisible
+characters, from `TYPE`-ing the bad token, before the printed `ABORT`).
+
+**Isolated in a fresh `Machine`, not the live session, to avoid
+touching in-progress work**: confirmed this was never actually specific
+to `DO`/`LOOP` — a bare, unconsumed number split across two block
+lines (`42` then `99`, no colon-definition at all) reproduced the
+identical `ABORT`. Any interpreted line leaving *anything* on the data
+stack corrupted the next iteration, `DO` was just the first construct
+naturally likely to do that while spanning two lines.
+
+**Fix:** two new variables, `LOAD-ADDR`/`LOAD-CONTEXT`, hold the block
+address and the saved `CONTEXT` instead of leaving them live on the
+data stack across arbitrary interpreted content — the same pattern
+this file's own `R#`/`SCR`/`T-LINE`/`TEXT-LEN` scratch variables
+already use for exactly this kind of loop-persistent state. `HIDE`n
+immediately after `LOAD`, their only consumer, matching `NUM-ADDR`/
+`NUM-LEN`/`NUM-ABORT`'s own precedent right after `NUMBER`. (The first
+draft of this fix's own explanatory comment briefly reintroduced the
+project's recurring nested-`(`-comment failure mode — see `LOAD`'s
+inline comment itself, and M56/M57's own write-ups — caught immediately
+since it broke `bootMachine()` for every single test in the suite, not
+just `LOAD`'s own.)
+
+*Implementation:* `system.fth` (`LOAD`, `LOAD-ADDR`, `LOAD-CONTEXT`).
+*Tests:* `screen-editor.test.ts` — two new regressions: a `DO`/`LOOP`
+colon-definition split across five block lines actually runs and
+produces the right answer, and bare values on separate lines don't
+corrupt a following `LOAD`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3967,5 +4024,6 @@ exactly as it would be on the bare-metal target.
 | **M57** | `TS` (§1.69): interactive multi-line block entry, rebuilt rather than literally ported once the M56 premise turned out wrong — classic's own `T` never reads anything itself, it's the terminal hardware that echoes keystrokes, a model this project's screen doesn't have. Needed no engine change: `KEY` already suspends correctly through any depth of colon-word/loop nesting (`dispatch`/`executeXT`/`threadFrom`'s `yield*` chain), so a plain `BEGIN`-loop around it gets `ACCEPT`'s own suspend/resume for free. Built instead around `AT-XY`/`CHAR!` positioned writes (`C/L` doesn't evenly divide the 80-column screen) and `CURSEN`/`CURSDIS` (M25, never actually called until now). Found and fixed while building it: five more nested-paren comment breaks; `>=`, missing from this dialect, hit as a real bug twice independently (§1.68's `FIND`, now `TS`'s own overflow guard) and finally added for real (`: >= < 0= ;`); a genuine `R#`-left-out-of-range bug the first test run caught; Escape given a `KMAP` entry for the first time, flagged as a Rebel-Sim-only addition until `rebel-rom`'s own keymap is confirmed to need the same thing. Two Oliver follow-ups after trying it live: Esc leaves the cursor visible instead of hiding it (`CURSDIS` dropped from just that exit path); Up/Down/Left/Right cursor movement added (four more `KMAP` entries, same reasoning as Escape), deliberately unclamped beyond the screen's own `0..BLOCK-SIZE` bounds ("consistent to drop clamping everywhere... as long as we stay inside the screen buffer boundaries") — which also retired `TS-START` entirely, since `TS` always starts fresh at `R#` 0 and that variable had only ever equaled 0 in practice. | `system.fth`, `keyboard.ts`, `screen-editor-commands.test.ts`, `keyboard.test.ts`, `FORTH-ARCHITECTURE.md` |
 | **M58** | `MIN_BANK_SIZE` drops 4 KiB → 2 KiB (§1.70), Oliver's idea, prompted by auditing how much of the 4 KiB floor `MMAP`/`KMAP`/`WORK`/`SYSV` actually used (well under half each). Bump-allocator alignment (`mmap.ts`) now derives from `MIN_BANK_SIZE` instead of a hardcoded 4095/`~4095` mask, preserving the doubling ladder's zero-padding property at the new floor. `DSTK`/`RSTK` deliberately cut from 1024 cells to 512 (a real capacity decision, not a side effect — confirmed with Oliver, since unlike the other four banks they weren't rounded-up-from-smaller in the first place). `SYSV`/`KMAP` now diverge from `rebel-rom`'s still-4-KiB-floor bank sizing — flagged in code comments as a widening of an already-existing ladder mismatch (`rebel-rom` never adopted M55's doubling ladder either), not a new problem. `CHAR`/`DICT`/`BLKS` unaffected — already above the new floor. | `banks.ts`, `mmap.ts`, `repl.ts`, `02-MEMORY-MODEL.md`, `banks.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `strings.test.ts` |
 | **M59** | Arena-resident `FONT` bank (§1.71), loaded by default from the user's own `rebel.FNT` (packages/app/public), resolving `spec/03-SYSVARS.md` §8's long-reserved `FONT` group for real. `repl.ts` creates the bank and points the new `FONT.FONT-BASE` sysvar at it; `app.ts` fetches `rebel.FNT` and writes it into the arena in parallel with `system.fth`, before anything can render. `CanvasScreenHal` now reads glyphs from the arena via `FONT-BASE` instead of importing a compiled-in font (`font-zxspectrum.ts` deleted) — `attach(arena, sysvars)` solves the ordering problem of the HAL being constructed before the `Machine` that owns what it needs to read. Confirmed with Oliver: iteration is edit-the-file-then-refresh, same as `system.fth` already works, no dedicated live-reload tool built. Flagged, not hidden: `rebel-rom`'s own font system stays entirely HAL-side with no Forth-addressable bank or runtime switching (`docs/FONT-SYSTEM.md` §6) — this makes Rebel-Sim genuinely ahead here, and `01-HAL.md` §3.7 makes the whole `FONT` bank/sysvar group OPTIONAL for exactly that reason. | `rebel-opcodes.json`, `repl.ts`, `canvas-screen-hal.ts`, `app.ts`, `01-HAL.md`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `bank-access.test.ts`, `sysvars.test.ts`, `storage.test.ts` |
+| **M60** | `LOAD` stack-safety bug (§1.72), found live by Oliver: a colon-definition with `DO`/`LOOP` split across block lines threw `? ABORT` on `LOAD`, working fine on one line. Root cause: `LOAD` kept the block's base address live on the *data* stack across its whole 16-line loop, re-`DUP`-ing it each iteration — `DO`'s own compile-time backpatch address, still pending on that same stack until its matching `LOOP` (a later block line) consumed it, got re-`DUP`-ed instead, corrupting every subsequent line's computed address. Isolated in a fresh `Machine` (not the live session) to a general case: any interpreted line leaving anything on the data stack, not just `DO`, breaks it — confirmed with two bare unconsumed numbers split across lines, no colon-definition involved. Fixed with two dedicated variables (`LOAD-ADDR`/`LOAD-CONTEXT`) instead of leaving state live on the data stack, matching `R#`/`SCR`/`T-LINE`'s own established pattern. | `system.fth`, `screen-editor.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

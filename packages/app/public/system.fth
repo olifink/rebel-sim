@@ -1023,18 +1023,43 @@ VARIABLE BOOT-HERE
 ( fail to compile at all depending on what the caller happened to )
 ( be browsing at the time -- purely accidental, not something a )
 ( screen's own author has any control over. )
+
+( LOAD-ADDR/LOAD-CONTEXT -- found live, Oliver, spreading a colon- )
+( definition across several block lines instead of one: the block's )
+( base address and the saved CONTEXT used to live on the data stack )
+( itself, under whatever the interpreted lines pushed -- exactly the )
+( kind of thing this file's own R#/SCR/T-LINE/TEXT-LEN scratch )
+( variables already exist to avoid. Fine as long as every interpreted )
+( line balanced its own stack effect back to empty, which most do -- )
+( but a bare number, or DO -- compile-time, pushes its own backpatch )
+( address -- on one line with its matching LOOP on a later one, )
+( leaves something sitting there. The next iteration's DUP then )
+( re-fetches that leftover instead of the real block address, )
+( computes a garbage line address, and INTERPRET reads whatever )
+( unrelated arena memory happens to be there as if it were Forth )
+( source -- usually non-text bytes, which fail NUMBER's validation )
+( and ABORT, TYPEing the bad token first, hence the big gap of )
+( invisible characters before the printed ABORT. Isolated directly: )
+( a colon-definition header on one block line and a DO on the next )
+( reproduces it with no LOOP/I involved yet; two bare numbers on )
+( separate lines, no colon-def at all, reproduce the identical )
+( ABORT -- confirming this was never actually about DO/LOOP )
+( specifically, just the first construct naturally likely to span )
+( two lines while still leaving something on the stack in between. )
+VARIABLE LOAD-ADDR
+VARIABLE LOAD-CONTEXT
 : LOAD ( n -- )
-  CONTEXT @
+  CONTEXT @ LOAD-CONTEXT !
   CURRENT-VOCAB @ CONTEXT !
-  SWAP
-  BLOCK
+  BLOCK LOAD-ADDR !
   L/SCR 0 DO
-    DUP I C/L * + C/L (SET-INPUT)
+    LOAD-ADDR @ I C/L * + C/L (SET-INPUT)
     INTERPRET
   LOOP
-  DROP
-  CONTEXT !
+  LOAD-CONTEXT @ CONTEXT !
 ;
+HIDE LOAD-ADDR
+HIDE LOAD-CONTEXT
 
 ( The interactive editor commands live in their own vocabulary, not )
 ( plain FORTH's -- single-letter names collide too easily with )
