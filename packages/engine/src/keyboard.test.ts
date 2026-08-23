@@ -45,6 +45,14 @@ describe('Keyboard', () => {
     expect(m.keyboard.readEvent()?.char).toBe(32);
     m.keyboard.pushRawEvent(0x29, true); // Escape — M57, TS's own cancel key
     expect(m.keyboard.readEvent()?.char).toBe(27);
+    m.keyboard.pushRawEvent(0x52, true); // Up — M57 follow-up, TS's cursor movement
+    expect(m.keyboard.readEvent()?.char).toBe(2);
+    m.keyboard.pushRawEvent(0x51, true); // Down
+    expect(m.keyboard.readEvent()?.char).toBe(3);
+    m.keyboard.pushRawEvent(0x4f, true); // Right
+    expect(m.keyboard.readEvent()?.char).toBe(4);
+    m.keyboard.pushRawEvent(0x50, true); // Left
+    expect(m.keyboard.readEvent()?.char).toBe(5);
   });
 
   it('leaves untranslated keys (Caps Lock, F-keys, arrows) at char 0, identified only by usageCode', () => {

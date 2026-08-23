@@ -3570,6 +3570,25 @@ over requiring an explicit Enter at the line boundary), sharing the
 same `BLOCK-SIZE` guard as Enter's own end-of-screen case, so filling
 the last line to its very end also ends the session cleanly.
 
+**Cursor keys (Oliver's follow-up), Up/Down/Left/Right.** Same
+groundwork as Escape: unmapped in `keyboard.ts`'s default `KMAP` like
+every other non-printable key, so four more entries were added (codes
+2-5, chosen only to dodge control codes already spoken for — 1 is
+`TEXT`'s own end-of-line `WORD` delimiter, 8/9/10/27 are Backspace/
+Tab/Enter/Escape). Movement itself is simpler than everything else in
+`TS`: adjust `R#` by ±1 (Left/Right) or ±`C/L` (Up/Down), clamp to
+`0..BLOCK-SIZE`, `#LOCATE AT-XY` — no block/screen write at all, unlike
+every other branch in the loop. Asked directly whether movement should
+stay bounded to wherever a session had actually typed (mirroring
+`ACCEPT`'s own never-go-below-where-this-call-started rule, which
+Backspace had been enforcing via a `TS-START` variable) or roam the
+whole screen: "consistent to drop clamping everywhere ... as long as
+we stay inside the screen buffer boundaries overall." Dropping it
+turned out to simplify the code, not just extend it — `TS` always
+starts fresh at `R# ! 0` (no way to resume elsewhere), so `TS-START`
+had only ever equaled 0 in practice; it's gone now, replaced by a
+plain `R# @ 0 >` bounds check shared with Left.
+
 **Two real bugs the test suite caught, both before this reached the
 live app:**
 1. Five separate nested-`(...)`-comment breaks, found in two passes
@@ -3603,12 +3622,13 @@ BuildDefaultKeymap` does the same — the comment says so explicitly,
 flagged as worth reconciling once a C++ Forth executor's own screen
 editor needs the same thing, rather than claimed as settled parity.
 
-*Implementation:* `system.fth` (`TS`, `TS-ROW`, `TS-START`, `>=`),
-`keyboard.ts` (Escape added to the default keymap).
-*Tests:* `screen-editor-commands.test.ts` (6 new tests: plain typing,
-Enter mid-screen, Enter on the last line, Esc, Backspace's
-`TS-START` boundary, auto-advance at the end of a line);
-`keyboard.test.ts` (Escape's own translation).
+*Implementation:* `system.fth` (`TS`, `TS-ROW`, `>=`), `keyboard.ts`
+(Escape and the four cursor keys added to the default keymap).
+*Tests:* `screen-editor-commands.test.ts` (12 tests: plain typing,
+Enter mid-screen, Enter on the last line, Esc, Backspace's own
+boundary, auto-advance at the end of a line, Left/Right/Up/Down
+movement and their own boundaries); `keyboard.test.ts` (Escape's and
+the cursor keys' own translation).
 
 ### 1.64 `DUMP`: a classic hex dump (M52)
 
@@ -3807,6 +3827,6 @@ exactly as it would be on the bare-metal target.
 | **M54** | Bank resizing (§1.66), Oliver's idea: `BANK-RESIZE` edits a bank's `MMAP` size field only, inert until a `RESTORE` that detects the saved size no longer matches what the running `Machine` actually booted with (`bootBankSize`, not a live re-read, which would always agree with a just-edited `MMAP` cell) triggers a full restart instead of an in-place patch — `inner.ts`'s `dispatch()` special-cases `RESTORE` the same way `COLD` already is, yielding a new `'restart-project'` `StepSignal`/`StepStatus` the host (`app.ts`) reboots into via `Machine`'s new `bootProject` option, which re-derives every bank's base from the saved sizes through the ordinary bump allocator before restoring content. `DSTK`/`RSTK` are unconditionally cleared across that restart — their live `SP`/`RP` are high-end-relative absolute addresses a relayout can silently invalidate even when their own size didn't change, a correctness trap found while designing this. Reordering `DICT` right after `SYSV` (this same session, just before M54) is what keeps `DICT`'s own base pinned regardless of how many times it's resized. | `mmap.ts`, `banks.ts`, `storage.ts`, `primitives.ts`, `inner.ts`, `repl.ts`, `app.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `resize.test.ts` |
 | **M55** | Size classes double instead of quadrupling, and lose their letter names (§1.67), Oliver's idea, prompted right after using M54's resize mechanism for the first time: the old 4x-per-step ladder (`XS`..`XXL`) could round a request up by nearly 4x; plain doubling from `MIN_BANK_SIZE` (4 KiB) to `MAX_BANK_SIZE` (4 MiB) halves that worst case while removing the maintained `SIZE_CLASSES` lookup array and its six named constants entirely — `roundToSizeClass` is now a direct power-of-two computation, no table. Every bank size chosen before this change was already a power of two (the old classes were exactly the even powers of two), so no existing bank's actual byte size changes — only new, in-between requests round more tightly now. | `banks.ts`, `index.ts`, `mmap.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `banks.test.ts`, `resize.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `mmap.test.ts` |
 | **M56** | The remaining core screen-editor commands (§1.68), completing what M48 deliberately deferred: cursor tracking (`R#`/`#LOCATE`/`#LEAD`/`#LAG`/`M`), line editing (`TEXT`/`-MOVE`/`H`/`E`/`S`/`D`/`R`/`P`/`I`, `I` kept as classic's own name per Oliver's explicit call despite shadowing `DO`/`LOOP`'s loop index), `COPY`, and search/replace (`-TEXT`/`1LINE`/`FIND`/`DELETE`/`N`/`F`/`B`/`X`/`TILL`/`C`) — all ported from `inspiration/figforth_editor_screens.txt`, reimplemented with named scratch variables and `BEGIN`/`WHILE`/`REPEAT` instead of classic's own dense stack code and `DO`-loop-plus-`LEAVE` (this project has no `LEAVE`). `TS` initially left unported here — see M57 (§1.69), which revisited and shipped it. Three real bugs found and fixed while hand-tracing the port: a nested-paren Forth comment aborting the whole file's load, `TEXT-LEN` never actually getting wired into `TEXT`'s own body, and `-TEXT`'s first draft using `2DUP` on the wrong two stack items (fixed, like `1LINE`, with named variables instead of positional stack tricks). | `system.fth`, `screen-editor-commands.test.ts` |
-| **M57** | `TS` (§1.69): interactive multi-line block entry, rebuilt rather than literally ported once the M56 premise turned out wrong — classic's own `T` never reads anything itself, it's the terminal hardware that echoes keystrokes, a model this project's screen doesn't have. Needed no engine change: `KEY` already suspends correctly through any depth of colon-word/loop nesting (`dispatch`/`executeXT`/`threadFrom`'s `yield*` chain), so a plain `BEGIN`-loop around it gets `ACCEPT`'s own suspend/resume for free. Built instead around `AT-XY`/`CHAR!` positioned writes (`C/L` doesn't evenly divide the 80-column screen) and `CURSEN`/`CURSDIS` (M25, never actually called until now). Found and fixed while building it: five more nested-paren comment breaks; `>=`, missing from this dialect, hit as a real bug twice independently (§1.68's `FIND`, now `TS`'s own overflow guard) and finally added for real (`: >= < 0= ;`); a genuine `R#`-left-out-of-range bug the first test run caught; Escape given a `KMAP` entry for the first time, flagged as a Rebel-Sim-only addition until `rebel-rom`'s own keymap is confirmed to need the same thing. | `system.fth`, `keyboard.ts`, `screen-editor-commands.test.ts`, `keyboard.test.ts`, `FORTH-ARCHITECTURE.md` |
+| **M57** | `TS` (§1.69): interactive multi-line block entry, rebuilt rather than literally ported once the M56 premise turned out wrong — classic's own `T` never reads anything itself, it's the terminal hardware that echoes keystrokes, a model this project's screen doesn't have. Needed no engine change: `KEY` already suspends correctly through any depth of colon-word/loop nesting (`dispatch`/`executeXT`/`threadFrom`'s `yield*` chain), so a plain `BEGIN`-loop around it gets `ACCEPT`'s own suspend/resume for free. Built instead around `AT-XY`/`CHAR!` positioned writes (`C/L` doesn't evenly divide the 80-column screen) and `CURSEN`/`CURSDIS` (M25, never actually called until now). Found and fixed while building it: five more nested-paren comment breaks; `>=`, missing from this dialect, hit as a real bug twice independently (§1.68's `FIND`, now `TS`'s own overflow guard) and finally added for real (`: >= < 0= ;`); a genuine `R#`-left-out-of-range bug the first test run caught; Escape given a `KMAP` entry for the first time, flagged as a Rebel-Sim-only addition until `rebel-rom`'s own keymap is confirmed to need the same thing. Two Oliver follow-ups after trying it live: Esc leaves the cursor visible instead of hiding it (`CURSDIS` dropped from just that exit path); Up/Down/Left/Right cursor movement added (four more `KMAP` entries, same reasoning as Escape), deliberately unclamped beyond the screen's own `0..BLOCK-SIZE` bounds ("consistent to drop clamping everywhere... as long as we stay inside the screen buffer boundaries") — which also retired `TS-START` entirely, since `TS` always starts fresh at `R#` 0 and that variable had only ever equaled 0 in practice. | `system.fth`, `keyboard.ts`, `screen-editor-commands.test.ts`, `keyboard.test.ts`, `FORTH-ARCHITECTURE.md` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

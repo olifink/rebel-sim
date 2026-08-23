@@ -356,7 +356,7 @@ describe('TS: interactive multi-line block entry (system.fth, M57)', () => {
     expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
   });
 
-  it("Backspace erases the last character and won't cross before where TS started", () => {
+  it("Backspace erases the last character and won't cross above the top of the screen", () => {
     const { m, remote } = bootWithRemote();
     m.interpret('USE EDITOR');
     m.interpret('4 CLEAR');
@@ -377,5 +377,77 @@ describe('TS: interactive multi-line block entry (system.fth, M57)', () => {
     expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
     expect(lineText(m, 0)).toBe('X'.repeat(64));
     expect(lineText(m, 1)).toBe('YZ');
+  });
+
+  it('Right moves the cursor without writing anything, unlike typing', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('6 CLEAR');
+    m.interpret('TS');
+    remote.push('\x04\x04'); // Right, Right -- no content written yet
+    remote.push('X');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('  X'); // columns 0-1 untouched, X lands at column 2
+  });
+
+  it('Left moves the cursor back without erasing, unlike Backspace', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('7 CLEAR');
+    m.interpret('TS');
+    remote.push('AB\x05X'); // type AB, Left (back onto the B, not erasing it yet), overwrite with X
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('AX');
+  });
+
+  it("Left at column 0 of the screen doesn't move past it", () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('8 CLEAR');
+    m.interpret('TS');
+    remote.push('\x05X'); // Left, then type -- still lands at the very start
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('X');
+  });
+
+  it('Down moves the cursor one line down, preserving column, and Up undoes it', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('9 CLEAR');
+    m.interpret('TS');
+    remote.push('AAAA\x03'); // four chars on line 0 (R# now 4), then Down -- line 1, column 4
+    remote.push('X'); // writes at line 1 column 4, R# advances to column 5
+    remote.push('\x02'); // Up -- back to line 0, same column 5 (X's own advance)
+    remote.push('Y');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('AAAA Y'); // column 4 untouched, Y at column 5
+    expect(lineText(m, 1)).toBe('    X'); // columns 0-3 untouched, X at column 4
+  });
+
+  it("Up on the very first line doesn't move", () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('10 CLEAR');
+    m.interpret('TS');
+    remote.push('\x02X'); // Up, then type -- still lands on line 0
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('X');
+  });
+
+  it("Down on the very last line doesn't move", () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('11 CLEAR');
+    m.interpret('TS');
+    remote.push('\x03'.repeat(16)); // Down x16 -- only 15 actually move (line 0..15)
+    remote.push('X');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 15)).toBe('X'); // stopped exactly at the last line, not past it
   });
 });

@@ -120,6 +120,16 @@ export class Keyboard {
     setBoth(0x29, '\x1b'); // Escape — M57: TS's own cancel key, found needed
     // once TS actually tried to read it via KEY; previously unmapped like
     // every other non-printable key, so KEY/KEY? could never see it.
+
+    // Arrow keys — M57 follow-up: TS's own cursor movement, same reasoning
+    // as Escape above (unmapped otherwise, so KEY could never see them).
+    // Codes 2-5, chosen only to avoid the control codes already spoken for
+    // elsewhere (1 is TEXT's own "read to end of line" WORD delimiter,
+    // system.fth; 8/9/10/27 are Backspace/Tab/Enter/Escape above).
+    setBoth(0x52, '\x02'); // Up
+    setBoth(0x51, '\x03'); // Down
+    setBoth(0x4f, '\x04'); // Right
+    setBoth(0x50, '\x05'); // Left
   }
 
   private readKmapByte(plane: 0 | 1, usageCode: number): number {

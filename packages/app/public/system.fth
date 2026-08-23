@@ -1447,11 +1447,8 @@ VARIABLE C-LEN
 ( DO...I...LOOP for it -- I is EDITOR's own insert-line command by )
 ( this point in the file, same constraint noted above I's own )
 ( definition -- so this uses the same named-counter BEGIN/WHILE shape )
-( as -TEXT/1LINE further up. TS-START holds whatever R# TS began at, )
-( so Backspace can't erase past it -- the same never-go-below-where- )
-( this-call-started rule ACCEPT already enforces for its own input. )
+( as -TEXT/1LINE further up. )
 VARIABLE TS-ROW
-VARIABLE TS-START
 : TS ( -- )
   CLS
   0 TS-ROW !
@@ -1460,7 +1457,7 @@ VARIABLE TS-START
     TS-ROW @ LINE C/L TYPE
     1 TS-ROW +!
   REPEAT
-  0 R# ! 0 TS-START !
+  0 R# !
   0 0 AT-XY CURSEN
   ( No AGAIN in this dialect -- only BEGIN/UNTIL and BEGIN/WHILE/REPEAT )
   ( are defined, further up this file -- so 0 UNTIL loops unconditionally, )
@@ -1481,15 +1478,29 @@ VARIABLE TS-START
       #LOCATE NIP 1+ C/L * R# !
       R# @ BLOCK-SIZE >= IF WRAP-R# CURSDIS UPDATE EXIT THEN
       #LOCATE AT-XY
-    ELSE DUP 8 = IF ( Backspace: step back one, blank that cell, )
-      ( but never past TS-START. )
+    ELSE DUP 8 = IF ( Backspace: step back one, blank that cell -- )
+      ( nothing stops it walking back over already-there content, )
+      ( same as the cursor keys just below: this screen's whole )
+      ( buffer is fair game, not just what was typed this session. )
       DROP
-      R# @ TS-START @ > IF
+      R# @ 0 > IF
         -1 R# +!
         BL SCR @ BLOCK R# @ + C!
         #LOCATE BL CHAR!
         #LOCATE AT-XY
       THEN
+    ELSE DUP 2 = IF ( Up: move one line up, same column, no edit. )
+      DROP
+      R# @ C/L >= IF C/L NEGATE R# +! #LOCATE AT-XY THEN
+    ELSE DUP 3 = IF ( Down: move one line down, same column. )
+      DROP
+      R# @ C/L + BLOCK-SIZE < IF C/L R# +! #LOCATE AT-XY THEN
+    ELSE DUP 4 = IF ( Right: move one column right, same line. )
+      DROP
+      R# @ 1+ BLOCK-SIZE < IF 1 R# +! #LOCATE AT-XY THEN
+    ELSE DUP 5 = IF ( Left: move one column left, same line. )
+      DROP
+      R# @ 0 > IF -1 R# +! #LOCATE AT-XY THEN
     ELSE ( an ordinary character: write it into the block, draw it, )
       ( advance -- crossing a line boundary here auto-advances to the )
       ( next line with no Enter needed, the same BLOCK-SIZE guard as )
@@ -1499,7 +1510,7 @@ VARIABLE TS-START
       1 R# +!
       R# @ BLOCK-SIZE >= IF WRAP-R# CURSDIS UPDATE EXIT THEN
       #LOCATE AT-XY
-    THEN THEN
+    THEN THEN THEN THEN THEN THEN
   0 UNTIL
 ;
 
