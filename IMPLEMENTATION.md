@@ -109,14 +109,14 @@ saved file's basename — no separate mapping between "what a bank is
 called" and "what file represents it."
 
 Bank sizes are drawn from a fixed ladder of **size classes** — every
-power of two from 4 KiB (`MIN_BANK_SIZE`) through 4 MiB
-(`MAX_BANK_SIZE`), M55 — rather than arbitrary byte counts. (An earlier
-revision used six named classes, `XS` through `XXL`, each 4x the
-previous, with no class in between; §1.67 covers why that changed.)
-Most banks (`SYSV`, `DSTK`, ...) just happen to be sized in code to
-match a class already; the ladder's real payoff is loading a file of
-unknown length (§1.22): round its size up to the smallest class that
-fits, and that's the bank's size — a lookup, not a calculation.
+power of two from 2 KiB (`MIN_BANK_SIZE`, M58 — 4 KiB through M55–M57)
+through 4 MiB (`MAX_BANK_SIZE`) — rather than arbitrary byte counts.
+(An earlier revision used six named classes, `XS` through `XXL`, each
+4x the previous, with no class in between; §1.67 covers why that
+changed.) Most banks (`SYSV`, `DSTK`, ...) just happen to be sized in
+code to match a class already; the ladder's real payoff is loading a
+file of unknown length (§1.22): round its size up to the smallest class
+that fits, and that's the bank's size — a lookup, not a calculation.
 
 *Implementation:* `BankTable` (`banks.ts`) — `createBank(tag, size,
 name?)` / `findBank(tag, name?)` / `findBankByName(name)` /
@@ -3667,6 +3667,71 @@ maps to rather than another dot, exactly as asked for.
 *Implementation:* `system.fth` (`HEXDIGIT`/`HEX2`/`HEX8`/`DUMP`).
 *Tests:* `dump.test.ts` (new).
 
+### 1.70 `MIN_BANK_SIZE` drops to 2 KiB, and `DSTK`/`RSTK` shrink to 512 cells (M58, Oliver: "align on 2K banks as the smallest size")
+
+Prompted by auditing what the M55 doubling ladder's 4 KiB floor was
+actually buying: `MMAP` (1552 raw bytes), `KMAP` (512-byte keymap
+table), `WORK` (384 bytes of `TIB`+`PAD`), and `SYSV` (448 bytes of
+real sysvar content, against a 4096-byte request the boot code chose
+explicitly) were all burning 2.5–3.5 KiB of pure allocator overhead per
+arena for no reason tied to real content size. §4.3's floor was never
+an MMU-paging requirement (this model doesn't page, §4.4) — just a nod
+to ARM's native page size — so there was no structural reason it
+couldn't drop further.
+
+**Two design questions this raised, resolved with Oliver before
+touching code:**
+
+1. **Allocator alignment must track the floor, not stay hardcoded.**
+   `mmap.ts`'s bump allocator (`(base + 4095) & ~4095`) was hardcoded
+   to 4 KiB independently of `MIN_BANK_SIZE` — harmless while the two
+   happened to be equal, but decoupled from a 2 KiB floor it would
+   silently reintroduce padding waste between consecutive 2 KiB banks
+   (up to 2 KiB lost realigning to a stale 4 KiB boundary), exactly the
+   problem M55 eliminated. Resolved: alignment now derives from
+   `MIN_BANK_SIZE` (`(base + 2047) & ~2047`), preserving the "every
+   size class is a multiple of the alignment, nothing ever pads"
+   property at the new floor.
+2. **`DSTK`/`RSTK` are not a free shrink.** Unlike `MMAP`/`SYSV`/
+   `KMAP`/`WORK`, whose 4096-byte requests were headroom above a much
+   smaller real requirement, `DSTK`/`RSTK` were requested at exactly
+   4096 bytes *by design* — 1024 cells of stack depth, not something
+   rounded up from a smaller natural need. Dropping them to the new
+   2 KiB floor is a genuine capacity cut to 512 cells each, not a side
+   effect of the floor change. Resolved: cut them anyway, deliberately,
+   alongside the floor change rather than leaving them at their old
+   4096-byte size (which the new ladder still supports as the
+   second-smallest class — nothing forces every bank down to the
+   floor).
+
+**A cross-target note, not resolved here:** `SYSV`'s and `KMAP`'s old
+4096-byte sizing was explicitly commented as "matches Rebel-ROM's
+minimum size class" — `rebel-rom`'s own `docs/MEMORY-MODEL.md` is
+still on the pre-M55 four-name `XS`..`XXL` ladder (`XS` = 4 KiB) and
+hasn't adopted the M55 doubling ladder at all yet, so this floor drop
+widens an already-existing divergence between the two targets' bank
+tables rather than creating a new one. Flagged in `repl.ts`'s own
+comments rather than silently dropped; reconciling `rebel-rom` to a
+matching ladder is a separate, future piece of work.
+
+`CHAR` and `DICT`/`BLKS` are unaffected: `CHAR`'s real content (80×60
+= 4800 bytes at the default screen size) already exceeds 2 KiB, so it
+rounds to the same 8192-byte class either way; `DICT` (65536) and
+`BLKS` (16384) were already well above the floor.
+
+*Implementation:* `banks.ts` (`MIN_BANK_SIZE` 4×1024 → 2×1024), `mmap.ts`
+(`MMAP_SIZE` 4096 → 2048, bump-allocator alignment 4095/~4095 →
+2047/~2047), `repl.ts` (`SYSV_BANK_SIZE`/`KMAP_BANK_SIZE` 4096 → 2048;
+`DSTK_BANK_SIZE`/`RSTK_BANK_SIZE` 4096 → 2048, i.e. 1024 cells → 512
+cells; comments updated, including the `rebel-rom` divergence note
+above). *Spec:* `02-MEMORY-MODEL.md` §4.3 (floor), §4.4 (alignment
+tracks the floor), §5.3/§5.4 (`MMAP` size and worked-example table
+recomputed), §8 (conformance table). *Tests:* `banks.test.ts` (comment
+only, symbolic via `MIN_BANK_SIZE`/`MAX_BANK_SIZE`, no literal
+changes), `mmap.test.ts`, `bank-access.test.ts`, `storage.test.ts`
+(rounding-result assertions that hardcoded 4096 for a sub-2-KiB
+request now expect 2048), `strings.test.ts` (comment only).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3828,5 +3893,6 @@ exactly as it would be on the bare-metal target.
 | **M55** | Size classes double instead of quadrupling, and lose their letter names (§1.67), Oliver's idea, prompted right after using M54's resize mechanism for the first time: the old 4x-per-step ladder (`XS`..`XXL`) could round a request up by nearly 4x; plain doubling from `MIN_BANK_SIZE` (4 KiB) to `MAX_BANK_SIZE` (4 MiB) halves that worst case while removing the maintained `SIZE_CLASSES` lookup array and its six named constants entirely — `roundToSizeClass` is now a direct power-of-two computation, no table. Every bank size chosen before this change was already a power of two (the old classes were exactly the even powers of two), so no existing bank's actual byte size changes — only new, in-between requests round more tightly now. | `banks.ts`, `index.ts`, `mmap.ts`, `rebel-opcodes.json`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `banks.test.ts`, `resize.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `mmap.test.ts` |
 | **M56** | The remaining core screen-editor commands (§1.68), completing what M48 deliberately deferred: cursor tracking (`R#`/`#LOCATE`/`#LEAD`/`#LAG`/`M`), line editing (`TEXT`/`-MOVE`/`H`/`E`/`S`/`D`/`R`/`P`/`I`, `I` kept as classic's own name per Oliver's explicit call despite shadowing `DO`/`LOOP`'s loop index), `COPY`, and search/replace (`-TEXT`/`1LINE`/`FIND`/`DELETE`/`N`/`F`/`B`/`X`/`TILL`/`C`) — all ported from `inspiration/figforth_editor_screens.txt`, reimplemented with named scratch variables and `BEGIN`/`WHILE`/`REPEAT` instead of classic's own dense stack code and `DO`-loop-plus-`LEAVE` (this project has no `LEAVE`). `TS` initially left unported here — see M57 (§1.69), which revisited and shipped it. Three real bugs found and fixed while hand-tracing the port: a nested-paren Forth comment aborting the whole file's load, `TEXT-LEN` never actually getting wired into `TEXT`'s own body, and `-TEXT`'s first draft using `2DUP` on the wrong two stack items (fixed, like `1LINE`, with named variables instead of positional stack tricks). | `system.fth`, `screen-editor-commands.test.ts` |
 | **M57** | `TS` (§1.69): interactive multi-line block entry, rebuilt rather than literally ported once the M56 premise turned out wrong — classic's own `T` never reads anything itself, it's the terminal hardware that echoes keystrokes, a model this project's screen doesn't have. Needed no engine change: `KEY` already suspends correctly through any depth of colon-word/loop nesting (`dispatch`/`executeXT`/`threadFrom`'s `yield*` chain), so a plain `BEGIN`-loop around it gets `ACCEPT`'s own suspend/resume for free. Built instead around `AT-XY`/`CHAR!` positioned writes (`C/L` doesn't evenly divide the 80-column screen) and `CURSEN`/`CURSDIS` (M25, never actually called until now). Found and fixed while building it: five more nested-paren comment breaks; `>=`, missing from this dialect, hit as a real bug twice independently (§1.68's `FIND`, now `TS`'s own overflow guard) and finally added for real (`: >= < 0= ;`); a genuine `R#`-left-out-of-range bug the first test run caught; Escape given a `KMAP` entry for the first time, flagged as a Rebel-Sim-only addition until `rebel-rom`'s own keymap is confirmed to need the same thing. Two Oliver follow-ups after trying it live: Esc leaves the cursor visible instead of hiding it (`CURSDIS` dropped from just that exit path); Up/Down/Left/Right cursor movement added (four more `KMAP` entries, same reasoning as Escape), deliberately unclamped beyond the screen's own `0..BLOCK-SIZE` bounds ("consistent to drop clamping everywhere... as long as we stay inside the screen buffer boundaries") — which also retired `TS-START` entirely, since `TS` always starts fresh at `R#` 0 and that variable had only ever equaled 0 in practice. | `system.fth`, `keyboard.ts`, `screen-editor-commands.test.ts`, `keyboard.test.ts`, `FORTH-ARCHITECTURE.md` |
+| **M58** | `MIN_BANK_SIZE` drops 4 KiB → 2 KiB (§1.70), Oliver's idea, prompted by auditing how much of the 4 KiB floor `MMAP`/`KMAP`/`WORK`/`SYSV` actually used (well under half each). Bump-allocator alignment (`mmap.ts`) now derives from `MIN_BANK_SIZE` instead of a hardcoded 4095/`~4095` mask, preserving the doubling ladder's zero-padding property at the new floor. `DSTK`/`RSTK` deliberately cut from 1024 cells to 512 (a real capacity decision, not a side effect — confirmed with Oliver, since unlike the other four banks they weren't rounded-up-from-smaller in the first place). `SYSV`/`KMAP` now diverge from `rebel-rom`'s still-4-KiB-floor bank sizing — flagged in code comments as a widening of an already-existing ladder mismatch (`rebel-rom` never adopted M55's doubling ladder either), not a new problem. `CHAR`/`DICT`/`BLKS` unaffected — already above the new floor. | `banks.ts`, `mmap.ts`, `repl.ts`, `02-MEMORY-MODEL.md`, `banks.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `storage.test.ts`, `strings.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

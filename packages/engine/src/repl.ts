@@ -65,11 +65,27 @@ import {
 } from './dictionary.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
-const SYSV_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's minimum size class (docs/SYSVARS.md §1)
-const DSTK_BANK_SIZE = 4096; // 1024 cells
-const RSTK_BANK_SIZE = 4096; // 1024 cells
+// M58: 2 KiB (MIN_BANK_SIZE, banks.ts) — was 4 KiB through M55-M57,
+// which happened to match Rebel-ROM's own minimum size class
+// (docs/SYSVARS.md §1). Rebel-ROM hasn't adopted M55's doubling ladder
+// (still the old XS..XXL scheme, XS = 4 KiB), so this floor drop widens
+// an already-existing cross-target ladder mismatch rather than creating
+// a new one — flagged here, not silently dropped (IMPLEMENTATION.md
+// §1.70). SYSV's real content is 448 bytes (rebel-opcodes.json's
+// sysvarGroups); 2 KiB is still generous headroom.
+const SYSV_BANK_SIZE = 2048;
+// M58, Oliver's explicit call: cut from 1024 cells (4096 bytes) to 512
+// cells (2048), the new MIN_BANK_SIZE floor — a deliberate depth
+// reduction, not a side effect of the floor dropping (unlike SYSV/KMAP/
+// WORK/MMAP above, DSTK/RSTK were sized at exactly 4096 by design, not
+// rounded up from a smaller natural request; IMPLEMENTATION.md §1.70).
+const DSTK_BANK_SIZE = 2048; // 512 cells
+const RSTK_BANK_SIZE = 2048; // 512 cells
 const DICT_BANK_SIZE = 1 << 16; // 64 KiB
-const KMAP_BANK_SIZE = 4096; // 4 KiB, matches Rebel-ROM's minimum size class (docs/KEYBOARD.md §6); table itself is 512 bytes
+// M58: 2 KiB, was 4 KiB (see SYSV_BANK_SIZE's comment — same Rebel-ROM
+// cross-target-divergence note applies, docs/KEYBOARD.md §6); table
+// itself is 512 bytes (KMAP_TABLE_SIZE, keyboard.ts).
+const KMAP_BANK_SIZE = 2048;
 // spec/04-FORTH-CORE.md §5.3/§6.13: the TIB now has to physically hold
 // every line fed to the outer interpreter (WORD scans real arena bytes,
 // not a JS string) — bumped from 128 once system.fth's own longest line

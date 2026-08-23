@@ -64,10 +64,10 @@ describe('Storage', () => {
     expect(loaded).toHaveLength(1);
     expect(loaded[0].tag).toBe('DATA');
     expect(loaded[0].name).toBe('MYASSET');
-    // The reloaded bank is rounded up to a size class (4 KiB) — only
+    // The reloaded bank is rounded up to a size class (2 KiB) — only
     // the original 64-byte payload should match; the rest is legitimate
     // zero-filled slack, not part of the round-trip contract.
-    expect(loaded[0].size).toBe(4096);
+    expect(loaded[0].size).toBe(2048);
     for (let i = 0; i < bank.size; i++) {
       expect(readArena.readByte(loaded[0].base + i)).toBe((i * 3) & 0xff);
     }
@@ -375,7 +375,7 @@ describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, 
     expect(loaded[0].name).toBe('PLAINBNK');
     // Bump-allocated fresh (not reusing bank.base — readBanks has no
     // MMAP asset to restore an exact base from).
-    expect(loaded[0].size).toBe(4096);
+    expect(loaded[0].size).toBe(2048);
   });
 });
 

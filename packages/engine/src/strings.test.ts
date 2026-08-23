@@ -66,7 +66,7 @@ describe('Strings (M8, CORE-VOCABULARY.md §8)', () => {
     const m = new Machine();
     // padSize is PAD's own logical sub-region size (128, M31's
     // TIB+PAD-share-one-WORK-bank merge) — the WORK bank's real
-    // rounded footprint (4096) is allocator overhead, not PAD's
+    // rounded footprint (2048, M58) is allocator overhead, not PAD's
     // exposed capacity. Words joined by consumeQuotedText exceed it.
     const tooLong = 'x '.repeat(100).trim();
     expect(() => m.interpret(`S" ${tooLong}"`)).toThrow(/too long for PAD/);

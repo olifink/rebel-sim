@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
 import { BankTable, MIN_BANK_SIZE, MAX_BANK_SIZE, roundToSizeClass } from './banks.js';
 
-// M55 (Oliver): size classes double (4 KiB, 8 KiB, 16 KiB, ...) instead
-// of quadrupling — finer-grained rounding, no more per-class names.
+// M55 (Oliver): size classes double (was 4 KiB, 8 KiB, 16 KiB, ...;
+// 2 KiB, 4 KiB, 8 KiB, ... as of M58's lower floor) instead of
+// quadrupling — finer-grained rounding, no more per-class names.
 describe('roundToSizeClass', () => {
   it('rounds up to the smallest power-of-two class that fits, floored at MIN_BANK_SIZE', () => {
     expect(roundToSizeClass(1)).toBe(MIN_BANK_SIZE);
@@ -12,7 +13,7 @@ describe('roundToSizeClass', () => {
     expect(roundToSizeClass(MIN_BANK_SIZE * 2 + 1)).toBe(MIN_BANK_SIZE * 4);
   });
 
-  it('is exactly the doubling ladder from 4 KiB to 4 MiB', () => {
+  it('is exactly the doubling ladder from MIN_BANK_SIZE to MAX_BANK_SIZE', () => {
     let expected = MIN_BANK_SIZE;
     while (expected <= MAX_BANK_SIZE) {
       expect(roundToSizeClass(expected)).toBe(expected);

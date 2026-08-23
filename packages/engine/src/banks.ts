@@ -46,21 +46,31 @@ export const BANK_NAME_LEN = 8;
 const DEFAULT_FLAGS = BankFlagResident | BankFlagActive;
 
 /** M55 (spec/02-MEMORY-MODEL.md §4.3): a bank's size class is the next
- * power of two, floored at `MIN_BANK_SIZE` (ARM's native page size — a
- * nod to alignment, not an MMU-paging requirement) and capped at
- * `MAX_BANK_SIZE` (needing more than that takes multiple banks, not one
- * bigger one). Replaces the earlier six *named* classes (`XS`..`XXL`,
- * each 4x the previous, Oliver: "the jumps we have are a bit big and
- * unpredictable") — doubling instead of quadrupling halves worst-case
- * rounding waste (under 2x instead of under 4x) while dropping the
- * maintained lookup table and its per-class names entirely: a bank's
- * size class is simply its own rounded byte count, nothing else names
- * it. Every bank size chosen before this change (4096/65536/...) was
- * already a power of two under the old 4x-per-step ladder too (the old
- * classes were exactly the *even* powers of two — this just fills in
- * the odd ones between them), so no existing bank's actual byte size
- * changes; only new, in-between requests round more tightly now. */
-export const MIN_BANK_SIZE = 4 * 1024;
+ * power of two, floored at `MIN_BANK_SIZE` and capped at `MAX_BANK_SIZE`
+ * (needing more than that takes multiple banks, not one bigger one).
+ * Replaces the earlier six *named* classes (`XS`..`XXL`, each 4x the
+ * previous, Oliver: "the jumps we have are a bit big and unpredictable")
+ * — doubling instead of quadrupling halves worst-case rounding waste
+ * (under 2x instead of under 4x) while dropping the maintained lookup
+ * table and its per-class names entirely: a bank's size class is simply
+ * its own rounded byte count, nothing else names it. Every bank size
+ * chosen before that change (4096/65536/...) was already a power of two
+ * under the old 4x-per-step ladder too (the old classes were exactly
+ * the *even* powers of two — this just fills in the odd ones between
+ * them), so no existing bank's actual byte size changed there; only
+ * new, in-between requests rounded more tightly.
+ *
+ * M58 (Oliver: "align on 2K banks as the smallest size"): the floor
+ * itself dropped one more step, 4 KiB → 2 KiB, once several boot banks
+ * (`MMAP`, `KMAP`, `WORK`, `SYSV`) turned out to use well under half of
+ * their old 4 KiB floor. 4 KiB was always ARM's native page size
+ * adopted as a nod to alignment, never an MMU-paging requirement this
+ * model actually has (§4.4) — nothing structural stopped it dropping
+ * further. The bump allocator's own alignment (`mmap.ts`) now derives
+ * from this constant rather than a hardcoded 4 KiB, so every size class
+ * stays a multiple of the alignment and the "no rounding step ever
+ * pads" property holds at the new floor too. */
+export const MIN_BANK_SIZE = 2 * 1024;
 export const MAX_BANK_SIZE = 4 * 1024 * 1024;
 
 /** FORTH-ARCHITECTURE.md §7: the fixed unit `hal_block_read`/

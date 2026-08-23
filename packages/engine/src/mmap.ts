@@ -72,14 +72,15 @@ const MMAP_RAW_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
  * exemption is gone — MMAP now conforms to the same size-class rule
  * (§4.3) as every other bank, for consistency, at the cost of a real,
  * accepted breaking change for any already-saved project (no real
- * project data exists yet to migrate). 4096 (`MIN_BANK_SIZE` in
- * banks.ts, M55 — not imported here, same avoid-a-circular-dependency
- * reason as NAME_SIZE above) comfortably covers the 64-slot default's
- * 1552-byte raw requirement; a build with a much larger MAX_SLOTS
- * would need to round to a bigger class instead — this constant is
- * asserted against the raw requirement below specifically so a future
- * MAX_SLOTS change can't silently outgrow it. */
-export const MMAP_SIZE = 4096;
+ * project data exists yet to migrate). 2048 (`MIN_BANK_SIZE` in
+ * banks.ts, 4096 through M55–M57, 2048 as of M58 — not imported here,
+ * same avoid-a-circular-dependency reason as NAME_SIZE above)
+ * comfortably covers the 64-slot default's 1552-byte raw requirement;
+ * a build with `MAX_SLOTS` above roughly 84 slots would need to round
+ * to a bigger class instead — this constant is asserted against the
+ * raw requirement below specifically so a future MAX_SLOTS change
+ * can't silently outgrow it. */
+export const MMAP_SIZE = 2048;
 
 if (MMAP_RAW_SIZE > MMAP_SIZE) {
   throw new Error(
@@ -227,11 +228,17 @@ export class MemoryMap {
    * becomes true once the descriptor is fully written.
    *
    * The computed free-cursor position is then rounded up to the next
-   * 4 KiB boundary (spec/02-MEMORY-MODEL.md §4.4) before anything gets
-   * placed there — every size class is itself already a multiple of
-   * 4 KiB, and (since MMAP itself became size-class-rounded too, spec
-   * §5.3) so is MMAP now, so in practice no placement ever needs real
-   * rounding — every bank already lands pre-aligned regardless. Applied
+   * `MIN_BANK_SIZE` boundary — 2 KiB as of M58, spec/02-MEMORY-MODEL.md
+   * §4.4 — before anything gets placed there. This alignment MUST track
+   * `MIN_BANK_SIZE` (banks.ts), not a value hardcoded independently of
+   * it: every size class is itself already a multiple of `MIN_BANK_SIZE`
+   * by construction, and (since MMAP itself became size-class-rounded
+   * too, spec §5.3) so is MMAP now, so in practice no placement ever
+   * needs real rounding — every bank already lands pre-aligned
+   * regardless, but only *because* alignment and the floor agree; M58
+   * decoupling them (dropping the floor to 2 KiB while leaving this at
+   * a stale 4 KiB) would have silently reintroduced padding between
+   * consecutive minimum-class banks. Applied
    * unconditionally anyway, including for `MMAP`'s own self-registration
    * (`BankTable`'s constructor) — harmless there since offset 0 is
    * already aligned, and it's what keeps this the one place base
@@ -258,7 +265,10 @@ export class MemoryMap {
     if (freeSlot === -1) {
       throw new RangeError(`MMAP is full (${MMAP_MAX_SLOTS} slots)`);
     }
-    const alignedBase = (base + 4095) & ~4095;
+    // 2047/~2047 (MIN_BANK_SIZE - 1, banks.ts): not imported, same
+    // avoid-a-circular-dependency reason as NAME_SIZE/MMAP_SIZE below —
+    // MUST be kept in lockstep with banks.ts's MIN_BANK_SIZE by hand.
+    const alignedBase = (base + 2047) & ~2047;
 
     const activeFlags = flags | BankFlagActive;
     const offset = this.slotOffset(freeSlot);

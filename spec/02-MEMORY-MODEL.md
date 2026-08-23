@@ -154,12 +154,11 @@ Flag bits (bit-for-bit stable across every conformant target — a target
 
 Every **carved** bank (§4.4 — i.e. every bank that isn't external, §4.5,
 or the bank table itself, §5) **MUST** occupy exactly one size class: the
-smallest power of two, no smaller than `MIN_BANK_SIZE` (4 KiB — ARM's
-native page size, a nod to alignment rather than an MMU-paging
-requirement) and no larger than `MAX_BANK_SIZE` (4 MiB), that fits the
-requested size. This is a doubling ladder — 4 KiB, 8 KiB, 16 KiB, 32
-KiB, 64 KiB, 128 KiB, 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB — eleven
-classes total, each exactly twice the one below it.
+smallest power of two, no smaller than `MIN_BANK_SIZE` (2 KiB) and no
+larger than `MAX_BANK_SIZE` (4 MiB), that fits the requested size. This
+is a doubling ladder — 2 KiB, 4 KiB, 8 KiB, 16 KiB, 32 KiB, 64 KiB, 128
+KiB, 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB — twelve classes total, each
+exactly twice the one below it.
 
 [Revised M55, Oliver: "the jumps we have are a bit big and
 unpredictable"] An earlier revision of this section specified six named
@@ -174,6 +173,24 @@ power of two — the old classes were exactly the *even* powers of two;
 this ladder just fills in the odd ones between them — so nothing that
 already existed needs to change size under this revision, only new,
 in-between requests round more tightly now.
+
+[Revised M58, Oliver: "align on 2K banks as the smallest size"] The
+floor itself dropped one more step, from 4 KiB to 2 KiB, once a survey
+of Rebel-Sim's actual boot-time banks (`MMAP`, `SYSV`, `KMAP`, `WORK`)
+showed most of them use well under 2 KiB of their declared 4 KiB —
+`MMAP`'s 1552-byte header+slot-table content and `KMAP`'s 512-byte
+keymap being the starkest cases, each burning 2.5–3.5 KiB of pure
+allocator overhead on every arena for no reason tied to real content
+size. 4 KiB was never an MMU-paging requirement (this model doesn't
+page at all, §4.4) — it was ARM's native page size adopted as a
+convenient nod, not a load-bearing constraint, so there was no
+structural reason it couldn't drop further. `DSTK`/`RSTK` are the one
+case where this floor change is *not* free: both were sized at exactly
+4 KiB (1024 cells) by deliberate stack-depth choice, not because that's
+what 1024 cells happens to round up to from something smaller — dropping
+them to the new 2 KiB floor is a real, deliberate capacity cut to 512
+cells each, decided alongside this floor change rather than a side
+effect of it (`IMPLEMENTATION.md`'s M58 entry has the reasoning).
 
 **There is no path to an arbitrary exact byte size for a carved bank.**
 A subsystem whose natural content is smaller than a class (a character
@@ -198,7 +215,7 @@ loading an oversized project asset already does (`01-HAL.md` §6.3). It
 **MUST NOT** honor an arbitrary caller-supplied byte count as the
 bank's actual size.
 
-### 4.4 Allocation: a 4 KiB-aligned bump allocator
+### 4.4 Allocation: a 2 KiB-aligned bump allocator
 
 Carved banks are handed out by a simple bump allocator, run once per
 bank creation:
@@ -206,18 +223,26 @@ bank creation:
 1. Compute `candidate_base` = the current free-cursor position (the end
    of the highest-addressed active bank so far; `0` for the very first
    bank).
-2. **Round `candidate_base` up to the next 4 KiB boundary**:
-   `aligned_base = (candidate_base + 4095) & ~4095`.
+2. **Round `candidate_base` up to the next 2 KiB boundary**:
+   `aligned_base = (candidate_base + 2047) & ~2047`.
 3. Place the new bank at `aligned_base`; the free cursor becomes
    `aligned_base + size`.
 
-4 KiB is a deliberate nod to common page granularity — no MMU paging is
-implied or required by this model, but keeping every bank boundary
-aligned to it costs nothing (every size class in §4.3 is itself already
-a multiple of 4 KiB, so **only the very first placement after a
-non-class-sized item, if any, ever needs real rounding** — every
-placement after that lands pre-aligned automatically) and keeps the
-door open if paging ever becomes useful on some future target.
+The alignment granularity **MUST** track `MIN_BANK_SIZE` (§4.3), not a
+fixed byte count independent of it — that's what keeps every size class
+a multiple of the alignment, so **only the very first placement after a
+non-class-sized item, if any, ever needs real rounding** (every
+placement after that lands pre-aligned automatically). [Revised M58]
+An earlier revision hardcoded this at 4 KiB as "a nod to common page
+granularity" even after `MIN_BANK_SIZE` itself was still 4 KiB — that
+was harmless while the two values were equal, but decoupling them would
+silently reintroduce padding waste between consecutive minimum-class
+banks (e.g. two 2 KiB banks back to back, aligned to a stale 4 KiB
+boundary, waste up to 2 KiB between them) — exactly the rounding-waste
+problem §4.3's M55 revision was written to eliminate. No MMU paging is
+implied or required by this model either way; keeping alignment tied to
+`MIN_BANK_SIZE` costs nothing and keeps the door open if paging ever
+becomes useful on some future target.
 
 **A bank's address is fixed once created; there is no compaction and no
 reordering, ever** (§7 — no removal mechanism exists at all). Whatever
@@ -531,19 +556,22 @@ fits, exactly like any other carved bank's content-driven request
 bank-size request" already covered this case; `MMAP` was simply never
 routed through it). With the recommended default of `MAX_SLOTS = 64`,
 the raw requirement is 1552 bytes, comfortably inside the smallest
-class, **`MIN_BANK_SIZE` (4 KiB)** — so `MMAP`'s declared size is 4096
-bytes, not 1552. A target with a larger `MAX_SLOTS` recomputes the same
-way; only a `MAX_SLOTS` whose raw requirement exceeds 4 KiB (more than
-roughly 169 slots) would round to a larger class instead.
+class, **`MIN_BANK_SIZE`** — so `MMAP`'s declared size is `MIN_BANK_SIZE`
+bytes, not 1552 (4096 bytes prior to M58's §4.3 floor change; 2048
+bytes as of M58). A target with a larger `MAX_SLOTS` recomputes the
+same way; only a `MAX_SLOTS` whose raw requirement exceeds the current
+floor (more than roughly 84 slots, as of the 2 KiB floor — 169 slots
+under the prior 4 KiB one) would round to a larger class instead.
 
 There is now no exception left in this section at all: `MMAP`'s
-placement still goes through the ordinary 4 KiB-aligned allocator
-(§4.4) like any other bank, it is simply always the first one (so its
-own placement trivially needs no rounding, offset `0` already being
-aligned) — and because its declared size is now itself a 4 KiB
-multiple like every other size class, the bank placed immediately
-after it lands pre-aligned too, with no rounding step actually doing
-anything anywhere in the sequence (§5.4).
+placement still goes through the ordinary alignment-per-§4.4 allocator
+like any other bank, it is simply always the first one (so its own
+placement trivially needs no rounding, offset `0` already being
+aligned) — and because its declared size is now itself a multiple of
+the §4.4 alignment (tied to `MIN_BANK_SIZE`, same as every other size
+class), the bank placed immediately after it lands pre-aligned too,
+with no rounding step actually doing anything anywhere in the sequence
+(§5.4).
 
 ### 5.4 Worked example
 
@@ -552,32 +580,31 @@ The bank sequence below (`MMAP` implicitly first, then `SYSV`, `DSTK`,
 except `DICT`) is exactly the kind of arena an implementation this
 suite governs produces, computed per §4.3/§4.4/§5.3 with
 `MAX_SLOTS = 64` (`MMAP`'s raw requirement, `16 + 64×24 = 1552` bytes,
-rounds up to the minimum class, 4096 bytes — §5.3):
+rounds up to the minimum class, 2048 bytes as of M58 — §5.3):
 
 | Bank | Base | Size |
 |---|---|---|
-| `MMAP` | `0x00000` (0) | 4096 (§5.3) |
-| `SYSV` | `0x01000` (4096) | 4096 |
-| `DSTK` | `0x02000` (8192) | 4096 |
-| `RSTK` | `0x03000` (12288) | 4096 |
-| `DICT` | `0x04000` (16384) | 65536 |
-| `CHAR` | `0x14000` (81920) | 4096 |
-| `KMAP` | `0x15000` (86016) | 4096 |
-| `WORK` | `0x16000` (90112) | 4096 |
+| `MMAP` | `0x0000` (0) | 2048 (§5.3) |
+| `SYSV` | `0x0800` (2048) | 2048 |
+| `DSTK` | `0x1000` (4096) | 2048 |
+| `RSTK` | `0x1800` (6144) | 2048 |
+| `DICT` | `0x2000` (8192) | 65536 |
+| `CHAR` | `0x12000` (73728) | 2048 |
+| `KMAP` | `0x12800` (75776) | 2048 |
+| `WORK` | `0x13000` (77824) | 2048 |
 
 Every base lands pre-aligned with no rounding step actually doing
 anything anywhere in this sequence — the direct consequence of every
-bank, `MMAP` included now, always being an exact 4 KiB-multiple size
-class (§4.4). **[Revised]** an earlier version of this table had `MMAP`
-at its old, non-class-sized 1552 bytes, which meant `SYSV`'s placement
-right after it was the one spot the round-up step actually did
-something; with `MMAP` itself now size-class-rounded, that was the last
-remaining case where rounding had real work to do, and it's gone too —
-every bank in a conformant target's sequence, this one included,
-already lands on a 4 KiB boundary without the allocator needing to
-round anything up. A conformant target's own allocator, run against the
-same bank sequence with the same `MAX_SLOTS`, **MUST** reproduce this
-table exactly.
+bank, `MMAP` included, always being an exact `MIN_BANK_SIZE`-multiple
+size class, and the §4.4 alignment granularity tracking that same
+floor (§4.4). **[Revised M58]** this table used 4096-byte minimum-class
+banks (and 4 KiB alignment) prior to §4.3's floor dropping to 2 KiB;
+every non-`DICT` row here halved accordingly, and every base recomputed
+from that — the "no rounding step does anything" property this table
+demonstrates is unchanged by the floor's value, only by keeping §4.3's
+classes and §4.4's alignment in lockstep. A conformant target's own
+allocator, run against the same bank sequence with the same
+`MAX_SLOTS`, **MUST** reproduce this table exactly.
 
 ## 6. Multi-arena isolation
 
@@ -745,8 +772,8 @@ one becomes real and load-bearing somewhere, not before:
 | Cell is exactly 32-bit, little-endian, signed/unsigned by operation | §2 |
 | Addresses are per-arena offsets; a raw host pointer never becomes a Forth cell value | §3 |
 | A single arena never addresses ≥ 2^32 bytes | §3, §6.3 |
-| Every carved bank, including `MMAP` itself, occupies exactly one size class (a power of two, 4 KiB–4 MiB); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
-| Bump allocator 4 KiB-aligns every carved bank's base, including absolute-address alignment if the arena's own allocation might not already be page-aligned | §4.4 |
+| Every carved bank, including `MMAP` itself, occupies exactly one size class (a power of two, 2 KiB–4 MiB); no arbitrary exact sizes, no exceptions | §4.3, §5.3 |
+| Bump allocator aligns every carved bank's base to `MIN_BANK_SIZE` (2 KiB), including absolute-address alignment if the arena's own allocation might not already be aligned | §4.4 |
 | External banks are registered, don't consume the free cursor, and don't need a size class | §4.5 |
 | `@`/`!` resolution reaches an `EXTERNAL` bank's real backing store (not just the arena's own buffer) on any target where the two aren't automatically the same memory | §4.5 |
 | Bank table (`MMAP`) is arena-resident, not a host-side-only structure | §5 |
