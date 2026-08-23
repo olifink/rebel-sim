@@ -348,6 +348,10 @@ describe('TS: interactive multi-line block entry (system.fth, M57)', () => {
     remote.push('\x1b');
     expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
     expect(lineText(m, 0)).toBe('KEEP-ME');
+    // Esc leaves the cursor showing right where typing left off -- unlike
+    // the two BLOCK-SIZE-overflow exits, which really do have nothing
+    // left to point at and disable it.
+    expect(m.sysvars.get('SCREEN', 'CURSOR-VISIBLE')).toBe(-1);
     m.interpret('0 M'); // control genuinely returned, not just paused
     expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
   });

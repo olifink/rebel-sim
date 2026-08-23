@@ -1468,8 +1468,11 @@ VARIABLE TS-START
   ( back on FALSE. Every exit from here on is an explicit EXIT. )
   BEGIN
     KEY
-    DUP 27 = IF ( Esc: stop, keep whatever's already been typed )
-      DROP CURSDIS UPDATE EXIT
+    DUP 27 = IF ( Esc: stop, keep whatever's already been typed, and )
+      ( leave the cursor showing right where typing left off, rather )
+      ( than blanking it -- unlike the two BLOCK-SIZE-overflow exits )
+      ( below, which really are "nothing left to point at." )
+      DROP UPDATE EXIT
     THEN
     DUP 10 = IF ( Enter: advance to the next line's start; landing )
       ( past the last line, BLOCK-SIZE, ends the session exactly like )

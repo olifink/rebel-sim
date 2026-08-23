@@ -3552,7 +3552,11 @@ and `UNTIL` branches on `FALSE`), with every real exit an explicit
 **Per-keystroke behavior**, confirmed with Oliver rather than assumed:
 Esc ends the session immediately, keeping whatever was typed so far
 (no undo/rollback buffer — adding one wasn't judged worth it for a
-first cut). Enter advances `R#` to the start of the next line; on the
+first cut) and leaving the cursor visible right where typing left off
+(Oliver's own follow-up after using it — `CURSDIS` dropped from just
+this exit path, unlike the two `BLOCK-SIZE`-overflow exits below,
+which really do have nothing left to point at). Enter advances `R#`
+to the start of the next line; on the
 last line (15) that computation lands exactly on `BLOCK-SIZE`, which
 the same overflow guard used for ordinary typing already catches, so
 Enter-on-line-15 needed no special case at all — it just falls out of
