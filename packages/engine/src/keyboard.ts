@@ -14,9 +14,9 @@
  *   ordinary keys via the 0x80+bit pseudo-usage-code convention
  *   (docs/KEYBOARD.md §10), exactly matching Rebel-ROM.
  * - The KMAP bank holds a plain u8[2][256] table (unshifted/shifted
- *   planes) — only printable keys plus Enter/Backspace/Tab/Space get a
- *   translated char; everything else (Caps Lock, F-keys, PrintScreen,
- *   arrows, GUI) is left at 0, identified only via usageCode
+ *   planes) — only printable keys plus Enter/Backspace/Tab/Space/Escape
+ *   get a translated char; everything else (Caps Lock, F-keys,
+ *   PrintScreen, arrows, GUI) is left at 0, identified only via usageCode
  *   (docs/KEYBOARD.md §4's "identification now, behavior later").
  * - The event queue itself is a plain ring buffer, not arena/bank memory
  *   (same category as SCRN: host/module-owned, excluded from the
@@ -59,9 +59,13 @@ export class Keyboard {
     return this.kmapBank.base + plane * 256 + usageCode;
   }
 
-  /** US layout, printable keys + Enter/Backspace/Tab/Space only
-   * (docs/KEYBOARD.md §5), byte-for-byte matching
-   * CKeyboardModule::BuildDefaultKeymap. */
+  /** US layout, printable keys + Enter/Backspace/Tab/Space (docs/
+   * KEYBOARD.md §5), byte-for-byte matching CKeyboardModule::
+   * BuildDefaultKeymap -- plus Escape (M57), a Rebel-Sim-side addition
+   * TS needed as its own cancel key that rebel-rom's own keymap doesn't
+   * have yet (not present in this checkout to confirm either way); worth
+   * reconciling once a C++ Forth executor's own screen editor needs the
+   * same thing, rather than something to treat as settled parity now. */
   private buildDefaultKeymap(): void {
     for (let i = 0; i < KMAP_TABLE_SIZE; i++) {
       this.arena.writeByte(this.kmapBank.base + i, 0);
@@ -113,6 +117,9 @@ export class Keyboard {
     setBoth(0x2a, '\b'); // Backspace
     setBoth(0x2b, '\t'); // Tab — identification only for now
     setBoth(0x2c, ' '); // Space
+    setBoth(0x29, '\x1b'); // Escape — M57: TS's own cancel key, found needed
+    // once TS actually tried to read it via KEY; previously unmapped like
+    // every other non-printable key, so KEY/KEY? could never see it.
   }
 
   private readKmapByte(plane: 0 | 1, usageCode: number): number {

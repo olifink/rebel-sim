@@ -103,6 +103,13 @@
 : 2OVER 3 PICK 3 PICK ;
 : /MOD 2DUP MOD -ROT / ;
 : <> = INVERT ;
+( >= was missing for a while, worked around at each call site with )
+( plain < 0= -- WRAP-R#'s own BLOCK-SIZE check, M55, and TS's own )
+( BLOCK-SIZE guard, M57, hit the same gap independently. Adding it )
+( for real now: two genuinely separate bugs from the same missing )
+( word is exactly the "wait for a real need" signal CLAUDE.md asks )
+( for, not premature machinery. )
+: >= < 0= ;
 : 0< 0 < ;
 : 0> 0 > ;
 : 1+ 1 + ;
@@ -1323,7 +1330,7 @@ VARIABLE TRY-POS
 ( early give-up path below need to apply identically, or a not-found )
 ( search can leave R# sitting one past the last valid byte, which )
 ( LINE, and so #LOCATE/#LEAD/#LAG/M, would then reject. )
-: WRAP-R# ( -- ) R# @ BLOCK-SIZE < 0= IF 0 R# ! THEN ;
+: WRAP-R# ( -- ) R# @ BLOCK-SIZE >= IF 0 R# ! THEN ;
 
 ( FIND searches the current screen for the pattern held in PAD, )
 ( starting from the cursor and trying at most L/SCR lines -- one )
@@ -1418,16 +1425,80 @@ VARIABLE C-LEN
   C-LEN @ M
 ;
 
-( TS, classic's interactive multi-line entry screen 6, is not )
-( ported: it depends on classic Forth's own blocking terminal read, )
-( where each loop iteration's T call genuinely pauses for the next )
-( line the user types. This project's WORD -- T's own delimiter-one )
-( scan -- never blocks; it returns immediately with nothing found )
-( once the current input line runs out, spec/04-FORTH-CORE.md )
-( section 6.13. A literal port would silently blank fifteen lines )
-( instead of prompting for each one -- porting TS for real needs )
-( WORD to suspend and resume the way ACCEPT already does, a genuine )
-( engine change, not an EDITOR-vocabulary word. )
+( TS, classic's interactive multi-line entry screen 6, rebuilt from )
+( scratch rather than ported literally: classic's own T, screen 2, )
+( never actually reads anything -- it just repositions the cursor and )
+( redraws, relying on the terminal's own hardware to echo keystrokes )
+( straight into the display at a hardware cursor, a model this )
+( project's own CHAR-bank-backed screen doesn't have. FORTH- )
+( ARCHITECTURE.md section 9 item 17 records that finding. The actual )
+( gap turned out not to need engine changes at all: KEY -- already )
+( blocking, inner.ts -- suspends correctly through any depth of colon- )
+( word/loop nesting, since dispatch/executeXT/threadFrom all delegate )
+( via `yield*` -- so a plain Forth BEGIN loop around KEY gets the same )
+( suspend/resume ACCEPT gets, for free. What TS actually needed )
+( instead was its own positioned-write loop: EMIT/TYPE's free-running )
+( stream cursor doesn't line up with block-line boundaries, since C/L )
+( -- 64 -- doesn't evenly divide this project's 80-column physical )
+( screen, so every character here is drawn with AT-XY/CHAR! at an )
+( explicitly computed column/row instead. )
+
+( TS-ROW walks the initial full-screen draw. Can't use a bare )
+( DO...I...LOOP for it -- I is EDITOR's own insert-line command by )
+( this point in the file, same constraint noted above I's own )
+( definition -- so this uses the same named-counter BEGIN/WHILE shape )
+( as -TEXT/1LINE further up. TS-START holds whatever R# TS began at, )
+( so Backspace can't erase past it -- the same never-go-below-where- )
+( this-call-started rule ACCEPT already enforces for its own input. )
+VARIABLE TS-ROW
+VARIABLE TS-START
+: TS ( -- )
+  CLS
+  0 TS-ROW !
+  BEGIN TS-ROW @ L/SCR < WHILE
+    0 TS-ROW @ AT-XY
+    TS-ROW @ LINE C/L TYPE
+    1 TS-ROW +!
+  REPEAT
+  0 R# ! 0 TS-START !
+  0 0 AT-XY CURSEN
+  ( No AGAIN in this dialect -- only BEGIN/UNTIL and BEGIN/WHILE/REPEAT )
+  ( are defined, further up this file -- so 0 UNTIL loops unconditionally, )
+  ( same as classic AGAIN would, since 0 is FALSE and UNTIL branches )
+  ( back on FALSE. Every exit from here on is an explicit EXIT. )
+  BEGIN
+    KEY
+    DUP 27 = IF ( Esc: stop, keep whatever's already been typed )
+      DROP CURSDIS UPDATE EXIT
+    THEN
+    DUP 10 = IF ( Enter: advance to the next line's start; landing )
+      ( past the last line, BLOCK-SIZE, ends the session exactly like )
+      ( Esc, so pressing Enter on line 15 needs no special-casing. )
+      DROP
+      #LOCATE NIP 1+ C/L * R# !
+      R# @ BLOCK-SIZE >= IF WRAP-R# CURSDIS UPDATE EXIT THEN
+      #LOCATE AT-XY
+    ELSE DUP 8 = IF ( Backspace: step back one, blank that cell, )
+      ( but never past TS-START. )
+      DROP
+      R# @ TS-START @ > IF
+        -1 R# +!
+        BL SCR @ BLOCK R# @ + C!
+        #LOCATE BL CHAR!
+        #LOCATE AT-XY
+      THEN
+    ELSE ( an ordinary character: write it into the block, draw it, )
+      ( advance -- crossing a line boundary here auto-advances to the )
+      ( next line with no Enter needed, the same BLOCK-SIZE guard as )
+      ( Enter's own end-of-screen case. )
+      DUP SCR @ BLOCK R# @ + C!
+      #LOCATE ROT CHAR!
+      1 R# +!
+      R# @ BLOCK-SIZE >= IF WRAP-R# CURSDIS UPDATE EXIT THEN
+      #LOCATE AT-XY
+    THEN THEN
+  0 UNTIL
+;
 
 ( TOP jumps to and displays the very first screen -- this project's )
 ( own reading of classic TOP's idea of a known starting point, )

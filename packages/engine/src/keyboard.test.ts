@@ -33,7 +33,7 @@ describe('Keyboard', () => {
     expect(m.keyboard.readEvent()?.char).toBe('!'.charCodeAt(0));
   });
 
-  it('translates Enter/Backspace/Tab/Space identically on both planes', () => {
+  it('translates Enter/Backspace/Tab/Space/Escape identically on both planes', () => {
     const m = new Machine();
     m.keyboard.pushRawEvent(0x28, true); // Enter
     expect(m.keyboard.readEvent()?.char).toBe(10);
@@ -43,6 +43,8 @@ describe('Keyboard', () => {
     expect(m.keyboard.readEvent()?.char).toBe(9);
     m.keyboard.pushRawEvent(0x2c, true); // Space
     expect(m.keyboard.readEvent()?.char).toBe(32);
+    m.keyboard.pushRawEvent(0x29, true); // Escape — M57, TS's own cancel key
+    expect(m.keyboard.readEvent()?.char).toBe(27);
   });
 
   it('leaves untranslated keys (Caps Lock, F-keys, arrows) at char 0, identified only by usageCode', () => {

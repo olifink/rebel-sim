@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { bootMachine } from './test-support.js';
+import { RemoteChannel } from './channel.js';
+import { bootMachine, AMPLE_STEP_BUDGET } from './test-support.js';
 
 // M55 follow-up: the remaining core screen-editor commands, ported from
 // inspiration/figforth_editor_screens.txt screens 2-6 — R# and the
 // cursor-relative words (#LOCATE/#LEAD/#LAG/M), line editing (LINE/-MOVE/
 // H/E/S/D/R/P/I), COPY, and search/replace (TEXT-LEN/-TEXT/1LINE/FIND/
-// DELETE/N/F/B/X/TILL/C). TS (classic's interactive multi-line entry) is
-// deliberately not ported — see its own comment in system.fth for why
-// (this project's WORD doesn't block for more input the way classic's
-// terminal read does).
+// DELETE/N/F/B/X/TILL/C). TS (classic's interactive multi-line entry,
+// rebuilt rather than literally ported — its own comment in system.fth
+// explains why) is covered in its own describe block further down, M57.
 function screenText(rows: number, m: ReturnType<typeof bootMachine>): string {
   const out: string[] = [];
   for (let r = 0; r < rows; r++) {
@@ -281,5 +281,97 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
     // And a following, ordinary command still works — nothing left the
     // machine in a broken state.
     expect(() => m.interpret('0 M')).not.toThrow();
+  });
+});
+
+describe('TS: interactive multi-line block entry (system.fth, M57)', () => {
+  function bootWithRemote(): { m: ReturnType<typeof bootMachine>; remote: RemoteChannel } {
+    const remote = new RemoteChannel();
+    const m = bootMachine({ remoteChannel: remote });
+    return { m, remote };
+  }
+
+  function lineText(m: ReturnType<typeof bootMachine>, n: number): string {
+    m.interpret(`${n} LINE`);
+    const addr = m.stack.pop()!;
+    let s = '';
+    for (let i = 0; i < 64; i++) s += String.fromCharCode(m.arena.readByte(addr + i));
+    return s.trimEnd();
+  }
+
+  it('types characters directly into the block and onto the screen', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('0 CLEAR');
+    m.interpret('TS');
+    remote.push('HI');
+    remote.push('\x1b'); // Esc: stop
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('HI');
+    expect(m.screen.readRowText(0).trimEnd()).toBe('HI');
+  });
+
+  it('Enter advances to the start of the next line', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('1 CLEAR');
+    m.interpret('TS');
+    remote.push('AAA\nBB');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('AAA');
+    expect(lineText(m, 1)).toBe('BB');
+  });
+
+  it('Enter on the last line ends the session, same as Esc', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('2 CLEAR');
+    m.interpret('TS');
+    remote.push('\n'.repeat(16)); // one Enter per line; the 16th runs off the end
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    m.interpret('R# @');
+    const r = m.stack.pop()!;
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThan(1024);
+    // Control genuinely returned to the caller -- an ordinary command
+    // right afterward still works, nothing left the machine stuck.
+    expect(() => m.interpret('0 M')).not.toThrow();
+  });
+
+  it('Esc ends the session, keeping whatever was typed so far', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('3 CLEAR');
+    m.interpret('TS');
+    remote.push('KEEP-ME');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('KEEP-ME');
+    m.interpret('0 M'); // control genuinely returned, not just paused
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+  });
+
+  it("Backspace erases the last character and won't cross before where TS started", () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('4 CLEAR');
+    m.interpret('TS');
+    remote.push('AB\b\b\b'); // two real erases; the third is a no-op, nothing left
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('');
+  });
+
+  it('a full line auto-advances to the next one without needing Enter', () => {
+    const { m, remote } = bootWithRemote();
+    m.interpret('USE EDITOR');
+    m.interpret('5 CLEAR');
+    m.interpret('TS');
+    remote.push('X'.repeat(64) + 'YZ');
+    remote.push('\x1b');
+    expect(m.step(AMPLE_STEP_BUDGET)).toBe('idle');
+    expect(lineText(m, 0)).toBe('X'.repeat(64));
+    expect(lineText(m, 1)).toBe('YZ');
   });
 });

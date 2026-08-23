@@ -817,6 +817,27 @@ moved into their respective sections (§1/§3/§4/§7) as firm rules — see
     out and even less scoped, inherits the same open question with no
     lean either way yet.
 
+    **Follow-up, Rebel-Sim M57:** the concrete motivating example above
+    turned out to rest on a mistaken premise — rechecked against
+    `inspiration/figforth_editor_screens.txt` directly, classic `T`
+    (screen 2, `DUP C/L * R# ! H 0 M`) never reads anything itself; it
+    only repositions the cursor and redraws, relying on the *terminal's
+    own hardware* to echo keystrokes into the display at a hardware
+    cursor. So `TS` never actually needed `WORD` to suspend mid-scan —
+    it needed a per-character loop of its own, and `KEY` (already
+    suspend-capable) turned out to be sufficient once `TS` was rebuilt
+    around positioned writes (`AT-XY`/`CHAR!`) instead of the free-
+    running stream cursor `EMIT`/`TYPE` use elsewhere. Zero engine
+    changes were needed for Rebel-Sim specifically — `dispatch`/
+    `executeXT`/`threadFrom`'s existing `yield*`-delegation chain
+    already propagates `KEY`'s suspend through arbitrary Forth-level
+    loop nesting. **This doesn't resolve the open question above** —
+    Rebel-Sim already had a working suspend mechanism (a JS generator)
+    that Rebel Machine MkI/Headless Rebel don't have yet; it just means
+    the *specific* example that first surfaced the question wasn't
+    actually evidence that `WORD` itself needs to change. See
+    `IMPLEMENTATION.md` §1.69 for the full account.
+
 ### 10. v4 resolution summary — what graduated from cross-check to rule
 
 Rebel-ROM is the only one of the three targets that exists in code, and
