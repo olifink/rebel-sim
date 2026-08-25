@@ -263,6 +263,40 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
   });
 
+  it('PALETTE (system.fth, M62 follow-up 2) selects PAL\'s n\'th map by index', () => {
+    const m = bootMachine();
+    const palBase = m.banks.findBank('PAL')!.base;
+
+    m.interpret('0 PALETTE');
+    expect(m.screen.getPaletteBase()).toBe(palBase);
+
+    m.interpret('3 PALETTE');
+    expect(m.screen.getPaletteBase()).toBe(palBase + 3 * 64);
+  });
+
+  it('a custom color written into a non-default PAL map resolves correctly once PALETTE selects it', () => {
+    const hal = spyHal();
+    const m = bootMachine({ screenHal: hal });
+    const palBase = m.banks.findBank('PAL')!.base;
+    m.arena.writeCell(palBase + 2 * 64 + 0 * 4, 0x123456); // map 2, index 0
+    hal.blitGlyph.mockClear();
+
+    m.interpret('2 PALETTE');
+    m.interpret('0 INK 0 PAPER 65 EMIT');
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x123456, 0x123456);
+  });
+
+  it('disabling stays a plain sysvar write — 0 PALETTE-BASE !, no dedicated word', () => {
+    const m = bootMachine();
+    m.interpret('1 PALETTE');
+    expect(m.screen.getPaletteBase()).not.toBe(0);
+
+    m.interpret('0 PALETTE-BASE !');
+
+    expect(m.screen.getPaletteBase()).toBe(0);
+  });
+
   it('the default palette is resident at PAL map slot 0 at boot', () => {
     const m = new Machine();
     const palBank = m.banks.findBank('PAL')!;

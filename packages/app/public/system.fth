@@ -278,6 +278,19 @@ VARIABLE CURRENT-VOCAB
 ( -- nothing generates these yet, see spec/00-OVERVIEW.md. )
 : PALETTE-BASE BANK@ SYSV 100 + ;
 
+( PALETTE, M62 follow-up 2, Oliver's request: n PALETTE selects PAL's )
+( n'th map as the active palette in one word, instead of writing out )
+( the n 64 * BANK@ PAL + PALETTE-BASE ! arithmetic by hand each time. )
+( 0 PALETTE selects the default map -- no special-casing needed, map )
+( 0 already sits at PAL's own base address. Disabling the palette )
+( entirely needs no word here either -- 0 PALETTE-BASE ! already )
+( does that directly, PALETTE-BASE's own 0-means-disabled convention, )
+( so PALETTE only ever has to handle picking a real map. No bounds )
+( check on n, same trust-the-caller convention AT-XY already uses -- )
+( an out-of-range n lands somewhere else inside PAL's own allocated )
+( bank, not memory-unsafe, just a meaningless palette until corrected. )
+: PALETTE ( n -- ) 64 * BANK@ PAL + PALETTE-BASE ! ;
+
 ( DUMP, M51: a classic hex dump, requested alongside BANKS -- 16 rows )
 ( of 8 bytes each, 128 bytes total starting at the given address. Row )
 ( shape: an 8-digit hex address, 8 space-separated 2-digit hex bytes, )
