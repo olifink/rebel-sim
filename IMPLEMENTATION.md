@@ -3981,11 +3981,30 @@ palette content, index resolution, the literal-color passthrough,
 fix, `cls()`'s `ATTR` fill), `project.test.ts` (`PAL`/`ATTR`
 `SAVE`/`RESTORE` round-trip).
 
-No Forth-level primitive changes — selecting a map is ordinary
-arithmetic against `PALETTE-BASE`'s sysvar cell (`BANK@ SYSV <offset> +
-!`), deliberately not given a dedicated word (`spec/01-HAL.md` §3.6's
-own stated reasoning: trivial enough via existing primitives that a
-convenience word isn't warranted yet).
+**M62 follow-up, Oliver's request:** `PALETTE-BASE`, a plain `system.fth`
+word (BOOTSTRAP, *not* a native primitive) — `: PALETTE-BASE BANK@ SYSV
+100 + ;`, pushing the `SCREEN.PALETTE-BASE` sysvar cell's own address
+(100 = `SCREEN`'s `baseOffset` 64 + the field's own offset 36, hand-kept
+in sync with `rebel-opcodes.json` the same way `BANKS`'s `MMAP-*`
+constants already are), so it's a real read/write variable —
+`PALETTE-BASE @` reads it, `addr PALETTE-BASE !` writes it (e.g. `BANK@
+PAL PALETTE-BASE !` enables the default palette in one line).
+Deliberately *not* a native primitive: unlike `BASE`/`STATE`/
+`HERE-ADDR`/`LATEST-ADDR`, which exist natively because something has
+to bootstrap that very mechanism (self-hosted `INTERPRET`,
+`VARIABLE`/`CONSTANT`, …) before it's available, `PALETTE-BASE` is
+just an ordinary *user* of an already-existing one — `BANK@`'s own note
+already describes exactly this "`BANK@ SYSV <offset> + @` reaches any
+sysvar from pure Forth source" pattern, so a native primitive would
+have spent a token ID on something Forth source already does natively.
+First implemented as a native primitive (token 147) and corrected
+same-session once this was pointed out. This only shortens the
+*address-lookup* half — it doesn't add a "select palette map N" word;
+picking a specific map is still `BANK@ PAL N 64 * + PALETTE-BASE !`,
+ordinary arithmetic, exactly as `spec/01-HAL.md` §3.6's still-standing
+open item describes. *Implementation:* `system.fth`. *Tests:*
+`screen.test.ts` (via `bootMachine()`, since this is a `system.fth`
+word, not an engine primitive).
 
 ---
 
@@ -4155,6 +4174,6 @@ exactly as it would be on the bare-metal target.
 | **M59** | Arena-resident `FONT` bank (§1.71), loaded by default from the user's own `rebel.FNT` (packages/app/public), resolving `spec/03-SYSVARS.md` §8's long-reserved `FONT` group for real. `repl.ts` creates the bank and points the new `FONT.FONT-BASE` sysvar at it; `app.ts` fetches `rebel.FNT` and writes it into the arena in parallel with `system.fth`, before anything can render. `CanvasScreenHal` now reads glyphs from the arena via `FONT-BASE` instead of importing a compiled-in font (`font-zxspectrum.ts` deleted) — `attach(arena, sysvars)` solves the ordering problem of the HAL being constructed before the `Machine` that owns what it needs to read. Confirmed with Oliver: iteration is edit-the-file-then-refresh, same as `system.fth` already works, no dedicated live-reload tool built. Flagged, not hidden: `rebel-rom`'s own font system stays entirely HAL-side with no Forth-addressable bank or runtime switching (`docs/FONT-SYSTEM.md` §6) — this makes Rebel-Sim genuinely ahead here, and `01-HAL.md` §3.7 makes the whole `FONT` bank/sysvar group OPTIONAL for exactly that reason. | `rebel-opcodes.json`, `repl.ts`, `canvas-screen-hal.ts`, `app.ts`, `01-HAL.md`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `bank-access.test.ts`, `sysvars.test.ts`, `storage.test.ts` |
 | **M60** | `LOAD` stack-safety bug (§1.72), found live by Oliver: a colon-definition with `DO`/`LOOP` split across block lines threw `? ABORT` on `LOAD`, working fine on one line. Root cause: `LOAD` kept the block's base address live on the *data* stack across its whole 16-line loop, re-`DUP`-ing it each iteration — `DO`'s own compile-time backpatch address, still pending on that same stack until its matching `LOOP` (a later block line) consumed it, got re-`DUP`-ed instead, corrupting every subsequent line's computed address. Isolated in a fresh `Machine` (not the live session) to a general case: any interpreted line leaving anything on the data stack, not just `DO`, breaks it — confirmed with two bare unconsumed numbers split across lines, no colon-definition involved. Fixed with two dedicated variables (`LOAD-ADDR`/`LOAD-CONTEXT`) instead of leaving state live on the data stack, matching `R#`/`SCR`/`T-LINE`'s own established pattern. | `system.fth`, `screen-editor.test.ts` |
 | **M61** | Address-less `DUMP` (§1.73), Oliver's idea: a bare `DUMP` continues from wherever the last one left off, monitor-style paging, instead of always needing an explicit address. `DEPTH 0= IF DUMP-NEXT @ THEN` decides which form was used; `DUP 128 + DUMP-NEXT !` right after unconditionally advances the next start address, so explicit-address and bare calls compose naturally. `DUMP-NEXT` stays an ordinary visible `VARIABLE`, pokeable directly, not hidden internal plumbing. | `system.fth`, `dump.test.ts` |
-| **M62** | Indexed color palette (§1.74, `spec/01-HAL.md` §3.6, `spec/02-MEMORY-MODEL.md` §4.6): new `PAL` bank (up to 16 selectable 16-entry `0xRRGGBB` palettes, default palette normatively resident at map slot 0) and `ATTR` bank (`CHAR`'s per-cell `IIIIPPPP` ink/paper-index companion), gated by a new `PALETTE-BASE` sysvar (`SCREEN` group, `0` = disabled, address-of-active-map otherwise — same shape as `FONT-BASE`). `INK`/`PAPER` values 0-15 resolve through the active map when one is set; values >=16 and the disabled state stay exactly today's literal-RGB behavior, unchanged. Also fixes a real, previously-named gap: `redrawCursorAt()`/`redrawAll()` used to always reapply the *current global* `INK`/`PAPER` on redraw, never a cell's actual stored color (flagged ahead of time in the M25 note, §1.46) — now reads each cell's own `ATTR` byte instead, while a palette is active. Accepted, documented limitation: a literal RGB `>=16` written while paletted renders correctly once but isn't `ATTR`-durable across a later redraw (4-bit nibbles can't encode it). No new primitives — palette selection is ordinary sysvar arithmetic, deliberately not given a dedicated word. | `screen.ts`, `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `screen.test.ts`, `project.test.ts` |
+| **M62** | Indexed color palette (§1.74, `spec/01-HAL.md` §3.6, `spec/02-MEMORY-MODEL.md` §4.6): new `PAL` bank (up to 16 selectable 16-entry `0xRRGGBB` palettes, default palette normatively resident at map slot 0) and `ATTR` bank (`CHAR`'s per-cell `IIIIPPPP` ink/paper-index companion), gated by a new `PALETTE-BASE` sysvar (`SCREEN` group, `0` = disabled, address-of-active-map otherwise — same shape as `FONT-BASE`). `INK`/`PAPER` values 0-15 resolve through the active map when one is set; values >=16 and the disabled state stay exactly today's literal-RGB behavior, unchanged. Also fixes a real, previously-named gap: `redrawCursorAt()`/`redrawAll()` used to always reapply the *current global* `INK`/`PAPER` on redraw, never a cell's actual stored color (flagged ahead of time in the M25 note, §1.46) — now reads each cell's own `ATTR` byte instead, while a palette is active. Accepted, documented limitation: a literal RGB `>=16` written while paletted renders correctly once but isn't `ATTR`-durable across a later redraw (4-bit nibbles can't encode it). **Follow-up, same session:** `PALETTE-BASE` (§1.74), an ordinary `system.fth` word exposing the sysvar cell's own address for direct `@`/`!` access, `BANK@ SYSV <offset> +`-built — deliberately *not* a native primitive, unlike `BASE`/`STATE`/`HERE-ADDR`/`LATEST-ADDR` (those bootstrap the very mechanism this word is just an ordinary user of); still no dedicated "select map N" word. | `screen.ts`, `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `system.fth`, `screen.test.ts`, `project.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Machine } from './repl.js';
 import { ScreenHal } from './screen.js';
+import { bootMachine } from './test-support.js';
 
 function spyHal(): ScreenHal & { blitGlyph: ReturnType<typeof vi.fn>; clearScreen: ReturnType<typeof vi.fn> } {
   return { blitGlyph: vi.fn(), clearScreen: vi.fn() };
@@ -235,6 +236,31 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A'
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
+  });
+
+  it('PALETTE-BASE (system.fth, M62 follow-up) pushes the sysvar cell\'s own address, same BASE/STATE idiom — read with @, write with !', () => {
+    const m = bootMachine();
+
+    m.interpret('PALETTE-BASE @');
+    expect(m.stack.pop()).toBe(0); // disabled by default
+
+    const palBase = m.banks.findBank('PAL')!.base;
+    m.interpret(`${palBase} PALETTE-BASE !`);
+    expect(m.screen.getPaletteBase()).toBe(palBase); // same sysvar setPaletteBase() writes
+
+    m.interpret('PALETTE-BASE @');
+    expect(m.stack.pop()).toBe(palBase);
+  });
+
+  it('BANK@ PAL PALETTE-BASE ! is enough to enable the default palette end-to-end', () => {
+    const hal = spyHal();
+    const m = bootMachine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.interpret('BANK@ PAL PALETTE-BASE !');
+    m.interpret('4 INK 0 PAPER 65 EMIT'); // green (4) on black (0)
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
   });
 
   it('the default palette is resident at PAL map slot 0 at boot', () => {

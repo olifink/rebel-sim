@@ -261,6 +261,23 @@ VARIABLE CURRENT-VOCAB
   LOOP
 ;
 
+( PALETTE-BASE, M62 follow-up, Oliver's request: direct read/write )
+( access to the indexed-color-palette sysvar, spec/01-HAL.md 3.6, )
+( spec/02-MEMORY-MODEL.md 4.6 -- PALETTE-BASE @ reads it, addr )
+( PALETTE-BASE ! writes it, e.g. BANK@ PAL PALETTE-BASE ! enables )
+( the default palette. No native primitive needed for this, unlike )
+( BASE/STATE/HERE-ADDR/LATEST-ADDR -- those exist natively because )
+( something has to bootstrap the very mechanism, self-hosted )
+( INTERPRET, VARIABLE/CONSTANT, and so on -- this word is just an )
+( ordinary *user* of: BANK@'s own note already describes exactly )
+( this pattern, BANK@ SYSV offset + @ reaches any sysvar from pure )
+( Forth source. BANK@ is IMMEDIATE, so SYSV's address bakes in here )
+( as a plain LIT, same as BANKS' own MMAP-HDR-style constants -- the )
+( +100 is SCREEN's sysvarGroups baseOffset 64 plus PALETTE-BASE's )
+( own field offset 36, kept in sync by hand with rebel-opcodes.json )
+( -- nothing generates these yet, see spec/00-OVERVIEW.md. )
+: PALETTE-BASE BANK@ SYSV 100 + ;
+
 ( DUMP, M51: a classic hex dump, requested alongside BANKS -- 16 rows )
 ( of 8 bytes each, 128 bytes total starting at the given address. Row )
 ( shape: an 8-digit hex address, 8 space-separated 2-digit hex bytes, )
