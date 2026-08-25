@@ -98,6 +98,11 @@ read those as precise descriptions of required *behavior* to
 reimplement faithfully in TypeScript rather than something to link or
 import against.
 
+## Word implementations
+
+Primitive words should only be written if absolutely necessary. Default
+to adding forth words in `system.fth` for portability to other implementations.
+
 ## Architectural rules that will shape any code written here
 
 These are firm, settled rules from `FORTH-ARCHITECTURE.md` — not open
@@ -207,3 +212,10 @@ discipline to any implementation work here.
 open decisions (not yet resolved anywhere) that an implementer will need
 to make explicitly rather than guess past — check those sections before
 assuming a design choice is already settled.
+
+
+## Testing
+
+The full test suite should only be run for significant refacorings or 
+broad changes to the codebase. Don't run the full suite during feature 
+development.
