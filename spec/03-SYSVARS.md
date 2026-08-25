@@ -190,6 +190,15 @@ owning subsystem-existence precondition.
   exactly the drift this whole grouped-layout mechanism exists to
   avoid; this specification resolves the duplication in `SCREEN`'s
   favor and does not define a `CORE`-level equivalent.
+
+  [Update: `PALETTE-BASE` field added] `SCREEN`'s side of this
+  resolution is no longer merely reserved — a target with a genuine
+  indexed-color text mode now has a concrete field to populate:
+  `PALETTE-BASE` (§6, `01-HAL.md` §3.6), an address, not an index,
+  following the same "0/absent means disabled" convention as
+  `FONT-BASE` (§8). This does not reopen the question this bullet
+  settles: the field still lives in `SCREEN`, not `CORE`, and `CORE`
+  still defines no palette-related field of its own.
 - **A general `LAST-ERROR` field.** `STORAGE` already has one
   (`01-HAL.md` §6.6, §10 below) — a same-named `CORE`-level field would
   collide in the flat dictionary namespace (§2). Whether a *unified*,
@@ -214,6 +223,7 @@ read the two together, not as duplicates of each other.
 | 24 | `INK` | REQUIRED |
 | 28 | `PAPER` | REQUIRED |
 | 32 | `CURSOR-VISIBLE` | OPTIONAL (`01-HAL.md` §3.5) |
+| 36 | `PALETTE-BASE` | OPTIONAL (`01-HAL.md` §3.6) |
 
 ## 7. `KEYBOARD`
 
@@ -337,6 +347,6 @@ rather than each picking independently. Full semantics belong to
 | An optional field a target doesn't implement is entirely omitted, never populated-but-meaningless | §2 |
 | Omitting an optional field never shifts another field's offset | §2 |
 | Group base offsets match §4's table exactly | §4 |
-| `CORE` does not define `COLOR-DEPTH`/`PALETTE-BANK`/a general `LAST-ERROR` | §5 |
+| `CORE` does not define `COLOR-DEPTH`/`PALETTE-BANK`/a general `LAST-ERROR`; the resolved indexed-color mechanism (`PALETTE-BASE`) lives in `SCREEN` instead | §5, §6 |
 | `SCREEN`/`KEYBOARD`/`STORAGE` field layout matches §6/§7/§10 exactly, consistent with `01-HAL.md`'s meanings | §6, §7, §10 |
 | `FORTH` group present at `0x180` with §11's field layout, once a target has a Forth executor at all | §11 |

@@ -339,6 +339,8 @@ to it — it is not exhaustive by design (§7).
 | `RSTK` | Return stack, grows down | Per-arena |
 | `DSTK` | Data stack, grows down | Per-arena |
 | `CHAR` | Character-code grid, write-through into the display surface (`01-HAL.md` §3) | Per-arena |
+| `PAL`  | Indexed color palette: up to 16 maps of 16 × `0xRRGGBB` entries (64 bytes each, contiguous); the active map's address is tracked by `SCREEN`'s `PALETTE-BASE` field (`03-SYSVARS.md` §6, `01-HAL.md` §3.6) | Per-arena |
+| `ATTR` | Per-cell ink/paper attribute byte (`IIIIPPPP`), same size and addressing as `CHAR`; write-through mirrors `CHAR`'s while `PALETTE-BASE` is non-zero, otherwise inert (`01-HAL.md` §3.2, §3.6) | Per-arena |
 | `WORK` | Terminal Input Buffer and scratch-text-handling region (`PAD`), at fixed sub-offsets within one bank — both are small, transient, per-line scratch text, so they share one size class instead of each independently rounding up to its own (§4.3) | Per-arena |
 | `SPRT` | Sprite/tile data | Per-arena |
 | `CART` | Cart-loaded code landing area | Per-arena |
@@ -360,6 +362,58 @@ stack's own bank, bounds-checked against that bank's own recorded size.
 deliberate, narrow exception, not a precedent for treating other
 subsystems loosely — see §6 for why exactly these, and no others, stay
 singular.
+
+`PAL` and `ATTR` follow `CHAR`'s per-arena model, not `FONT`'s/`KMAP`'s
+shared one. A palette map is superficially resource-like the way a font
+or keymap is, but it's addressed through an absolute per-arena sysvar
+pointer (`PALETTE-BASE`), not a singular hardware/host resource multiple
+arenas could observably disagree about — and its total footprint (1 KiB
+of real content, rounding to one 2 KiB size class, §4.3) is cheap enough
+that duplicating it per arena avoids taking on any multi-arena-aliasing
+complexity for a resource this small.
+
+#### `PAL` bank layout
+
+One palette map is 16 cells of `0xRRGGBB` (4 bytes each, little-endian
+per the arena's fixed cell endianness) — 64 bytes total. The `PAL` bank
+holds up to 16 such maps, packed contiguously: map `N`'s base address is
+`PAL bank base + N*64`, for `N` in `0..15`. Full bank content is
+`16 * 64 = 1024` bytes, which rounds up to the 2 KiB minimum size class
+(§4.3: "There is no path to an arbitrary exact byte size for a carved
+bank... MUST still round up and take the whole class, leaving the
+remainder of that class simply unused") — the trailing 1024 bytes of the
+allocated bank is unused padding, not a 17th map.
+
+An implementation providing a `PAL` bank **MUST** initialize map slot 0
+(`PAL base + 0`) to this default palette at boot, before any Forth
+program runs:
+
+| Index | Name | Color |
+|---|---|---|
+| 0 | black | `0x000000` |
+| 1 | blue | `0x0000ff` |
+| 2 | red | `0xff0000` |
+| 3 | magenta | `0xff00ff` |
+| 4 | green | `0x00ff00` |
+| 5 | cyan | `0x00ffff` |
+| 6 | yellow | `0xffff00` |
+| 7 | white | `0xffffff` |
+| 8 | pink | `0xff0088` |
+| 9 | lila | `0x8800ff` |
+| 10 | rose | `0xff8888` |
+| 11 | orange | `0xff8800` |
+| 12 | marine | `0x0088ff` |
+| 13 | mauve | `0x8888ff` |
+| 14 | brown | `0x888800` |
+| 15 | grey | `0x888888` |
+
+Slots 1-15 **MAY** be left zero-initialized (all-black) until a program
+writes them — worth stating explicitly, since a zero-filled slot is
+coincidentally a valid color and easy to mistake for "already
+meaningfully initialized." Note this default table's index 0 and index
+4 coincide with today's existing boot `PAPER`/`INK` defaults
+(`0x000000`/`0x00ff00`) — a program that points `PALETTE-BASE` at slot 0
+immediately after boot sees no visible color change.
 
 ### 4.7 Naming: `tag` vs. `name`
 

@@ -259,13 +259,90 @@ document's. In order:
 | `INK` | Current foreground color for character writes. |
 | `PAPER` | Current background color for character writes. |
 | `CURSOR-VISIBLE` | OPTIONAL (§3.5). HAL boolean. Omit the field entirely on a target that never implements a visible cursor, per `03-SYSVARS.md`'s reserved-field convention — do not wire a fixed `FALSE` in its place. |
+| `PALETTE-BASE` | OPTIONAL. Address of the active 16-entry palette map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank), or `0` for "disabled" (literal-RGB-only, today's unmodified behavior) — same address/0-disabled convention as `FONT-BASE` (§3.7). |
 
 A target with a fixed, non-indexed truecolor display has no referent
 for a color-depth or palette-size field and **MUST** omit them rather
-than invent a meaningless constant. A target that genuinely has an
-indexed/palette display mode is out of this version's scope (§9) —
-raise it against this document rather than inventing a local
-extension.
+than invent a meaningless constant.
+
+A target with a genuine indexed/palette **text-mode** display is now in
+scope: `PALETTE-BASE` (above) holds the absolute address of the active
+16-entry `0xRRGGBB` map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank), and
+the per-cell `ATTR` bank (`02-MEMORY-MODEL.md` §4.6) stores the resolved
+`IIIIPPPP` ink/paper index pair once a palette is active. This is scoped
+strictly to the character-grid `INK`/`PAPER` path this section already
+governs (`hal_blit_glyph`/`hal_clear_screen`'s `ink`/`paper` parameters,
+§3.3) — it is **not** a general pixel/graphics-mode palette. No
+`hal_draw_*` pixel primitive (§3.4) gains any palette awareness by this;
+a future indexed pixel/graphics mode remains genuinely out of this
+version's scope (§10) exactly as before, and would need its own
+extension when it becomes real.
+
+**Color-resolution rule.** This single rule governs both what the HAL
+receives for `ink`/`paper` and what `ATTR` encodes — neither may define
+its own variant:
+
+> When `PALETTE-BASE` is non-zero and a color value `v` satisfies
+> `0 ≤ v ≤ 15`, the actual color used is the 32-bit `0xRRGGBB` cell at
+> address `PALETTE-BASE + v*4`. Otherwise — `PALETTE-BASE` is `0`, or
+> `v ≥ 16` — the color value `v` is used directly as a literal
+> `0xRRGGBB` color, exactly as today's unmodified behavior.
+
+**`ATTR` write-through.** `ATTR` is a per-cell attribute byte,
+`IIIIPPPP` (high nibble = ink index, low nibble = paper index), sized
+and addressed exactly like `CHAR` (`02-MEMORY-MODEL.md` §4.6).
+
+- `PALETTE-BASE = 0`: `ATTR` is not written and not consulted anywhere
+  — inert, identical to a target with no `ATTR` bank at all.
+- `PALETTE-BASE ≠ 0`: every `write_char`/`emit` write-through (§3.2)
+  **MUST** also write that cell's `ATTR` byte as
+  `((ink & 0xF) << 4) | (paper & 0xF)`, applied mechanically to whatever
+  raw `ink`/`paper` values that write used. (Worked example: green,
+  index 4, on black, index 0 → `(4<<4)|0 = 0x40`.) `cls()` **MUST** fill
+  `ATTR` the same way it fills `CHAR`: while `PALETTE-BASE` is non-zero,
+  every `ATTR` byte is set to
+  `((current INK & 0xF)<<4) | (current PAPER & 0xF)` as part of the same
+  clear, so a freshly-cleared screen is attribute-consistent
+  immediately.
+
+  **Accepted limitation.** While `PALETTE-BASE` is non-zero, a literal
+  RGB `≥16` written to `INK`/`PAPER` renders correctly at that moment
+  (the HAL still gets the real, resolved color), but `ATTR`'s nibble for
+  that cell captures only its low 4 bits — not a meaningful palette
+  index. Such a cell is not guaranteed to survive a later ATTR-driven
+  redraw (below): the stored nibble gets reinterpreted as *some*
+  palette index. This is a named, accepted gap, not a defect to design
+  a fallback for.
+
+**Redraw path.** `redraw_cursor_at`/`redraw_all` (§3.2, §3.5) currently
+reconstruct a cell's colors from the *current global* `INK`/`PAPER`
+sysvars, not whatever colors that cell was actually written with. This
+changes when a palette is active:
+
+> **When `PALETTE-BASE` is non-zero**, redrawing any cell **MUST** read
+> that cell's `ATTR` byte, decode an ink nibble (`(attr>>4)&0xF`) and a
+> paper nibble (`attr&0xF`), resolve each via the color-resolution rule
+> above (both nibbles are always `0..15` by construction, so both always
+> hit the palette-lookup branch), and blit using those resolved colors
+> (swapped for cursor inversion, as today) — **instead of** the current
+> global `INK`/`PAPER` sysvar values.
+>
+> **When `PALETTE-BASE` is zero**, redraw is unchanged: reapply the
+> current global `INK`/`PAPER`; `ATTR` is not read.
+
+**Open questions, not designed here:**
+- Whether a future pixel/graphics-mode HAL palette would reuse this
+  mechanism or need its own — undecided; this section is text-mode
+  only.
+- Whether `PAL` should ever become shared/singular like `FONT`/`KMAP`
+  instead of per-arena (`02-MEMORY-MODEL.md` §4.6) — not needed now.
+- A dedicated Forth word for "select palette map N" — deliberately not
+  proposed; `PAL-base + N*64 PALETTE-BASE !` is trivial enough via
+  ordinary `BANK@`/arithmetic/`!` that a convenience word isn't
+  warranted yet.
+- Whether §11's conformance checklist should gain rows for these
+  data/bank contracts (currently function-shaped, HAL-call-oriented) —
+  left open.
 
 ### 3.7 Sysvar contract — `FONT` group
 
