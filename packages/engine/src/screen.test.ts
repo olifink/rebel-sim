@@ -225,3 +225,113 @@ describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
     expect(hal.blitGlyph.mock.calls.every((call) => call[3] !== 0x000000 || call[4] !== 0x00ff00)).toBe(true);
   });
 });
+
+describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMORY-MODEL.md §4.6)', () => {
+  it('PALETTE-BASE defaults to 0 (disabled) — INK/PAPER stay literal RGB, unchanged from today', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A'
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
+  });
+
+  it('the default palette is resident at PAL map slot 0 at boot', () => {
+    const m = new Machine();
+    const palBank = m.banks.findBank('PAL')!;
+    const defaultPalette = [
+      0x000000, 0x0000ff, 0xff0000, 0xff00ff, 0x00ff00, 0x00ffff, 0xffff00, 0xffffff, 0xff0088, 0x8800ff, 0xff8888,
+      0xff8800, 0x0088ff, 0x8888ff, 0x888800, 0x888888,
+    ];
+    for (let i = 0; i < defaultPalette.length; i++) {
+      expect(m.arena.readCell(palBank.base + i * 4)).toBe(defaultPalette[i]);
+    }
+  });
+
+  it('once PALETTE-BASE points at the default map, INK/PAPER values 0-15 resolve through it', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    hal.blitGlyph.mockClear();
+
+    m.interpret('4 INK 0 PAPER 65 EMIT'); // green (index 4) on black (index 0)
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
+  });
+
+  it('values >=16 stay literal RGB even while a palette is active', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    hal.blitGlyph.mockClear();
+
+    m.interpret('16711680 INK 255 PAPER 65 EMIT');
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
+  });
+
+  it("writes the cell's ATTR byte as IIIIPPPP while a palette is active — green on black is 0x40", () => {
+    const m = new Machine();
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+
+    m.interpret('4 INK 0 PAPER 65 EMIT');
+
+    const attrBank = m.banks.findBank('ATTR')!;
+    expect(m.arena.readByte(attrBank.base)).toBe(0x40);
+  });
+
+  it('ATTR is not written while PALETTE-BASE is 0', () => {
+    const m = new Machine();
+    const attrBank = m.banks.findBank('ATTR')!;
+    m.arena.writeByte(attrBank.base, 0xff); // sentinel — writeChar() must leave this alone
+
+    m.interpret('4 INK 0 PAPER 65 EMIT');
+
+    expect(m.arena.readByte(attrBank.base)).toBe(0xff);
+  });
+
+  it('redrawAll() reads each cell\'s own ATTR-stored color while a palette is active, not the current global INK/PAPER', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    m.interpret('2 INK 1 PAPER 65 EMIT'); // red (2) on blue (1) at (0,0)
+    m.interpret('6 INK 0 PAPER 66 EMIT'); // yellow (6) on black (0) at (1,0)
+
+    m.interpret('99 INK 99 PAPER'); // change the global colors to something unrelated
+    hal.blitGlyph.mockClear();
+
+    m.screen.redrawAll();
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0xff0000, 0x0000ff);
+    expect(hal.blitGlyph).toHaveBeenCalledWith(1, 0, 66, 0xffff00, 0x000000);
+  });
+
+  it('cls() fills ATTR with the current ink/paper attribute while a palette is active, so a cleared screen is attribute-consistent immediately', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    m.interpret('3 INK 5 PAPER'); // magenta ink, cyan paper
+
+    m.interpret('CLS');
+    hal.blitGlyph.mockClear();
+
+    m.screen.redrawAll();
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 32, 0xff00ff, 0x00ffff);
+    expect(hal.blitGlyph).toHaveBeenCalledTimes(m.screen.cols * m.screen.rows);
+  });
+
+  it('CURSEN inverts using the cell\'s own resolved palette colors, not the global INK/PAPER, while a palette is active', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    m.interpret('2 INK 1 PAPER 3 4 65 CHAR!'); // 'A', red (2) ink / blue (1) paper, ATTR = 0x21
+    m.interpret('3 4 AT-XY');
+    hal.blitGlyph.mockClear();
+
+    m.interpret('CURSEN');
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(3, 4, 65, 0x0000ff, 0xff0000); // swapped
+  });
+});

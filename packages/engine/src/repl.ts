@@ -127,6 +127,35 @@ const DEFAULT_CHAR_CELL_H = 8;
 const DEFAULT_INK = 0x00ff00; // green
 const DEFAULT_PAPER = 0x000000; // black
 
+// spec/02-MEMORY-MODEL.md §4.6 / spec/01-HAL.md §3.6: up to 16 maps of
+// 16 x 0xRRGGBB entries (64 bytes/map) — 1024 bytes total, rounding up
+// to MIN_BANK_SIZE's 2 KiB floor same as every other small boot bank
+// above.
+const PAL_BANK_SIZE = 1024;
+// The default palette (spec/02-MEMORY-MODEL.md §4.6) — normative: any
+// implementation providing a PAL bank MUST initialize map slot 0 to
+// this at boot, before any Forth program runs. Index 0/4 deliberately
+// coincide with DEFAULT_PAPER/DEFAULT_INK above, so pointing
+// PALETTE-BASE at slot 0 right after boot changes nothing visible.
+const DEFAULT_PALETTE: readonly number[] = [
+  0x000000, // 0 black
+  0x0000ff, // 1 blue
+  0xff0000, // 2 red
+  0xff00ff, // 3 magenta
+  0x00ff00, // 4 green
+  0x00ffff, // 5 cyan
+  0xffff00, // 6 yellow
+  0xffffff, // 7 white
+  0xff0088, // 8 pink
+  0x8800ff, // 9 lila
+  0xff8888, // 10 rose
+  0xff8800, // 11 orange
+  0x0088ff, // 12 marine
+  0x8888ff, // 13 mauve
+  0x888800, // 14 brown
+  0x888888, // 15 grey
+];
+
 export interface MachineOptions {
   arenaSize?: number;
   /** Host-supplied pixel drawing (canvas, etc). Defaults to a no-op —
@@ -323,7 +352,21 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // arena-bookkeeping rather than Forth-interpreter state.
 
     const charBank = this.banks.createBank('CHAR', sizeFor('CHAR', charCols * charRows), 'CHAR');
-    this.screen = new Screen(this.arena, charBank, this.sysvars, options.screenHal);
+    // spec/02-MEMORY-MODEL.md §4.6: ATTR is sized/addressed exactly like
+    // CHAR — its own per-cell IIIIPPPP attribute companion, inert until
+    // PALETTE-BASE (below) is non-zero.
+    const attrBank = this.banks.createBank('ATTR', sizeFor('ATTR', charCols * charRows), 'ATTR');
+    // The engine owns PAL's content too, unlike FONT below — the
+    // default palette is a portable, spec-mandated boot default
+    // (spec/02-MEMORY-MODEL.md §4.6), not a host-supplied asset.
+    const palBank = this.banks.createBank('PAL', sizeFor('PAL', PAL_BANK_SIZE), 'PAL');
+    for (let i = 0; i < DEFAULT_PALETTE.length; i++) {
+      this.arena.writeCell(palBank.base + i * 4, DEFAULT_PALETTE[i]);
+    }
+    // PALETTE-BASE (SCREEN group) defaults to 0/disabled via the
+    // arena's own zero-init — same "never explicitly set" precedent as
+    // CURSOR-VISIBLE above, not an oversight.
+    this.screen = new Screen(this.arena, charBank, attrBank, this.sysvars, options.screenHal);
     this.screen.cls();
 
     const kmapBank = this.banks.createBank('KMAP', sizeFor('KMAP', KMAP_BANK_SIZE), 'KMAP');

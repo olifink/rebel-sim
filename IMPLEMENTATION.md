@@ -417,8 +417,10 @@ claim.
 (`packages/app/src/app/canvas-screen-hal.ts`), fills a cell in `paper`
 then draws the glyph's set pixels in `ink`, reading from a ported
 bitmap font table (§1.19). `INK`/`PAPER` are raw 24-bit `0xRRGGBB`
-truecolor values, not palette indices — matching Rebel-ROM's likely
-default mode, and meaning no palette table exists anywhere.
+truecolor values by default — M62 (§1.74) adds an optional indexed
+palette mode (values 0-15 become a looked-up color) sitting in front of
+this same HAL call; the HAL boundary itself never gains any palette
+awareness, it always receives a resolved `0xRRGGBB` value either way.
 
 The host is free to do whatever it wants with the surface it's drawing
 into beyond that — `CanvasScreenHal` targets a DOM-detached, true-
@@ -3901,6 +3903,90 @@ consecutive bare `DUMP`s page forward 128 bytes at a time, writing
 `DUMP-NEXT` directly redirects the next bare `DUMP`, and the
 address-less form is stack-neutral too.
 
+### 1.74 Indexed color palette: `PAL`/`ATTR` banks, `PALETTE-BASE` (M62, `spec/01-HAL.md` §3.6, `spec/02-MEMORY-MODEL.md` §4.6)
+
+`INK`/`PAPER` (§1.17) were always raw `0xRRGGBB` truecolor — this adds
+an optional indexed mode sitting in front of that same value, resolving
+the values a program was already passing, not a new HAL surface or a
+new pair of primitives. Two new boot banks, created right alongside
+`CHAR`:
+
+- **`PAL`** — up to 16 selectable palettes, each 16 entries of
+  `0xRRGGBB`, packed contiguously (map `N` at `PAL-base + N*64`). The
+  engine (not a host asset, unlike `FONT`) writes the default 16-color
+  palette into map slot 0 at boot — the same table `spec/02-MEMORY-MODEL.md`
+  §4.6 specifies normatively.
+- **`ATTR`** — `CHAR`'s per-cell attribute companion, same size and
+  addressing stride. One byte per cell, `IIIIPPPP`: high nibble = ink
+  index, low nibble = paper index.
+
+**`PALETTE-BASE`** (new `SCREEN`-group sysvar, offset 36) is the one
+switch everything keys off: `0` (the boot default, via the arena's own
+zero-init — never explicitly set, same precedent as `CURSOR-VISIBLE`)
+means disabled — `INK`/`PAPER` behave exactly as before, `ATTR` is
+never written or read, and a `Machine` with a palette-unaware program
+sees zero behavior change. Non-zero means "this is the active map's
+address" — same address/0-disabled shape `FONT-BASE` already
+established, not a palette *index*.
+
+**The one resolution rule everything shares**
+(`Screen.resolveColor()`): when `PALETTE-BASE` is non-zero and a color
+value is `0..15`, the real color is the cell at `PALETTE-BASE +
+value*4`; otherwise the value is used directly as a literal color. This
+single rule governs both what `writeChar()` hands the HAL (always a
+resolved `0xRRGGBB`, HAL unchanged) and how `ATTR` gets decoded back on
+a redraw.
+
+**Write-through** (`writeChar()`): while a palette is active, every
+`CHAR`-bank write also packs the *raw* `ink`/`paper` values (not the
+resolved ones) into that cell's `ATTR` byte, mechanically — a literal
+color `>=16` truncates to its low nibble there, a named, accepted
+limitation (below), not something guarded against. `cls()` fills `ATTR`
+with the current ink/paper attribute the same way it fills `CHAR` with
+spaces, so a freshly-cleared screen is attribute-consistent immediately.
+
+**The redraw-path fix** (`redrawCursorAt()`, and therefore
+`redrawAll()`): before this milestone, a redraw always reapplied
+whatever `INK`/`PAPER` happened to be *right now*, never what a cell
+was actually written with — a real, pre-existing gap named ahead of
+time in the M25 note (§1.46) the day the cursor-inversion redraw hook
+was added. While a palette is active, a redraw instead reads that
+cell's own `ATTR` byte, decodes both nibbles, and resolves each through
+the same rule above — both nibbles are always `0..15` by construction,
+so they always hit the palette-lookup branch. Palette inactive: fully
+unchanged, global-`INK`/`PAPER` behavior, `ATTR` untouched.
+
+**Accepted limitation, not a bug:** a literal RGB `>=16` written while a
+palette is active renders correctly that one time (the HAL still gets
+the real, resolved color) but isn't `ATTR`-durable — a later redraw
+(screen resize, `RESTORE`) reinterprets the truncated nibble as *some*
+palette index, not the original literal. Named and accepted in
+`spec/01-HAL.md` §3.6, not solved further here.
+
+`PAL`/`ATTR` are ordinary boot banks — no `Storage`/`SAVE`/`RESTORE`
+changes needed beyond registering their asset-file extensions
+(`storage.ts`'s `TAG_TO_EXTENSION`: `ATR`/`PAL`), and they round-trip
+like any other bank automatically.
+
+*Implementation:* `screen.ts` (`resolveColor()`, `attrAddress()`,
+`getPaletteBase()`/`setPaletteBase()`, and the `writeChar()`/`cls()`/
+`redrawCursorAt()` changes above), `repl.ts` (`PAL`/`ATTR` bank
+creation, `DEFAULT_PALETTE`), `rebel-opcodes.json` (`PALETTE-BASE`
+field, `PAL`/`ATTR` bank-tag notes), `storage.ts`
+(`TAG_TO_EXTENSION`). *Tests:* `screen.test.ts` (new "Indexed color
+palette + ATTR bank" suite — default-disabled behavior, default
+palette content, index resolution, the literal-color passthrough,
+`ATTR` write-through and its green-on-black `0x40` worked example,
+`ATTR` staying inert while disabled, the `redrawAll()`/`CURSEN` redraw
+fix, `cls()`'s `ATTR` fill), `project.test.ts` (`PAL`/`ATTR`
+`SAVE`/`RESTORE` round-trip).
+
+No Forth-level primitive changes — selecting a map is ordinary
+arithmetic against `PALETTE-BASE`'s sysvar cell (`BANK@ SYSV <offset> +
+!`), deliberately not given a dedicated word (`spec/01-HAL.md` §3.6's
+own stated reasoning: trivial enough via existing primitives that a
+convenience word isn't warranted yet).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -3969,7 +4055,10 @@ exactly as it would be on the bare-metal target.
 | **HAL** | Hardware Abstraction Layer — the boundary where the engine defines an interface for something host-specific (drawing pixels) and the host supplies the implementation. |
 | **`ScreenHal`** | Rebel-Sim's HAL interface for screen drawing: `blitGlyph`/`clearScreen`. Defaults to a no-op (`NULL_SCREEN_HAL`) so engine tests don't need a real canvas. |
 | **Glyph** | One character's bitmap — a small fixed-size grid of on/off pixels, looked up by character code, never computed at render time. |
-| **Ink / Paper** | Foreground / background color for a character write. Raw 24-bit truecolor in Rebel-Sim, not a palette index. |
+| **Ink / Paper** | Foreground / background color for a character write. Raw 24-bit truecolor by default; resolved through the active palette instead when `PALETTE-BASE` is non-zero and the value is 0-15 (§1.74). |
+| **`PAL` bank** | Arena bank holding up to 16 selectable 16-entry `0xRRGGBB` palettes (64 bytes each), map slot 0 normatively the default 16-color palette (§1.74). |
+| **`ATTR` bank** | `CHAR`'s per-cell attribute companion — one `IIIIPPPP` byte per cell (ink index, paper index), sized/addressed identically to `CHAR`. Written only while a palette is active; inert otherwise (§1.74). |
+| **`PALETTE-BASE`** | `SCREEN`-group sysvar: address of the active `PAL` map, `0` = disabled (today's literal-RGB-only behavior). Same address/0-disabled shape as `FONT-BASE` (§1.74). |
 | **Blit** | Copying a bitmap's pixels onto a destination (here: a glyph's pixels onto the framebuffer) — no scaling or transformation, just placement. |
 | **Wrap (vs. scroll)** | What happens when text output reaches the last row: it overwrites row 0 rather than shifting everything up. A deliberate Rebel-ROM design choice, not a Rebel-Sim gap. |
 | **Usage code** | A small integer identifying *which physical key* was pressed/released, independent of any character it might produce (a Caps Lock press has a usage code but no character). |
@@ -4066,5 +4155,6 @@ exactly as it would be on the bare-metal target.
 | **M59** | Arena-resident `FONT` bank (§1.71), loaded by default from the user's own `rebel.FNT` (packages/app/public), resolving `spec/03-SYSVARS.md` §8's long-reserved `FONT` group for real. `repl.ts` creates the bank and points the new `FONT.FONT-BASE` sysvar at it; `app.ts` fetches `rebel.FNT` and writes it into the arena in parallel with `system.fth`, before anything can render. `CanvasScreenHal` now reads glyphs from the arena via `FONT-BASE` instead of importing a compiled-in font (`font-zxspectrum.ts` deleted) — `attach(arena, sysvars)` solves the ordering problem of the HAL being constructed before the `Machine` that owns what it needs to read. Confirmed with Oliver: iteration is edit-the-file-then-refresh, same as `system.fth` already works, no dedicated live-reload tool built. Flagged, not hidden: `rebel-rom`'s own font system stays entirely HAL-side with no Forth-addressable bank or runtime switching (`docs/FONT-SYSTEM.md` §6) — this makes Rebel-Sim genuinely ahead here, and `01-HAL.md` §3.7 makes the whole `FONT` bank/sysvar group OPTIONAL for exactly that reason. | `rebel-opcodes.json`, `repl.ts`, `canvas-screen-hal.ts`, `app.ts`, `01-HAL.md`, `02-MEMORY-MODEL.md`, `03-SYSVARS.md`, `bank-access.test.ts`, `sysvars.test.ts`, `storage.test.ts` |
 | **M60** | `LOAD` stack-safety bug (§1.72), found live by Oliver: a colon-definition with `DO`/`LOOP` split across block lines threw `? ABORT` on `LOAD`, working fine on one line. Root cause: `LOAD` kept the block's base address live on the *data* stack across its whole 16-line loop, re-`DUP`-ing it each iteration — `DO`'s own compile-time backpatch address, still pending on that same stack until its matching `LOOP` (a later block line) consumed it, got re-`DUP`-ed instead, corrupting every subsequent line's computed address. Isolated in a fresh `Machine` (not the live session) to a general case: any interpreted line leaving anything on the data stack, not just `DO`, breaks it — confirmed with two bare unconsumed numbers split across lines, no colon-definition involved. Fixed with two dedicated variables (`LOAD-ADDR`/`LOAD-CONTEXT`) instead of leaving state live on the data stack, matching `R#`/`SCR`/`T-LINE`'s own established pattern. | `system.fth`, `screen-editor.test.ts` |
 | **M61** | Address-less `DUMP` (§1.73), Oliver's idea: a bare `DUMP` continues from wherever the last one left off, monitor-style paging, instead of always needing an explicit address. `DEPTH 0= IF DUMP-NEXT @ THEN` decides which form was used; `DUP 128 + DUMP-NEXT !` right after unconditionally advances the next start address, so explicit-address and bare calls compose naturally. `DUMP-NEXT` stays an ordinary visible `VARIABLE`, pokeable directly, not hidden internal plumbing. | `system.fth`, `dump.test.ts` |
+| **M62** | Indexed color palette (§1.74, `spec/01-HAL.md` §3.6, `spec/02-MEMORY-MODEL.md` §4.6): new `PAL` bank (up to 16 selectable 16-entry `0xRRGGBB` palettes, default palette normatively resident at map slot 0) and `ATTR` bank (`CHAR`'s per-cell `IIIIPPPP` ink/paper-index companion), gated by a new `PALETTE-BASE` sysvar (`SCREEN` group, `0` = disabled, address-of-active-map otherwise — same shape as `FONT-BASE`). `INK`/`PAPER` values 0-15 resolve through the active map when one is set; values >=16 and the disabled state stay exactly today's literal-RGB behavior, unchanged. Also fixes a real, previously-named gap: `redrawCursorAt()`/`redrawAll()` used to always reapply the *current global* `INK`/`PAPER` on redraw, never a cell's actual stored color (flagged ahead of time in the M25 note, §1.46) — now reads each cell's own `ATTR` byte instead, while a palette is active. Accepted, documented limitation: a literal RGB `>=16` written while paletted renders correctly once but isn't `ATTR`-durable across a later redraw (4-bit nibbles can't encode it). No new primitives — palette selection is ordinary sysvar arithmetic, deliberately not given a dedicated word. | `screen.ts`, `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `screen.test.ts`, `project.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

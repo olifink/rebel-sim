@@ -13,7 +13,7 @@
  * Angular app supplies a real canvas-backed one.
  */
 
-import { Arena } from './arena.js';
+import { Arena, CELL_SIZE } from './arena.js';
 import { Bank } from './banks.js';
 import { Sysvars } from './sysvars.js';
 
@@ -45,6 +45,7 @@ export class Screen {
   constructor(
     private readonly arena: Arena,
     private readonly charBank: Bank,
+    private readonly attrBank: Bank,
     private readonly sysvars: Sysvars,
     private readonly hal: ScreenHal = NULL_SCREEN_HAL,
   ) {
@@ -59,8 +60,38 @@ export class Screen {
     return this.charBank.base + row * this.cols + col;
   }
 
+  /** Same addressing stride as charAddress() — ATTR is sized and laid
+   * out exactly like CHAR (spec/02-MEMORY-MODEL.md §4.6). */
+  private attrAddress(col: number, row: number): number {
+    return this.attrBank.base + row * this.cols + col;
+  }
+
   private inBounds(col: number, row: number): boolean {
     return col >= 0 && col < this.cols && row >= 0 && row < this.rows;
+  }
+
+  /** spec/01-HAL.md §3.6's color-resolution rule, the one rule both
+   * write-side ink/paper resolution and ATTR decoding key off. `0` means
+   * disabled (today's unmodified literal-RGB-only behavior); a target
+   * with no palette concept simply never sets it away from that boot
+   * default. */
+  getPaletteBase(): number {
+    return this.sysvars.get('SCREEN', 'PALETTE-BASE');
+  }
+
+  setPaletteBase(addr: number): void {
+    this.sysvars.set('SCREEN', 'PALETTE-BASE', addr);
+  }
+
+  /** When `paletteBase` is non-zero and `v` is a valid index (0-15), the
+   * real color is the 32-bit 0xRRGGBB cell at `paletteBase + v*4`.
+   * Otherwise `v` is used directly as a literal color — exactly today's
+   * unmodified behavior (spec/01-HAL.md §3.6). */
+  private resolveColor(v: number, paletteBase: number): number {
+    if (paletteBase !== 0 && v >= 0 && v <= 15) {
+      return this.arena.readCell(paletteBase + v * CELL_SIZE);
+    }
+    return v;
   }
 
   getCursorCol(): number {
@@ -97,14 +128,34 @@ export class Screen {
    * is a redraw, not a write), matching CScreenModule::Redraw()'s own
    * "CHAR content is always enough to redraw correctly" precedent
    * (screenmodule.h). Silently no-ops out of range, same convention
-   * writeChar()/readChar() already use. */
+   * writeChar()/readChar() already use.
+   *
+   * spec/01-HAL.md §3.6's redraw-path fix: while a palette is active,
+   * the cell's real colors come from its own stored ATTR byte, not the
+   * current global INK/PAPER — closing the gap DEVELOPING.md's M25 note
+   * flagged ahead of time (this always reapplied the global colors,
+   * never what a cell was actually written with). Both ATTR nibbles are
+   * always 0-15 by construction, so resolveColor() always takes the
+   * palette-lookup branch here. Palette inactive: unchanged, global
+   * ink/paper, ATTR not read. */
   private redrawCursorAt(col: number, row: number, inverted: boolean): void {
     if (!this.inBounds(col, row)) {
       return;
     }
     const code = this.readChar(col, row);
-    const ink = inverted ? this.getPaper() : this.getInk();
-    const paper = inverted ? this.getInk() : this.getPaper();
+    const paletteBase = this.getPaletteBase();
+    let ink: number;
+    let paper: number;
+    if (paletteBase !== 0) {
+      const attr = this.arena.readByte(this.attrAddress(col, row));
+      const resolvedInk = this.resolveColor((attr >> 4) & 0xf, paletteBase);
+      const resolvedPaper = this.resolveColor(attr & 0xf, paletteBase);
+      ink = inverted ? resolvedPaper : resolvedInk;
+      paper = inverted ? resolvedInk : resolvedPaper;
+    } else {
+      ink = inverted ? this.getPaper() : this.getInk();
+      paper = inverted ? this.getInk() : this.getPaper();
+    }
     this.hal.blitGlyph(col, row, code, ink, paper);
   }
 
@@ -139,7 +190,17 @@ export class Screen {
   }
 
   /** CHAR! — writes the CHAR bank cell and blits the glyph. Out-of-range
-   * coordinates are silently ignored (matches WriteChar). */
+   * coordinates are silently ignored (matches WriteChar).
+   *
+   * spec/01-HAL.md §3.6: while a palette is active, `ink`/`paper` are
+   * resolved through it before reaching the HAL (values 0-15 become a
+   * looked-up 0xRRGGBB color; the HAL itself never gains any palette
+   * awareness), and the *raw* ink/paper values — not the resolved ones —
+   * are packed into ATTR as IIIIPPPP, mechanically, regardless of
+   * whether they're valid indices (a literal RGB >=16 truncates to its
+   * low nibble here — the named, accepted limitation: it renders
+   * correctly this once via the resolved HAL call below, but isn't
+   * ATTR-durable across a later redraw). */
   writeChar(
     col: number,
     row: number,
@@ -152,7 +213,11 @@ export class Screen {
     }
     const code = charCode & 0xff;
     this.arena.writeByte(this.charAddress(col, row), code);
-    this.hal.blitGlyph(col, row, code, ink, paper);
+    const paletteBase = this.getPaletteBase();
+    if (paletteBase !== 0) {
+      this.arena.writeByte(this.attrAddress(col, row), ((ink & 0xf) << 4) | (paper & 0xf));
+    }
+    this.hal.blitGlyph(col, row, code, this.resolveColor(ink, paletteBase), this.resolveColor(paper, paletteBase));
   }
 
   /** CHAR@ — reads the CHAR bank directly, no framebuffer involved.
@@ -211,6 +276,15 @@ export class Screen {
   cls(): void {
     for (let i = 0; i < this.charBank.size; i++) {
       this.arena.writeByte(this.charBank.base + i, SPACE);
+    }
+    // spec/01-HAL.md §3.6: ATTR gets the same treatment CHAR does here —
+    // filled with the current ink/paper attribute so a freshly-cleared
+    // screen is attribute-consistent immediately, not stale. Only while
+    // a palette is active; otherwise ATTR stays untouched/inert.
+    const paletteBase = this.getPaletteBase();
+    if (paletteBase !== 0) {
+      const attrByte = ((this.getInk() & 0xf) << 4) | (this.getPaper() & 0xf);
+      this.arena.fillBytes(this.attrBank.base, this.attrBank.size, attrByte);
     }
     this.hal.clearScreen(this.getPaper());
     this.setCursor(0, 0);

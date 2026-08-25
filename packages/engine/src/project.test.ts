@@ -113,6 +113,23 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
     expect(screenHal.blitGlyph).toHaveBeenCalledWith(0, 0, 72, expect.anything(), expect.anything());
   });
 
+  it('PAL and ATTR round-trip through SAVE/RESTORE like any other bank (spec/02-MEMORY-MODEL.md §4.6)', () => {
+    const hal = memoryHal();
+
+    const m1 = new Machine({ storageHal: hal });
+    m1.screen.setPaletteBase(m1.banks.findBank('PAL')!.base);
+    m1.interpret('4 INK 0 PAPER 65 EMIT'); // green (4) on black (0), ATTR = 0x40
+    m1.interpret('PROJECT PALPROJ SAVE');
+
+    const m2 = new Machine({ storageHal: hal });
+    m2.interpret('RESTORE PALPROJ');
+
+    const attrBank = m2.banks.findBank('ATTR')!;
+    const palBank = m2.banks.findBank('PAL')!;
+    expect(m2.arena.readByte(attrBank.base)).toBe(0x40);
+    expect(m2.arena.readCell(palBank.base + 4 * 4)).toBe(0x00ff00); // slot 4 (green) intact
+  });
+
   it('a storage failure surfaces through interpret() like any other line error, not silently', () => {
     const brokenHal: StorageHal = {
       ensureDir(): void {},
