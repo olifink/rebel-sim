@@ -1088,19 +1088,34 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 144: { // BANK-SIZE ( "name" -- size ) — same name lookup as
-      // BANK@ (99) now, same parsed-word convention, same "unknown
-      // bank" error; returns the bank's actual size (already rounded up
-      // to its size class at creation, banks.ts's createBank) rather
-      // than its base. First real consumer: a future capacity display
-      // (e.g. DICT used/free) — see banks.ts/spec/02-MEMORY-MODEL.md §7
-      // for why this stays a plain read accessor, not a resize.
+    case 144: { // BANK-SIZE ( "name" -- size ) IMMEDIATE, dual-mode — same
+      // name lookup as BANK@ (99), same parsed-word convention, same
+      // "unknown bank" error; returns the bank's actual size (already
+      // rounded up to its size class at creation, banks.ts's
+      // createBank) rather than its base. First real consumer: a
+      // future capacity display (e.g. DICT used/free) — see
+      // banks.ts/spec/02-MEMORY-MODEL.md §7 for why this stays a plain
+      // read accessor, not a resize.
+      //
+      // IMMEDIATE + dual-mode (Oliver, same bug class as BANK@'s M53):
+      // a plain non-immediate BANK-SIZE compiled a call to itself and
+      // left the compiler's own outer loop to choke on the following
+      // name token as an ordinary word (`: FOO BANK-SIZE SYSV ;` failed
+      // to compile with "unrecognized word: SYSV"). Fixed the same way:
+      // resolve the name right now, at compile time, and bake the
+      // result in as a LIT literal — interpreted-mode behavior (push
+      // the size directly) is unchanged.
       const name = ctx.nextInputToken().toUpperCase();
       const bank = ctx.banks.findBankByName(name);
       if (bank === undefined) {
         throw new Error(`unknown bank: ${name}`);
       }
-      s.push(bank.size);
+      if (ctx.sysvars.getState() === -1) {
+        compileCell(ctx, findWord(ctx, 'LIT')!.cfa);
+        compileCell(ctx, bank.size);
+      } else {
+        s.push(bank.size);
+      }
       break;
     }
 

@@ -173,6 +173,48 @@ describe('BANK-SIZE (rebel-opcodes.json 144)', () => {
   });
 });
 
+// Same bug class BANK@ hit at M53 (found by Oliver, trying `: FOO
+// BANK-SIZE SYSV ;`): BANK-SIZE compiled as a plain non-IMMEDIATE call
+// left the following name token for the compiler's own outer loop to
+// choke on. Fixed the same way — IMMEDIATE + dual-mode on STATE, baking
+// in a resolved LIT size rather than raw text.
+describe('BANK-SIZE compiled into a definition', () => {
+  it('resolves the name at compile time and bakes its size in as a literal', () => {
+    const m = new Machine();
+    const sysv = m.banks.findBank('SYSV')!;
+
+    m.interpret(': GET-SYSV-SIZE BANK-SIZE SYSV ;');
+    m.interpret('GET-SYSV-SIZE');
+    expect(m.stack.toArray()).toEqual([sysv.size]);
+  });
+
+  it('is stack-neutral at runtime — no leftover input-consumption side effect', () => {
+    const m = new Machine();
+    m.interpret(': GET-DICT-SIZE BANK-SIZE DICT ;');
+
+    m.interpret('DEPTH');
+    const depthBefore = m.stack.pop();
+
+    m.interpret('GET-DICT-SIZE');
+    m.stack.pop();
+    m.interpret('DEPTH');
+    expect(m.stack.pop()).toBe(depthBefore);
+  });
+
+  it('still resolves and pushes immediately when used interactively, unaffected by IMMEDIATE', () => {
+    const m = new Machine();
+    const dict = m.banks.findBank('DICT')!;
+
+    m.interpret('BANK-SIZE DICT');
+    expect(m.stack.toArray()).toEqual([dict.size]);
+  });
+
+  it('still throws on an unknown name at compile time, before the definition is even built', () => {
+    const m = new Machine();
+    expect(() => m.interpret(': BAD BANK-SIZE NOPE ;')).toThrow('unknown bank: NOPE');
+  });
+});
+
 describe('BANKS (system.fth, M51)', () => {
   function screenText(m: Machine): string {
     const rows: string[] = [];
