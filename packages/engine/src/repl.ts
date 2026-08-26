@@ -128,13 +128,13 @@ const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 const DEFAULT_CHAR_CELL_W = 8; // matches the ZX Spectrum 8x8 font port
 const DEFAULT_CHAR_CELL_H = 8;
 // Oliver's request (M62 follow-up 3): boot with the default palette
-// (below) already active, so INK/PAPER's boot defaults are now palette
-// *indices* — 4 (green) and 0 (black) in the default map — not literal
-// RGB. Same rendered colors as before (the default map's slots 0/4 were
-// deliberately chosen to coincide with the old literal defaults), just
-// resolved through PALETTE-BASE from boot instead of bypassing it.
-const DEFAULT_INK = 4; // green, default palette index
-const DEFAULT_PAPER = 0; // black, default palette index
+// (below) already active, so INK/PAPER's boot defaults are palette
+// *indices* — not literal RGB. Sourced from `personality.ink`/`.paper`
+// (mmap.ts's `Personality`, `DEFAULT_PERSONALITY` is 4/0 — green/black,
+// matching this repo's original literal defaults) rather than a fixed
+// constant here, so a differently-personality'd Machine (e.g. a
+// `TERMINAL`-connected board, `app.ts`) can boot into visibly different
+// colors — see that field's own doc comment for why that's useful.
 
 // spec/02-MEMORY-MODEL.md §4.6 / spec/01-HAL.md §3.6: up to 16 maps of
 // 16 x 0xRRGGBB entries (64 bytes/map) — 1024 bytes total, rounding up
@@ -144,8 +144,9 @@ const PAL_BANK_SIZE = 1024;
 // The default palette (spec/02-MEMORY-MODEL.md §4.6) — normative: any
 // implementation providing a PAL bank MUST initialize map slot 0 to
 // this at boot, before any Forth program runs. Index 0/4 deliberately
-// coincide with DEFAULT_PAPER/DEFAULT_INK above, so pointing
-// PALETTE-BASE at slot 0 right after boot changes nothing visible.
+// coincide with `DEFAULT_PERSONALITY.paper`/`.ink` above, so pointing
+// PALETTE-BASE at slot 0 right after boot changes nothing visible for a
+// default-personality boot.
 const DEFAULT_PALETTE: readonly number[] = [
   0x000000, // 0 black
   0x0000ff, // 1 blue
@@ -368,8 +369,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.sysvars.set('SCREEN', 'CHAR-CELL-H', DEFAULT_CHAR_CELL_H);
     this.sysvars.set('SCREEN', 'CHAR-COLS', charCols);
     this.sysvars.set('SCREEN', 'CHAR-ROWS', charRows);
-    this.sysvars.set('SCREEN', 'INK', DEFAULT_INK);
-    this.sysvars.set('SCREEN', 'PAPER', DEFAULT_PAPER);
+    this.sysvars.set('SCREEN', 'INK', personality.ink);
+    this.sysvars.set('SCREEN', 'PAPER', personality.paper);
     this.sysvars.set('CORE', 'CURSOR-X', 0);
     this.sysvars.set('CORE', 'CURSOR-Y', 0);
     // DEVELOPING.md §20, M27: ARENA-SIZE moved out of CORE — it's now

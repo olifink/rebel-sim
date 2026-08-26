@@ -45,7 +45,7 @@ const NAME_SIZE = 8;
 // lives entirely in each slot's own ACTIVE flag.
 const HEADER_MAGIC_0 = 'M'.charCodeAt(0);
 const HEADER_MAGIC_1 = 'M'.charCodeAt(0);
-const HEADER_VERSION = 2;
+const HEADER_VERSION = 3;
 
 // DEVELOPING.md §20, M27: three more header cells, arena-bookkeeping
 // that belongs with MMAP itself rather than in SYSV — genuinely
@@ -68,7 +68,9 @@ const ARENA_ID_OFFSET = 12; // reserved, always 0 today — future
 const PERSONALITY_OFFSET = 16; // flags bitfield — see PersonalityFlag* below
 const SCREEN_COLS_OFFSET = 20;
 const SCREEN_ROWS_OFFSET = 24;
-const HEADER_SIZE = 28;
+const INK_OFFSET = 28; // palette index (0-15) or literal RGB (>=16), same convention SCREEN.INK already uses
+const PAPER_OFFSET = 32;
+const HEADER_SIZE = 36;
 
 // tag(4) + name(8) + base(4-cell) + size(4-cell) + flags(4-cell).
 const SLOT_SIZE = TAG_SIZE + NAME_SIZE + 4 + 4 + 4;
@@ -91,11 +93,12 @@ const MMAP_RAW_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
  * banks.ts, 4096 through M55–M57, 2048 as of M58 — not imported here,
  * same avoid-a-circular-dependency reason as NAME_SIZE above)
  * comfortably covers the 64-slot default's raw requirement — 1552 bytes
- * at the time of this change (16-byte header), 1564 now that the header
- * carries `Personality` too (28 bytes); a build with `MAX_SLOTS` above
- * roughly 84 slots would need to round to a bigger class instead — this
- * constant is asserted against the raw requirement below specifically so
- * a future MAX_SLOTS (or header) change can't silently outgrow it. */
+ * at the time of this change (16-byte header), 1564 with `Personality`'s
+ * first three fields (28-byte header), 1572 now that it also carries
+ * `ink`/`paper` (36-byte header); a build with `MAX_SLOTS` above roughly
+ * 84 slots would need to round to a bigger class instead — this constant
+ * is asserted against the raw requirement below specifically so a future
+ * MAX_SLOTS (or header) change can't silently outgrow it. */
 export const MMAP_SIZE = 2048;
 
 if (MMAP_RAW_SIZE > MMAP_SIZE) {
@@ -139,16 +142,28 @@ export interface Personality {
   readonly headless: boolean;
   readonly screenCols: number;
   readonly screenRows: number;
+  /** Boot-time `SCREEN.INK`/`SCREEN.PAPER` sysvar values — same
+   * palette-index-or-literal-RGB convention those sysvars already use
+   * (M62 follow-up 3). Doubles as a cheap, strong visual signal for
+   * anything that boots a distinctly different personality (e.g. a
+   * `TERMINAL`-connected board, `app.ts`) — a different ink/paper on
+   * first paint reads as "this is a different machine" long before any
+   * text says so. */
+  readonly ink: number;
+  readonly paper: number;
 }
 
-/** Reproduces today's hardcoded screen geometry exactly (80×60 chars, the
- * `640×480 ÷ 8×8` this repo has always booted with) — the "always
- * available, hardcoded" configuration a caller gets by simply omitting
+/** Reproduces today's hardcoded screen geometry and colors exactly (80×60
+ * chars, the `640×480 ÷ 8×8` this repo has always booted with; green ink
+ * on black paper, palette indices 4/0) — the "always available,
+ * hardcoded" configuration a caller gets by simply omitting
  * `MachineOptions.personality`. */
 export const DEFAULT_PERSONALITY: Personality = {
   headless: false,
   screenCols: 80,
   screenRows: 60,
+  ink: 4,
+  paper: 0,
 };
 
 export interface MMapSlot {
@@ -177,6 +192,8 @@ export class MemoryMap {
     this.arena.writeCellUnsigned(b + PERSONALITY_OFFSET, personality.headless ? PersonalityFlagHeadless : 0);
     this.arena.writeCellUnsigned(b + SCREEN_COLS_OFFSET, personality.screenCols);
     this.arena.writeCellUnsigned(b + SCREEN_ROWS_OFFSET, personality.screenRows);
+    this.arena.writeCellUnsigned(b + INK_OFFSET, personality.ink);
+    this.arena.writeCellUnsigned(b + PAPER_OFFSET, personality.paper);
   }
 
   /** Reads back exactly what `initHeader()` wrote — the one true source for
@@ -190,6 +207,8 @@ export class MemoryMap {
       headless: (flags & PersonalityFlagHeadless) !== 0,
       screenCols: this.arena.readCellUnsigned(b + SCREEN_COLS_OFFSET),
       screenRows: this.arena.readCellUnsigned(b + SCREEN_ROWS_OFFSET),
+      ink: this.arena.readCellUnsigned(b + INK_OFFSET),
+      paper: this.arena.readCellUnsigned(b + PAPER_OFFSET),
     };
   }
 

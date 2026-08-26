@@ -4250,6 +4250,40 @@ rather than rebooting. *Implementation:* `rebel-opcodes.json`, `inner.ts`,
 `app.spec.ts`, `terminal.test.ts`, `remote-terminal-loopback.test.ts`,
 `REMOTE-TERMINAL.md`.
 
+### 1.78 `Personality` gains `INK`/`PAPER`: a visual cue on `TERMINAL` connect (M66, Oliver's idea)
+
+Small follow-up to §1.75/§1.77: `MMAP`'s header grows a third time
+(16→28→**36** bytes) with two more `Personality` fields, `INK`/`PAPER` —
+the boot-time `SCREEN.INK`/`SCREEN.PAPER` sysvar values, same
+palette-index-or-literal-RGB convention those sysvars already use (M62).
+Motivation stated directly: a `TERMINAL`-connected board booting into a
+deliberately different color scheme than local's green-on-black is a
+cheap, immediate, unmissable visual signal of "you're on a different
+machine now" — before any text says so, and still true even if a user
+misses the board's own boot banner.
+
+`DEFAULT_PERSONALITY` gains `ink: 4, paper: 0` — the exact values
+`repl.ts`'s own now-removed `DEFAULT_INK`/`DEFAULT_PAPER` constants held,
+so a default-personality boot's colors are unchanged. `repl.ts`'s
+`Machine` constructor now sources `SCREEN.INK`/`.PAPER` from
+`personality.ink`/`.paper` instead of those hardcoded constants.
+`app.ts`'s `connectToRemote()` passes the board a personality of `ink: 6,
+paper: 1` — palette indices 6 (yellow) and 1 (blue) in `DEFAULT_PALETTE`
+(`repl.ts`) — Oliver's specific request, verified live: connecting via
+`TERMINAL` now visibly repaints the canvas yellow-on-blue immediately
+(the board's own boot `CLS`), and Ctrl+Escape's `Screen.redrawAll()`
+snaps it straight back to local's green-on-black.
+
+Same header-growth discipline as §1.75/§1.77's prior two rounds:
+`HEADER_VERSION` bumped 2→3 (still write-only/unenforced, free to bump);
+`spec/02-MEMORY-MODEL.md` §5.1/§5.3/§5.4 updated to match (36-byte
+header, 1572-byte raw requirement at the default 64 slots); and —
+learned from §1.75's own hidden-bug discovery — `system.fth`'s `BANKS`
+word's `MMAP-HDR` constant (`packages/app/public/`, outside the
+TS-only grep that missed it the first time) updated 28→36 alongside the
+TS-side change, not after. *Implementation:* `mmap.ts`, `repl.ts`,
+`app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4422,5 +4456,6 @@ exactly as it would be on the bare-metal target.
 | **M63** | `MMAP`'s header grows again: `Personality` (§1.75), Oliver's idea, motivated by wanting to test `REMOTE-TERMINAL.md`'s wire protocol in software before real RP2350 hardware exists, plus a general want to describe "what kind of machine is this" (headless, screen geometry) cross-target in a fixed structured place rather than Rebel-Sim-local constants. Header grows 16→28 bytes: `PERSONALITY` (flags cell, `PersonalityFlagHeadless` bit 0 defined), `SCREEN-COLS`, `SCREEN-ROWS` — `DEFAULT_PERSONALITY` (80x60, non-headless) reproduces today's hardcoded boot geometry exactly. `BankTable`/`Machine` take an optional `personality`; `Machine` reads it back via `getPersonality()` to size `CHAR`/`ATTR` and the `SCREEN` sysvar group (cell size stays the fixed 8x8 constants, matching `REMOTE-TERMINAL.md` §5's "not negotiated in v1"). Deliberately NOT done here, confirmed with Oliver: `headless` is stored/read but doesn't yet skip any bank or `Screen`/`Keyboard` construction — real follow-on work. `HEADER_VERSION` bumped 1→2 (write-only, unenforced, free to bump). | `mmap.ts`, `banks.ts`, `repl.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md` |
 | **M64** | `REMOTE-TERMINAL.md`'s wire protocol + a software loopback harness (§1.76), Oliver's idea: validates the design before real RP2350 hardware exists. Three new files, no existing engine file touched: `remote-terminal-protocol.ts` (framing/checksum/`FrameDecoder` resync, per-message codec, §3/§4), `remote-board.ts` (the "board" role, §8: `BoardScreenHal implements ScreenHal` serializes to the wire instead of drawing; `RemoteBoard` wraps a real `Machine` via existing `MachineOptions.screenHal`/`personality`, no engine changes needed), `remote-terminal.ts` (the "terminal" role, §7, scoped down: a shadow `{charCode,ink,paper}` grid, no `Machine`/`Arena`/real pixel rendering — deferred until real `CanvasScreenHal` wiring happens). A real reentrancy bug found and fixed this session: `HELLO`-sending moved out of `RemoteBoard`'s constructor into an explicit `start()`, since a fully-synchronous two-role harness has the terminal's `HELLO_ACK` reply try to reach a `board` variable that isn't assigned until the constructor returns — confirmed harmless that this means `Machine`'s own unconditional boot-time `Screen.cls()` now fires (and its `CLEAR` frame lands) before `HELLO`, since `RemoteTerminal` ignores screen frames until its own `HELLO` handling has sized the shadow grid. Message-ID table stays hand-coded, not JSON-driven (§9's own deferred stance — no second consumer exists yet). `packages/app`/`navigator.serial` wiring (§7's actual UI) explicitly out of scope, confirmed with Oliver — `REMOTE-TERMINAL.md` §0 updated with a status note distinguishing what's now implemented from what's still design-only. | `remote-terminal-protocol.ts`, `remote-board.ts`, `remote-terminal.ts`, `remote-terminal-protocol.test.ts`, `remote-terminal-loopback.test.ts`, `REMOTE-TERMINAL.md` |
 | **M65** | `TERMINAL`: a hands-on connection to a simulated board (§1.77), Oliver's idea. New portable HAL-level primitive (147), confirmed cross-target from the start (real targets implement it later via their own transport) — follows `COLD`/`RESTORE`'s exact host-signal plumbing (`inner.ts` dispatch()-level token check, a new `'terminal'` `StepSignal`, no payload). `app.ts`'s `connectToRemote()` builds a `RemoteBoard`/`RemoteTerminal` pair (persists across disconnect), reusing the already-attached `canvasScreenHal` as the render target; `tick()` branches to a new `tickRemote()` while connected, freezing the local machine for free; Ctrl+Escape disconnects. A real bug found and fixed via a failing `app.spec.ts` test (isolated with `it.only` + temporary diagnostics): the `'terminal'`/board-`'cold'` branches didn't reset `this.pumping` before their async call, permanently starving the RAF pump after connecting (`wake()`'s "already pumping" guard silently no-opped forever) — fixed by resetting it first, mirroring `resetUiSnapshotsForReboot()`. `RemoteTerminal` gained an optional `hal?: ScreenHal` param (no cursor-specific logic needed — no separate cursor HAL primitive exists anywhere in this codebase). Verified live in a real browser: `TERMINAL`, board banner/prompt appear, typed a line, Ctrl+Escape, reconnected and confirmed the board's session resumed rather than rebooting. | `rebel-opcodes.json`, `inner.ts`, `repl.ts`, `primitives.ts`, `remote-terminal.ts`, `index.ts`, `app.ts`, `app.spec.ts`, `terminal.test.ts`, `remote-terminal-loopback.test.ts`, `REMOTE-TERMINAL.md` |
+| **M66** | `Personality` gains `INK`/`PAPER` (§1.78), Oliver's idea: a `TERMINAL`-connected board booting into a deliberately different color scheme (yellow-on-blue, palette indices 6/1) than local's green-on-black is a cheap, immediate visual "different machine" signal. `MMAP`'s header grows a third time, 28→36 bytes; `DEFAULT_PERSONALITY` gains `ink: 4, paper: 0` (replacing `repl.ts`'s now-removed `DEFAULT_INK`/`DEFAULT_PAPER` constants, unchanged default-boot colors). `HEADER_VERSION` bumped 2→3. `system.fth`'s `MMAP-HDR` constant updated 28→36 alongside the TS-side change this time, not after (§1.75's own hidden-bug lesson applied). Verified live: connecting via `TERMINAL` now visibly repaints the canvas, Ctrl+Escape snaps straight back. | `mmap.ts`, `repl.ts`, `app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

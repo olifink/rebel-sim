@@ -356,7 +356,12 @@ export class App implements AfterViewInit, OnDestroy {
       // §7's own suggestion, made unnecessary here by already having a
       // live local Machine with a real font loaded).
       this.remoteTerminal = new RemoteTerminal(terminalSink, 80, 60, this.canvasScreenHal);
-      this.remoteBoard = new RemoteBoard(boardSink, { headless: true, screenCols: 80, screenRows: 60 });
+      // ink 6 (yellow) on paper 1 (blue), Oliver's request — a
+      // deliberately different color scheme from local's default
+      // green-on-black, so the very first paint after connecting is its
+      // own visual "you're on a different machine now" signal, before
+      // any text says so.
+      this.remoteBoard = new RemoteBoard(boardSink, { headless: true, screenCols: 80, screenRows: 60, ink: 6, paper: 1 });
       await this.loadSystemVocabulary(this.remoteBoard.machine);
       this.zone.runOutsideAngular(() => {
         this.remoteBoard!.machine.interpret('VERSION');

@@ -554,14 +554,14 @@ could drift from the table's actual contents.
 
 ### 5.1 Header
 
-Fixed 28 bytes at the start of the `MMAP` bank (i.e. at the owning
+Fixed 36 bytes at the start of the `MMAP` bank (i.e. at the owning
 arena's offset `0`):
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
 | 0 | 1 byte | Magic 0 | `'M'` |
 | 1 | 1 byte | Magic 1 | `'M'` |
-| 2 | 1 byte | Version | `2` |
+| 2 | 1 byte | Version | `3` |
 | 3 | 1 byte | Reserved | `0` |
 | 4 | 1 cell | `NEXT-BANK` | The shared auto-naming counter (§4.7). Reading it **MUST** return the current value and then increment it (pre-increment-on-read semantics — matches a plain `counter++` read). |
 | 8 | 1 cell | `ARENA-SIZE` | This arena's total byte size, queryable directly rather than requiring a separate host call. |
@@ -569,6 +569,8 @@ arena's offset `0`):
 | 16 | 1 cell | `PERSONALITY` | A fixed, small flags bitfield describing what kind of machine this arena belongs to — deliberately **not** a generic or dynamic config format, just a handful of named fields set once at boot. Bit 0 (`HEADLESS`) is the only bit defined so far, named after the headless-firmware family member (`HAL.md`); stored/read back but not required to change any other bank's presence in this version — a target MAY choose to act on it (e.g. skip display/keyboard banks), but is not required to yet. |
 | 20 | 1 cell | `SCREEN-COLS` | Character-grid width this arena boots with. Cell pixel size itself is **not** part of `Personality` — it stays a fixed, build-time constant (§4.6's `CHAR`/`ATTR` sizing, `01-HAL.md`'s screen HAL) — only the grid dimensions are configurable per arena. |
 | 24 | 1 cell | `SCREEN-ROWS` | Character-grid height this arena boots with. |
+| 28 | 1 cell | `INK` | Boot-time `SCREEN.INK` sysvar value — same palette-index-or-literal-RGB convention that sysvar already uses (§4.6). Lets a distinctly-`Personality`'d arena boot into visibly different colors, a cheap and immediate signal of "this is a different machine." |
+| 32 | 1 cell | `PAPER` | Boot-time `SCREEN.PAPER` sysvar value, same convention as `INK` above. |
 
 ### 5.2 Slot table
 
@@ -604,25 +606,26 @@ with different capacities.
 
 ### 5.3 `MMAP`'s own size — conforms to §4.3 like any other bank
 
-`MMAP`'s raw content requirement is `28 + MAX_SLOTS × 24` bytes (28 —
-not 16 — since §5.1's header now includes `Personality`) — a fixed
-function of a build-time constant. **[Revised]** an earlier version of
-this spec exempted `MMAP` from §4.3's size-class rule entirely,
-treating this computed byte count as the bank's actual, exact size.
-That exemption is gone: `MMAP`'s declared size **MUST** be this raw
-requirement rounded up to the smallest §4.3 size class that fits,
-exactly like any other carved bank's content-driven request (§4.3's
-own "this rule applies uniformly to every source of a bank-size
-request" already covered this case; `MMAP` was simply never routed
-through it). With the recommended default of `MAX_SLOTS = 64`, the raw
-requirement is 1564 bytes, comfortably inside the smallest class,
-**`MIN_BANK_SIZE`** — so `MMAP`'s declared size is `MIN_BANK_SIZE`
-bytes, not 1564 (1552 bytes with the pre-`Personality` 16-byte header;
-4096 bytes prior to M58's §4.3 floor change; 2048 bytes as of M58). A
-target with a larger `MAX_SLOTS` recomputes the same way; only a
-`MAX_SLOTS` whose raw requirement exceeds the current floor (a little
-above 84 slots, as of the 2 KiB floor and 28-byte header) would round
-to a larger class instead.
+`MMAP`'s raw content requirement is `36 + MAX_SLOTS × 24` bytes (36 —
+not 16 — since §5.1's header now includes all of `Personality`,
+`INK`/`PAPER` included) — a fixed function of a build-time constant.
+**[Revised]** an earlier version of this spec exempted `MMAP` from
+§4.3's size-class rule entirely, treating this computed byte count as
+the bank's actual, exact size. That exemption is gone: `MMAP`'s
+declared size **MUST** be this raw requirement rounded up to the
+smallest §4.3 size class that fits, exactly like any other carved
+bank's content-driven request (§4.3's own "this rule applies uniformly
+to every source of a bank-size request" already covered this case;
+`MMAP` was simply never routed through it). With the recommended
+default of `MAX_SLOTS = 64`, the raw requirement is 1572 bytes,
+comfortably inside the smallest class, **`MIN_BANK_SIZE`** — so
+`MMAP`'s declared size is `MIN_BANK_SIZE` bytes, not 1572 (1564 bytes
+with the pre-`INK`/`PAPER` 28-byte header; 1552 bytes with the original
+pre-`Personality` 16-byte header; 4096 bytes prior to M58's §4.3 floor
+change; 2048 bytes as of M58). A target with a larger `MAX_SLOTS`
+recomputes the same way; only a `MAX_SLOTS` whose raw requirement
+exceeds the current floor (a little above 83 slots, as of the 2 KiB
+floor and 36-byte header) would round to a larger class instead.
 
 There is now no exception left in this section at all: `MMAP`'s
 placement still goes through the ordinary alignment-per-§4.4 allocator
@@ -640,7 +643,7 @@ The bank sequence below (`MMAP` implicitly first, then `SYSV`, `DSTK`,
 `RSTK`, `DICT`, `CHAR`, `KMAP`, `WORK`, all at the minimum size class
 except `DICT`) is exactly the kind of arena an implementation this
 suite governs produces, computed per §4.3/§4.4/§5.3 with
-`MAX_SLOTS = 64` (`MMAP`'s raw requirement, `28 + 64×24 = 1564` bytes,
+`MAX_SLOTS = 64` (`MMAP`'s raw requirement, `36 + 64×24 = 1572` bytes,
 rounds up to the minimum class, 2048 bytes as of M58 — §5.3):
 
 | Bank | Base | Size |

@@ -14,10 +14,11 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   });
 
   it('is exactly one 2 KiB size class, no longer an exception to the size-class rule (spec §5.3)', () => {
-    // Comfortably covers the default 64-slot table's raw 1564-byte
-    // requirement (28-byte header, including Personality, + 64 * 24-byte
-    // slots) — the module-load-time assertion in mmap.ts is what
-    // actually guards against MAX_SLOTS someday outgrowing this class.
+    // Comfortably covers the default 64-slot table's raw 1572-byte
+    // requirement (36-byte header, including Personality's ink/paper, +
+    // 64 * 24-byte slots) — the module-load-time assertion in mmap.ts is
+    // what actually guards against MAX_SLOTS someday outgrowing this
+    // class.
     expect(MMAP_SIZE).toBe(2048);
   });
 
@@ -124,12 +125,13 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   it('a slot is readable directly via raw @ from Forth source, matching BANK@ for the same bank', () => {
     const m = new Machine();
     const dict = m.banks.findBank('DICT')!;
-    // MMAP's own layout: header(28) + slotIndex*24, then tag(4)+name(8)
+    // MMAP's own layout: header(36) + slotIndex*24, then tag(4)+name(8)
     // lead into base at +12, size at +16, flags at +20 within a slot.
     // Header grew 4 -> 16 (M27, DEVELOPING.md §20: NEXT-BANK/ARENA-SIZE/
-    // ARENA-ID) -> 28 (Personality: a flags cell + SCREEN-COLS/-ROWS).
+    // ARENA-ID) -> 28 (Personality: a flags cell + SCREEN-COLS/-ROWS) ->
+    // 36 (Personality's INK/PAPER).
     const dictSlotIndex = m.banks.getAllBanks().findIndex((b) => b.tag === 'DICT');
-    const slotAddr = 28 + dictSlotIndex * 24;
+    const slotAddr = 36 + dictSlotIndex * 24;
 
     m.interpret(`${slotAddr} 12 + @`); // base
     expect(m.stack.pop()).toBe(dict.base);
@@ -143,26 +145,31 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   });
 
   it('Personality: a caller-supplied value round-trips through getPersonality()', () => {
-    const banks = new BankTable(new Arena(1 << 16), { headless: true, screenCols: 40, screenRows: 25 });
-    expect(banks.mmap.getPersonality()).toEqual({ headless: true, screenCols: 40, screenRows: 25 });
+    const personality = { headless: true, screenCols: 40, screenRows: 25, ink: 6, paper: 1 };
+    const banks = new BankTable(new Arena(1 << 16), personality);
+    expect(banks.mmap.getPersonality()).toEqual(personality);
   });
 
-  it('Personality: Machine with no override boots the exact default 80x60/640x480 geometry', () => {
+  it('Personality: Machine with no override boots the exact default 80x60/640x480 geometry, green-on-black', () => {
     const m = new Machine();
     expect(m.sysvars.get('SCREEN', 'CHAR-COLS')).toBe(80);
     expect(m.sysvars.get('SCREEN', 'CHAR-ROWS')).toBe(60);
     expect(m.sysvars.get('SCREEN', 'SCREEN-WIDTH')).toBe(640);
     expect(m.sysvars.get('SCREEN', 'SCREEN-HEIGHT')).toBe(480);
+    expect(m.sysvars.get('SCREEN', 'INK')).toBe(4);
+    expect(m.sysvars.get('SCREEN', 'PAPER')).toBe(0);
     const charBank = m.banks.findBank('CHAR')!;
     expect(charBank.size).toBe(roundToSizeClass(80 * 60));
   });
 
-  it('Personality: a Machine built with a non-default personality derives CHAR/ATTR bank size and SCREEN sysvars from it', () => {
-    const m = new Machine({ personality: { headless: false, screenCols: 40, screenRows: 25 } });
+  it('Personality: a Machine built with a non-default personality derives CHAR/ATTR bank size and SCREEN sysvars (geometry and ink/paper) from it', () => {
+    const m = new Machine({ personality: { headless: false, screenCols: 40, screenRows: 25, ink: 6, paper: 1 } });
     expect(m.sysvars.get('SCREEN', 'CHAR-COLS')).toBe(40);
     expect(m.sysvars.get('SCREEN', 'CHAR-ROWS')).toBe(25);
     expect(m.sysvars.get('SCREEN', 'SCREEN-WIDTH')).toBe(320);
     expect(m.sysvars.get('SCREEN', 'SCREEN-HEIGHT')).toBe(200);
+    expect(m.sysvars.get('SCREEN', 'INK')).toBe(6);
+    expect(m.sysvars.get('SCREEN', 'PAPER')).toBe(1);
     const charBank = m.banks.findBank('CHAR')!;
     const attrBank = m.banks.findBank('ATTR')!;
     expect(charBank.size).toBe(roundToSizeClass(40 * 25));
