@@ -171,15 +171,18 @@ describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
 
     // The typed character itself must never be inverted — DEVELOPING.md
     // §17's own worked-through reasoning about EMIT's call sequence.
-    // Three calls happen, not two: EMIT's content write (normal), then
-    // setCursor(1,0)'s "restore the old cell" redraw — which redraws the
-    // just-typed 'A' again, harmlessly, since CHAR already holds it by
-    // then (the documented "wasted-but-harmless double-blit") — then the
-    // real new-position redraw, inverted.
+    // Two calls, not three: EMIT's content write (normal), then the
+    // real new-position redraw (inverted). setCursor()'s "restore the
+    // old cell" redraw is skipped here (redrawOldCell:false from
+    // advanceCursor()) — that cell is the one EMIT just wrote, already
+    // correctly on-screen, so redrawing it again would be not just
+    // wasted but actively wrong for a literal RGB color while a palette
+    // is active (see setCursor()'s own doc comment) — this used to be a
+    // real, harmless-by-coincidence double-blit; now it just doesn't
+    // happen.
     expect(hal.blitGlyph).toHaveBeenNthCalledWith(1, 0, 0, 65, 0x00ff00, 0x000000);
-    expect(hal.blitGlyph).toHaveBeenNthCalledWith(2, 0, 0, 65, 0x00ff00, 0x000000);
-    expect(hal.blitGlyph).toHaveBeenNthCalledWith(3, 1, 0, 32, 0x000000, 0x00ff00);
-    expect(hal.blitGlyph).toHaveBeenCalledTimes(3);
+    expect(hal.blitGlyph).toHaveBeenNthCalledWith(2, 1, 0, 32, 0x000000, 0x00ff00);
+    expect(hal.blitGlyph).toHaveBeenCalledTimes(2);
   });
 
   it('an out-of-range AT-XY while visible does not throw', () => {
