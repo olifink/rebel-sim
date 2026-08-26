@@ -32,3 +32,6 @@ export { Machine } from './repl.js';
 export type { MachineOptions, StepStatus } from './repl.js';
 export { listDictionaryEntries, getPrimitiveNote } from './dictionary.js';
 export type { DictionaryEntry } from './dictionary.js';
+export { RemoteBoard } from './remote-board.js';
+export { RemoteTerminal } from './remote-terminal.js';
+export type { ByteSink } from './remote-terminal-protocol.js';
