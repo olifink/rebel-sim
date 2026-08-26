@@ -107,14 +107,30 @@ export class Screen {
    * advanceCursor()'s wrap. DEVELOPING.md §17, M25: also the single
    * choke-point every cursor-movement path (AT-XY, EMIT's
    * auto-advance/CR/LF) already routes through, so the visible-cursor
-   * redraw hooks in here once rather than at each call site. */
-  setCursor(col: number, row: number): void {
+   * redraw hooks in here once rather than at each call site.
+   *
+   * `redrawOldCell` (default true): skip only from advanceCursor(),
+   * which calls this right after writeChar() already painted the cell
+   * the cursor is leaving in its correct, normal colors. Redrawing it
+   * again here from ATTR would be redundant at best, and — while a
+   * palette is active — actively wrong for a literal RGB ink/paper
+   * ATTR's 4-bit nibbles can't durably store (spec/01-HAL.md §3.6's
+   * accepted limitation): it renders correctly via writeChar()'s direct
+   * HAL call, then gets its low nibble reread back through the palette
+   * on this very next tick, turning e.g. white into whatever color
+   * happens to sit at that nibble's palette index. AT-XY and EMIT's
+   * CR/LF, by contrast, move the cursor *without* writing first, so the
+   * cell they're leaving genuinely is still showing its last redraw and
+   * needs the normal un-invert. */
+  setCursor(col: number, row: number, redrawOldCell = true): void {
     const oldCol = this.getCursorCol();
     const oldRow = this.getCursorRow();
     this.sysvars.set('CORE', 'CURSOR-X', col);
     this.sysvars.set('CORE', 'CURSOR-Y', row);
     if (this.isCursorVisible()) {
-      this.redrawCursorAt(oldCol, oldRow, false);
+      if (redrawOldCell) {
+        this.redrawCursorAt(oldCol, oldRow, false);
+      }
       this.redrawCursorAt(col, row, true);
     }
   }
@@ -241,7 +257,11 @@ export class Screen {
     if (row >= this.rows) {
       row = 0;
     }
-    this.setCursor(col, row);
+    // false: the cell being left was just written by writeChar() (this
+    // is only ever called right after it, from emit()) — see setCursor()'s
+    // own doc comment for why redrawing it again here is wrong, not just
+    // redundant, while a palette is active.
+    this.setCursor(col, row, false);
   }
 
   /** EMIT — streams one raw character code. \r/\n are handled as cursor

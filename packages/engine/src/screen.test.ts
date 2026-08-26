@@ -346,6 +346,21 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
   });
 
+  it('a literal RGB ink survives the very next cursor-advance while CURSEN is on — regression for a real bug found live: the un-invert half of setCursor() used to redraw the just-written cell from its ATTR-truncated nibble, silently replacing e.g. white with whatever the low nibble\'s palette entry happened to be', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
+    m.screen.showCursor(); // CURSEN
+    hal.blitGlyph.mockClear();
+
+    m.interpret('16777215 INK 0 PAPER 65 EMIT'); // white 'A' on black
+
+    // The cell EMIT wrote must be the LAST thing painted there — not
+    // clobbered a moment later by the cursor moving off it.
+    const paintsAtOrigin = hal.blitGlyph.mock.calls.filter((call) => call[0] === 0 && call[1] === 0);
+    expect(paintsAtOrigin.at(-1)).toEqual([0, 0, 65, 16777215, 0]);
+  });
+
   it("writes the cell's ATTR byte as IIIIPPPP while a palette is active — green on black is 0x40", () => {
     const m = new Machine();
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
