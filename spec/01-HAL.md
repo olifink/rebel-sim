@@ -259,22 +259,30 @@ document's. In order:
 | `INK` | Current foreground color for character writes. |
 | `PAPER` | Current background color for character writes. |
 | `CURSOR-VISIBLE` | OPTIONAL (§3.5). HAL boolean. Omit the field entirely on a target that never implements a visible cursor, per `03-SYSVARS.md`'s reserved-field convention — do not wire a fixed `FALSE` in its place. |
-| `PALETTE-BASE` | OPTIONAL. Address of the active 16-entry palette map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank), or `0` for "disabled" (literal-RGB-only, today's unmodified behavior) — same address/0-disabled convention as `FONT-BASE` (§3.7). |
+| `PALETTE-BASE` | **REQUIRED** if display-capable (§3.3) — see below. Address of the active 16-entry palette map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank), or `0` for "disabled" (literal-RGB-only). Same address/0-disabled convention as `FONT-BASE` (§3.7), but unlike that field this one is not conditional on the target having any dedicated font hardware/asset to point at — every display-capable target implements the mechanism below. Whether `PALETTE-BASE` defaults to `0` or a populated map at boot is target-specific (Rebel-Sim boots with the default map already active, `02-MEMORY-MODEL.md` §4.6). |
 
 A target with a fixed, non-indexed truecolor display has no referent
 for a color-depth or palette-size field and **MUST** omit them rather
 than invent a meaningless constant.
 
-A target with a genuine indexed/palette **text-mode** display is now in
-scope: `PALETTE-BASE` (above) holds the absolute address of the active
-16-entry `0xRRGGBB` map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank), and
-the per-cell `ATTR` bank (`02-MEMORY-MODEL.md` §4.6) stores the resolved
-`IIIIPPPP` ink/paper index pair once a palette is active. This is scoped
-strictly to the character-grid `INK`/`PAPER` path this section already
-governs (`hal_blit_glyph`/`hal_clear_screen`'s `ink`/`paper` parameters,
-§3.3) — it is **not** a general pixel/graphics-mode palette. No
-`hal_draw_*` pixel primitive (§3.4) gains any palette awareness by this;
-a future indexed pixel/graphics mode remains genuinely out of this
+**Every display-capable target's Screen Module (§3.2/§3.3) MUST
+implement this indexed-color mechanism** — not just a target that
+happens to have genuine indexed-palette display hardware. `PAL`/`ATTR`
+are a pure software indirection layer sitting in front of whatever
+`hal_blit_glyph`/`hal_clear_screen` already accept (§3.3); nothing about
+implementing them depends on the underlying display's own color model,
+so there is no hardware capability a conformant target could lack to
+justify omitting the mechanism (contrast `CURSOR-VISIBLE`, §3.5, or
+`hal_draw_*`, §3.4, which genuinely are conditional on target
+capability). `PALETTE-BASE` (above) holds the absolute address of the
+active 16-entry `0xRRGGBB` map (`02-MEMORY-MODEL.md` §4.6's `PAL` bank),
+and the per-cell `ATTR` bank (`02-MEMORY-MODEL.md` §4.6) stores the
+resolved `IIIIPPPP` ink/paper index pair once a palette is active. This
+is scoped strictly to the character-grid `INK`/`PAPER` path this section
+already governs (`hal_blit_glyph`/`hal_clear_screen`'s `ink`/`paper`
+parameters, §3.3) — it is **not** a general pixel/graphics-mode palette.
+No `hal_draw_*` pixel primitive (§3.4) gains any palette awareness by
+this; a future indexed pixel/graphics mode remains genuinely out of this
 version's scope (§10) exactly as before, and would need its own
 extension when it becomes real.
 
@@ -340,9 +348,8 @@ changes when a palette is active:
   proposed; `PAL-base + N*64 PALETTE-BASE !` is trivial enough via
   ordinary `BANK@`/arithmetic/`!` that a convenience word isn't
   warranted yet.
-- Whether §11's conformance checklist should gain rows for these
-  data/bank contracts (currently function-shaped, HAL-call-oriented) —
-  left open.
+- ~~Whether §11's conformance checklist should gain rows for these
+  data/bank contracts~~ — resolved: see §11.
 
 ### 3.7 Sysvar contract — `FONT` group
 
@@ -1002,6 +1009,7 @@ somewhere, not before:
 | `hal_blit_glyph` | A (target implements) | **REQUIRED** if display-capable | Screen §3.3 |
 | `hal_clear_screen` | A | **REQUIRED** if display-capable | Screen §3.3 |
 | `hal_draw_pixel`/`line`/`rect`/`rect_outline` | A | OPTIONAL | Screen §3.4 |
+| `PAL`/`ATTR` banks + `PALETTE-BASE` field | data/bank | **REQUIRED** if display-capable | Screen §3.6, `02-MEMORY-MODEL.md` §4.6 |
 | `keyboard_push_raw_event` | B (target calls in) | **REQUIRED** if input-capable | Keyboard §4.2 |
 | `keyboard_has_event` / `keyboard_read_event` | portable | n/a — never reimplement | Keyboard §4.3 |
 | `keyboard_has_translated_event` / `keyboard_read_translated_char` | portable | n/a — never reimplement | Keyboard §4.3 |

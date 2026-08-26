@@ -339,8 +339,8 @@ to it — it is not exhaustive by design (§7).
 | `RSTK` | Return stack, grows down | Per-arena |
 | `DSTK` | Data stack, grows down | Per-arena |
 | `CHAR` | Character-code grid, write-through into the display surface (`01-HAL.md` §3) | Per-arena |
-| `PAL`  | Indexed color palette: up to 16 maps of 16 × `0xRRGGBB` entries (64 bytes each, contiguous); the active map's address is tracked by `SCREEN`'s `PALETTE-BASE` field (`03-SYSVARS.md` §6, `01-HAL.md` §3.6) | Per-arena |
-| `ATTR` | Per-cell ink/paper attribute byte (`IIIIPPPP`), same size and addressing as `CHAR`; write-through mirrors `CHAR`'s while `PALETTE-BASE` is non-zero, otherwise inert (`01-HAL.md` §3.2, §3.6) | Per-arena |
+| `PAL`  | **REQUIRED** if display-capable. Indexed color palette: up to 16 maps of 16 × `0xRRGGBB` entries (64 bytes each, contiguous); the active map's address is tracked by `SCREEN`'s `PALETTE-BASE` field (`03-SYSVARS.md` §6, `01-HAL.md` §3.6) | Per-arena |
+| `ATTR` | **REQUIRED** if display-capable. Per-cell ink/paper attribute byte (`IIIIPPPP`), same size and addressing as `CHAR`; write-through mirrors `CHAR`'s while `PALETTE-BASE` is non-zero, otherwise inert (`01-HAL.md` §3.2, §3.6) | Per-arena |
 | `WORK` | Terminal Input Buffer and scratch-text-handling region (`PAD`), at fixed sub-offsets within one bank — both are small, transient, per-line scratch text, so they share one size class instead of each independently rounding up to its own (§4.3) | Per-arena |
 | `SPRT` | Sprite/tile data | Per-arena |
 | `CART` | Cart-loaded code landing area | Per-arena |
@@ -384,7 +384,7 @@ bank... MUST still round up and take the whole class, leaving the
 remainder of that class simply unused") — the trailing 1024 bytes of the
 allocated bank is unused padding, not a 17th map.
 
-An implementation providing a `PAL` bank **MUST** initialize map slot 0
+Every display-capable target **MUST** initialize map slot 0
 (`PAL base + 0`) to this default palette at boot, before any Forth
 program runs:
 
@@ -840,3 +840,4 @@ one becomes real and load-bearing somewhere, not before:
 | Auto-generated bank names share one counter (`MMAP`'s own header), regardless of creation path | §4.7, §5.1 |
 | A Forth task is bound to exactly one arena for its whole lifetime; only the *attached* arena is runtime-switchable | §6.1 |
 | `SCRN`/`KMAP`/`FONT` stay singular/shared; every other known bank tag is per-arena | §4.6, §6.2 |
+| `PAL`/`ATTR` banks are present (not omitted as optional) on every display-capable target; `PAL` map slot 0 holds the normative default palette at boot | §4.6 |
