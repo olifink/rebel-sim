@@ -19,6 +19,11 @@
  * Slot byte layout is proposed, not finalized cross-target — see
  * `DEVELOPING.md` §11/§14 and `rebel-rom/CHANGES.md` for the open
  * question around matching this to a real `CBank` C++ layout later.
+ *
+ * The header also carries a few fixed `Personality` fields (headless,
+ * screen geometry) read once at boot — see that type's own doc comment.
+ * Deliberately not a generic/dynamic config format, just named cells in
+ * the one place that's already the arena's early source of truth.
  */
 
 import { Arena } from './arena.js';
@@ -40,7 +45,7 @@ const NAME_SIZE = 8;
 // lives entirely in each slot's own ACTIVE flag.
 const HEADER_MAGIC_0 = 'M'.charCodeAt(0);
 const HEADER_MAGIC_1 = 'M'.charCodeAt(0);
-const HEADER_VERSION = 1;
+const HEADER_VERSION = 2;
 
 // DEVELOPING.md §20, M27: three more header cells, arena-bookkeeping
 // that belongs with MMAP itself rather than in SYSV — genuinely
@@ -53,7 +58,17 @@ const ARENA_SIZE_OFFSET = 8; // moved out of the old CORE.ARENA-SIZE sysvar
 const ARENA_ID_OFFSET = 12; // reserved, always 0 today — future
 // multi-arena bookkeeping (a counter on the arena-creation side,
 // analogous to NEXT-BANK), no consumer yet, not decided further
-const HEADER_SIZE = 16;
+
+// Oliver's request: a few fixed "personality" fields describing what kind
+// of machine this arena belongs to, available before any bank besides MMAP
+// itself exists — deliberately NOT a generic/dynamic config blob, just a
+// handful of named cells read once at boot (repl.ts's Machine constructor)
+// to decide bank sizes and sysvar defaults. Round-trips through ordinary
+// project save/restore for free, same as every other MMAP header field.
+const PERSONALITY_OFFSET = 16; // flags bitfield — see PersonalityFlag* below
+const SCREEN_COLS_OFFSET = 20;
+const SCREEN_ROWS_OFFSET = 24;
+const HEADER_SIZE = 28;
 
 // tag(4) + name(8) + base(4-cell) + size(4-cell) + flags(4-cell).
 const SLOT_SIZE = TAG_SIZE + NAME_SIZE + 4 + 4 + 4;
@@ -75,11 +90,12 @@ const MMAP_RAW_SIZE = HEADER_SIZE + MMAP_MAX_SLOTS * SLOT_SIZE;
  * project data exists yet to migrate). 2048 (`MIN_BANK_SIZE` in
  * banks.ts, 4096 through M55–M57, 2048 as of M58 — not imported here,
  * same avoid-a-circular-dependency reason as NAME_SIZE above)
- * comfortably covers the 64-slot default's 1552-byte raw requirement;
- * a build with `MAX_SLOTS` above roughly 84 slots would need to round
- * to a bigger class instead — this constant is asserted against the
- * raw requirement below specifically so a future MAX_SLOTS change
- * can't silently outgrow it. */
+ * comfortably covers the 64-slot default's raw requirement — 1552 bytes
+ * at the time of this change (16-byte header), 1564 now that the header
+ * carries `Personality` too (28 bytes); a build with `MAX_SLOTS` above
+ * roughly 84 slots would need to round to a bigger class instead — this
+ * constant is asserted against the raw requirement below specifically so
+ * a future MAX_SLOTS (or header) change can't silently outgrow it. */
 export const MMAP_SIZE = 2048;
 
 if (MMAP_RAW_SIZE > MMAP_SIZE) {
@@ -103,6 +119,38 @@ export const BankFlagSwappable = 1 << 2; // reserved, inert
 export const BankFlagDirty = 1 << 3; // reserved, inert — DEVELOPING.md §11
 export const BankFlagActive = 1 << 4; // DEVELOPING.md §11/§14, M19/M22
 
+/** The one bit `PERSONALITY` defines today. A Rebel-Sim-first addition —
+ * stored/read only in this version (repl.ts reads it back via
+ * `getPersonality()` but doesn't yet branch on it: banks/Screen/Keyboard are
+ * always constructed regardless). Named to match the "headless Rebel
+ * firmware" family member `HAL.md` already describes, so a future consumer
+ * that DOES branch on it has an obvious bit to reach for instead of
+ * inventing a new one. */
+export const PersonalityFlagHeadless = 1 << 0;
+
+/** `spec/02-MEMORY-MODEL.md` §5.1: a fixed, small set of named fields
+ * describing what kind of machine this arena belongs to — not a generic or
+ * dynamic config format, just a handful of cells a caller can set at
+ * `Machine` construction (`MachineOptions.personality`) and read back
+ * (`MemoryMap.getPersonality()`). Cell size (8×8) is deliberately NOT part
+ * of this — it stays fixed, matching `REMOTE-TERMINAL.md` §5's existing
+ * "not negotiated in v1" decision. */
+export interface Personality {
+  readonly headless: boolean;
+  readonly screenCols: number;
+  readonly screenRows: number;
+}
+
+/** Reproduces today's hardcoded screen geometry exactly (80×60 chars, the
+ * `640×480 ÷ 8×8` this repo has always booted with) — the "always
+ * available, hardcoded" configuration a caller gets by simply omitting
+ * `MachineOptions.personality`. */
+export const DEFAULT_PERSONALITY: Personality = {
+  headless: false,
+  screenCols: 80,
+  screenRows: 60,
+};
+
 export interface MMapSlot {
   readonly tag: string;
   readonly name: string;
@@ -117,7 +165,7 @@ export class MemoryMap {
     readonly base: number,
   ) {}
 
-  initHeader(): void {
+  initHeader(personality: Personality = DEFAULT_PERSONALITY): void {
     const b = this.base;
     this.arena.writeByte(b + 0, HEADER_MAGIC_0);
     this.arena.writeByte(b + 1, HEADER_MAGIC_1);
@@ -126,6 +174,23 @@ export class MemoryMap {
     this.arena.writeCellUnsigned(b + NEXT_BANK_OFFSET, 0);
     this.arena.writeCellUnsigned(b + ARENA_SIZE_OFFSET, this.arena.sizeBytes);
     this.arena.writeCellUnsigned(b + ARENA_ID_OFFSET, 0); // reserved, DEVELOPING.md §20
+    this.arena.writeCellUnsigned(b + PERSONALITY_OFFSET, personality.headless ? PersonalityFlagHeadless : 0);
+    this.arena.writeCellUnsigned(b + SCREEN_COLS_OFFSET, personality.screenCols);
+    this.arena.writeCellUnsigned(b + SCREEN_ROWS_OFFSET, personality.screenRows);
+  }
+
+  /** Reads back exactly what `initHeader()` wrote — the one true source for
+   * a booting `Machine` to consult, not whatever `MachineOptions.personality`
+   * a caller passed in (so omitting it and getting `DEFAULT_PERSONALITY`
+   * behaves identically to passing it explicitly). */
+  getPersonality(): Personality {
+    const b = this.base;
+    const flags = this.arena.readCellUnsigned(b + PERSONALITY_OFFSET);
+    return {
+      headless: (flags & PersonalityFlagHeadless) !== 0,
+      screenCols: this.arena.readCellUnsigned(b + SCREEN_COLS_OFFSET),
+      screenRows: this.arena.readCellUnsigned(b + SCREEN_ROWS_OFFSET),
+    };
   }
 
   /** DEVELOPING.md §20, M27: the shared bank-naming counter — both

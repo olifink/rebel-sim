@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Arena } from './arena.js';
-import { BankTable, BankFlagResident, BankFlagActive, BankFlagExternal } from './banks.js';
+import { BankTable, BankFlagResident, BankFlagActive, BankFlagExternal, DEFAULT_PERSONALITY, roundToSizeClass } from './banks.js';
 import { MMAP_MAX_SLOTS, MMAP_SIZE, MMAP_TAG } from './mmap.js';
 import { Machine } from './repl.js';
 
@@ -14,10 +14,10 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   });
 
   it('is exactly one 2 KiB size class, no longer an exception to the size-class rule (spec §5.3)', () => {
-    // Comfortably covers the default 64-slot table's raw 1552-byte
-    // requirement (16-byte header + 64 * 24-byte slots) — the
-    // module-load-time assertion in mmap.ts is what actually guards
-    // against MAX_SLOTS someday outgrowing this class.
+    // Comfortably covers the default 64-slot table's raw 1564-byte
+    // requirement (28-byte header, including Personality, + 64 * 24-byte
+    // slots) — the module-load-time assertion in mmap.ts is what
+    // actually guards against MAX_SLOTS someday outgrowing this class.
     expect(MMAP_SIZE).toBe(2048);
   });
 
@@ -124,18 +124,49 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   it('a slot is readable directly via raw @ from Forth source, matching BANK@ for the same bank', () => {
     const m = new Machine();
     const dict = m.banks.findBank('DICT')!;
-    // MMAP's own layout (M27): header(16) + slotIndex*24, then
-    // tag(4)+name(8) lead into base at +12, size at +16, flags at +20
-    // within a slot. Header grew from 4 to 16 (M27, DEVELOPING.md §20)
-    // — magic+version+reserved(4) + NEXT-BANK(4) + ARENA-SIZE(4) +
-    // ARENA-ID(4).
+    // MMAP's own layout: header(28) + slotIndex*24, then tag(4)+name(8)
+    // lead into base at +12, size at +16, flags at +20 within a slot.
+    // Header grew 4 -> 16 (M27, DEVELOPING.md §20: NEXT-BANK/ARENA-SIZE/
+    // ARENA-ID) -> 28 (Personality: a flags cell + SCREEN-COLS/-ROWS).
     const dictSlotIndex = m.banks.getAllBanks().findIndex((b) => b.tag === 'DICT');
-    const slotAddr = 16 + dictSlotIndex * 24;
+    const slotAddr = 28 + dictSlotIndex * 24;
 
     m.interpret(`${slotAddr} 12 + @`); // base
     expect(m.stack.pop()).toBe(dict.base);
     m.interpret(`${slotAddr} 16 + @`); // size
     expect(m.stack.pop()).toBe(dict.size);
+  });
+
+  it('Personality: omitting it at construction yields DEFAULT_PERSONALITY exactly', () => {
+    const banks = new BankTable(new Arena(1 << 16));
+    expect(banks.mmap.getPersonality()).toEqual(DEFAULT_PERSONALITY);
+  });
+
+  it('Personality: a caller-supplied value round-trips through getPersonality()', () => {
+    const banks = new BankTable(new Arena(1 << 16), { headless: true, screenCols: 40, screenRows: 25 });
+    expect(banks.mmap.getPersonality()).toEqual({ headless: true, screenCols: 40, screenRows: 25 });
+  });
+
+  it('Personality: Machine with no override boots the exact default 80x60/640x480 geometry', () => {
+    const m = new Machine();
+    expect(m.sysvars.get('SCREEN', 'CHAR-COLS')).toBe(80);
+    expect(m.sysvars.get('SCREEN', 'CHAR-ROWS')).toBe(60);
+    expect(m.sysvars.get('SCREEN', 'SCREEN-WIDTH')).toBe(640);
+    expect(m.sysvars.get('SCREEN', 'SCREEN-HEIGHT')).toBe(480);
+    const charBank = m.banks.findBank('CHAR')!;
+    expect(charBank.size).toBe(roundToSizeClass(80 * 60));
+  });
+
+  it('Personality: a Machine built with a non-default personality derives CHAR/ATTR bank size and SCREEN sysvars from it', () => {
+    const m = new Machine({ personality: { headless: false, screenCols: 40, screenRows: 25 } });
+    expect(m.sysvars.get('SCREEN', 'CHAR-COLS')).toBe(40);
+    expect(m.sysvars.get('SCREEN', 'CHAR-ROWS')).toBe(25);
+    expect(m.sysvars.get('SCREEN', 'SCREEN-WIDTH')).toBe(320);
+    expect(m.sysvars.get('SCREEN', 'SCREEN-HEIGHT')).toBe(200);
+    const charBank = m.banks.findBank('CHAR')!;
+    const attrBank = m.banks.findBank('ATTR')!;
+    expect(charBank.size).toBe(roundToSizeClass(40 * 25));
+    expect(attrBank.size).toBe(roundToSizeClass(40 * 25));
   });
 });
 

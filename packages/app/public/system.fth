@@ -231,15 +231,17 @@ VARIABLE CURRENT-VOCAB
 ( fact, not something to parse, so it's a plain literal 0 below, not )
 ( a call. Layout mirrors mmap.ts's real constants exactly, kept in )
 ( sync by hand -- nothing generates these yet, a known gap, see )
-( spec/00-OVERVIEW.md. Header is 16 bytes; each of the 64 fixed slots )
-( is 24 bytes -- tag 4 + name 8 + base/size/flags cells; the name )
-( field starts 4 bytes into a slot, NUL-padded to 8; ACTIVE is flags )
-( bit 4, value 16. A name shorter than 8 bytes only ever has )
-( *trailing* NUL padding, never an embedded gap, so skipping zero )
-( bytes while still emitting every nonzero one preserves order )
-( correctly -- no need for LEAVE, which doesn't exist yet anyway, )
-( see spec/04-FORTH-CORE.md section 9. )
-16 CONSTANT MMAP-HDR
+( spec/00-OVERVIEW.md. Header is 28 bytes (M63: grew from 16 once )
+( Personality -- PERSONALITY/SCREEN-COLS/SCREEN-ROWS -- was added )
+( ahead of the slot table); each of the 64 fixed slots is 24 bytes )
+( -- tag 4 + name 8 + base/size/flags cells; the name field starts )
+( 4 bytes into a slot, NUL-padded to 8; ACTIVE is flags bit 4, value )
+( 16. A name shorter than 8 bytes only ever has *trailing* NUL )
+( padding, never an embedded gap, so skipping zero bytes while still )
+( emitting every nonzero one preserves order correctly -- no need )
+( for LEAVE, which doesn't exist yet anyway, see spec/04-FORTH-CORE.md )
+( section 9. )
+28 CONSTANT MMAP-HDR
 24 CONSTANT MMAP-SLOT
 4  CONSTANT MMAP-NAME
 8  CONSTANT MMAP-NAME-LEN

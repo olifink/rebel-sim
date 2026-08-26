@@ -43,7 +43,7 @@
  */
 
 import { Arena } from './arena.js';
-import { Bank, BankTable, BLOCK_SIZE } from './banks.js';
+import { Bank, BankTable, BLOCK_SIZE, type Personality } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
 import { PrimitiveContext, WarmReset } from './primitives.js';
@@ -113,15 +113,18 @@ const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
 // mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
 // ownership: deferred") — Rebel-Sim boots into this mode and stays.
-// 640x480 (80x60 chars at 8x8), settled Oliver, M54: an earlier 320x240
-// -> 512x384 bump was dialed back after 640x480 first read as
+// 80x60 chars at 8x8 = 640x480px, settled Oliver, M54: an earlier
+// 320x240 -> 512x384 bump was dialed back after 640x480 first read as
 // bigger-than-needed, but 80 columns turned out to suit the editor
 // better than the original 512-wide assumption (which was sized around
 // a full-screen editor matching 1024-byte blocks) — kept, not
-// experimental. Matches app.ts's FRAMEBUFFER_WIDTH/HEIGHT (kept in sync
-// by hand, no shared constant between the two packages).
-const DEFAULT_SCREEN_WIDTH = 640;
-const DEFAULT_SCREEN_HEIGHT = 480;
+// experimental. char cols/rows now come from `MMAP`'s `Personality`
+// (mmap.ts's `DEFAULT_PERSONALITY` is exactly 80x60, reproducing this
+// unchanged when a caller doesn't override it via
+// `MachineOptions.personality`); cell size stays a fixed constant below,
+// not personality-driven (REMOTE-TERMINAL.md §5: not negotiated in v1).
+// Matches app.ts's FRAMEBUFFER_WIDTH/HEIGHT (kept in sync by hand, no
+// shared constant between the two packages).
 const DEFAULT_CHAR_CELL_W = 8; // matches the ZX Spectrum 8x8 font port
 const DEFAULT_CHAR_CELL_H = 8;
 // Oliver's request (M62 follow-up 3): boot with the default palette
@@ -207,6 +210,18 @@ export interface MachineOptions {
    * just falls back to its ordinary hardcoded default, identical to an
    * empty boot. */
   bootProject?: string;
+  /** `MMAP`'s header (`mmap.ts`'s `Personality`) — a fixed, small set of
+   * "what kind of machine is this" fields (headless, screen geometry)
+   * written into the arena at the very first line of `Machine`'s own
+   * construction, before any other bank exists. Defaults to
+   * `DEFAULT_PERSONALITY` (today's 80x60, non-headless boot) when
+   * omitted — this option only matters to a caller building a
+   * differently-shaped machine (e.g. a distinct screen geometry for a
+   * remote-terminal "board" role). `headless` is stored/read back
+   * (`this.banks.mmap.getPersonality()`) but not yet acted on: banks and
+   * `Screen`/`Keyboard` are always constructed regardless in this
+   * version — a deliberate, named scope limit, not an oversight. */
+  personality?: Personality;
 }
 
 /** `step()`'s return: `'idle'` — no session in flight, nothing to do.
@@ -232,7 +247,7 @@ export interface MachineOptions {
  * change, the host must reconstruct" shape as `'cold'`, except the host
  * should pass `pendingRestartProject()` as `MachineOptions.bootProject`
  * to the fresh `Machine` instead of booting empty. */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold' | 'restart-project';
+export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -307,7 +322,12 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
   constructor(options: MachineOptions = {}) {
     this.arena = new Arena(options.arenaSize ?? DEFAULT_ARENA_SIZE);
-    this.banks = new BankTable(this.arena);
+    this.banks = new BankTable(this.arena, options.personality);
+    // Read back from MMAP itself, not `options.personality` directly — the
+    // one true source from here on, so omitting the option and passing
+    // `DEFAULT_PERSONALITY` explicitly behave identically (mmap.ts's
+    // `initHeader()` already applies that same default internally).
+    const personality = this.banks.mmap.getPersonality();
 
     // M54: a `bootProject` peeks that project's saved bank sizes (a
     // pending `BANK-RESIZE` that was `SAVE`d) *before* creating a single
@@ -340,10 +360,10 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.sysvars.setLatest(0);
     this.sysvars.setHere(this.dictBank.base);
 
-    const charCols = DEFAULT_SCREEN_WIDTH / DEFAULT_CHAR_CELL_W;
-    const charRows = DEFAULT_SCREEN_HEIGHT / DEFAULT_CHAR_CELL_H;
-    this.sysvars.set('SCREEN', 'SCREEN-WIDTH', DEFAULT_SCREEN_WIDTH);
-    this.sysvars.set('SCREEN', 'SCREEN-HEIGHT', DEFAULT_SCREEN_HEIGHT);
+    const charCols = personality.screenCols;
+    const charRows = personality.screenRows;
+    this.sysvars.set('SCREEN', 'SCREEN-WIDTH', charCols * DEFAULT_CHAR_CELL_W);
+    this.sysvars.set('SCREEN', 'SCREEN-HEIGHT', charRows * DEFAULT_CHAR_CELL_H);
     this.sysvars.set('SCREEN', 'CHAR-CELL-W', DEFAULT_CHAR_CELL_W);
     this.sysvars.set('SCREEN', 'CHAR-CELL-H', DEFAULT_CHAR_CELL_H);
     this.sysvars.set('SCREEN', 'CHAR-COLS', charCols);
@@ -625,6 +645,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         }
         if (value === 'restart-project') {
           return 'restart-project';
+        }
+        if (value === 'terminal') {
+          return 'terminal';
         }
       }
       return 'more-to-run';

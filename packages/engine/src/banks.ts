@@ -34,12 +34,17 @@ import {
   BankFlagSwappable,
   BankFlagDirty,
   BankFlagActive,
+  PersonalityFlagHeadless,
+  type Personality,
+  DEFAULT_PERSONALITY,
 } from './mmap.js';
 
 // Re-exported for this module's own existing public surface
 // (index.ts/primitives.ts import these from banks.ts today) — owned by
 // mmap.ts now, DEVELOPING.md §14, M22.
 export { BankFlagResident, BankFlagExternal, BankFlagSwappable, BankFlagDirty, BankFlagActive };
+export { PersonalityFlagHeadless, DEFAULT_PERSONALITY };
+export type { Personality };
 
 export const BANK_NAME_LEN = 8;
 
@@ -111,13 +116,13 @@ export class BankTable {
    * tests/tooling can inspect it directly. */
   readonly mmap: MemoryMap;
 
-  constructor(arena: Arena) {
+  constructor(arena: Arena, personality?: Personality) {
     // MMAP is always bank 0 — reserve its fixed space via the same
     // allocate() path every other bank uses (it naturally finds the
     // first inactive slot — slot 0, on a fresh arena — and computes
     // base 0, since no slot is active yet to push it forward).
     this.mmap = new MemoryMap(arena, 0);
-    this.mmap.initHeader();
+    this.mmap.initHeader(personality);
     this.mmap.allocate(MMAP_TAG, MMAP_TAG, MMAP_SIZE, DEFAULT_FLAGS);
   }
 
