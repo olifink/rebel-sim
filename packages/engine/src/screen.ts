@@ -286,7 +286,7 @@ export class Screen {
       const attrByte = ((this.getInk() & 0xf) << 4) | (this.getPaper() & 0xf);
       this.arena.fillBytes(this.attrBank.base, this.attrBank.size, attrByte);
     }
-    this.hal.clearScreen(this.getPaper());
+    this.hal.clearScreen(this.resolveColor(this.getPaper(), paletteBase));
     this.setCursor(0, 0);
   }
 

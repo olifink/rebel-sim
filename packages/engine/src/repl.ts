@@ -124,8 +124,14 @@ const DEFAULT_SCREEN_WIDTH = 640;
 const DEFAULT_SCREEN_HEIGHT = 480;
 const DEFAULT_CHAR_CELL_W = 8; // matches the ZX Spectrum 8x8 font port
 const DEFAULT_CHAR_CELL_H = 8;
-const DEFAULT_INK = 0x00ff00; // green
-const DEFAULT_PAPER = 0x000000; // black
+// Oliver's request (M62 follow-up 3): boot with the default palette
+// (below) already active, so INK/PAPER's boot defaults are now palette
+// *indices* — 4 (green) and 0 (black) in the default map — not literal
+// RGB. Same rendered colors as before (the default map's slots 0/4 were
+// deliberately chosen to coincide with the old literal defaults), just
+// resolved through PALETTE-BASE from boot instead of bypassing it.
+const DEFAULT_INK = 4; // green, default palette index
+const DEFAULT_PAPER = 0; // black, default palette index
 
 // spec/02-MEMORY-MODEL.md §4.6 / spec/01-HAL.md §3.6: up to 16 maps of
 // 16 x 0xRRGGBB entries (64 bytes/map) — 1024 bytes total, rounding up
@@ -363,9 +369,12 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     for (let i = 0; i < DEFAULT_PALETTE.length; i++) {
       this.arena.writeCell(palBank.base + i * 4, DEFAULT_PALETTE[i]);
     }
-    // PALETTE-BASE (SCREEN group) defaults to 0/disabled via the
-    // arena's own zero-init — same "never explicitly set" precedent as
-    // CURSOR-VISIBLE above, not an oversight.
+    // Oliver's request (M62 follow-up 3): the default palette is active
+    // from boot, not opt-in — PALETTE-BASE points at map slot 0
+    // immediately, matching DEFAULT_INK/DEFAULT_PAPER above already
+    // being indices into it. `0 PALETTE-BASE !` still disables it same
+    // as always.
+    this.sysvars.set('SCREEN', 'PALETTE-BASE', palBank.base);
     this.screen = new Screen(this.arena, charBank, attrBank, this.sysvars, options.screenHal);
     this.screen.cls();
 

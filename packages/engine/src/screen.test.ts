@@ -228,23 +228,38 @@ describe('Visible cursor (CURSEN/CURSDIS, DEVELOPING.md §17, M25)', () => {
 });
 
 describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMORY-MODEL.md §4.6)', () => {
-  it('PALETTE-BASE defaults to 0 (disabled) — INK/PAPER stay literal RGB, unchanged from today', () => {
+  it('PALETTE-BASE defaults to the default palette map at boot (M62 follow-up 3) — literal RGB >=16 still passes through unresolved', () => {
     const hal = spyHal();
     const m = new Machine({ screenHal: hal });
-    hal.blitGlyph.mockClear();
 
-    m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A'
+    expect(m.screen.getPaletteBase()).toBe(m.banks.findBank('PAL')!.base);
+
+    hal.blitGlyph.mockClear();
+    m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A' -- both >=16, literal either way
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
   });
 
+  it('boot defaults INK/PAPER to palette indices 4/0 (M62 follow-up 3) — same rendered green-on-black as before', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    hal.blitGlyph.mockClear();
+
+    m.interpret('65 EMIT'); // 'A' with untouched boot INK/PAPER
+
+    expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
+  });
+
   it('PALETTE-BASE (system.fth, M62 follow-up) pushes the sysvar cell\'s own address, same BASE/STATE idiom — read with @, write with !', () => {
     const m = bootMachine();
+    const palBase = m.banks.findBank('PAL')!.base;
 
     m.interpret('PALETTE-BASE @');
-    expect(m.stack.pop()).toBe(0); // disabled by default
+    expect(m.stack.pop()).toBe(palBase); // enabled by default at boot (M62 follow-up 3)
 
-    const palBase = m.banks.findBank('PAL')!.base;
+    m.interpret('0 PALETTE-BASE !');
+    expect(m.screen.getPaletteBase()).toBe(0);
+
     m.interpret(`${palBase} PALETTE-BASE !`);
     expect(m.screen.getPaletteBase()).toBe(palBase); // same sysvar setPaletteBase() writes
 
@@ -343,6 +358,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
 
   it('ATTR is not written while PALETTE-BASE is 0', () => {
     const m = new Machine();
+    m.screen.setPaletteBase(0); // explicitly disabled — boot now defaults to non-zero (M62 follow-up 3)
     const attrBank = m.banks.findBank('ATTR')!;
     m.arena.writeByte(attrBank.base, 0xff); // sentinel — writeChar() must leave this alone
 
