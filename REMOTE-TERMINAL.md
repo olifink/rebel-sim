@@ -64,6 +64,17 @@ HAL level, not raw pixels.** Concretely, this means:
   v1: the board's own screen HAL calls (whatever they're named in the new
   firmware) map directly onto this protocol's messages, because they're
   the same two operations Rebel-Sim already implements.
+- Indexed-color resolution (`spec/01-HAL.md` §3.6's `PAL`/`ATTR`
+  mechanism — **REQUIRED** for every display-capable target, including
+  this one, as of that spec's own M62-follow-up-4 update) stays entirely
+  on the board's side of the wire. The color-resolution rule already
+  keeps palette lookup *above* the HAL boundary, so `PLOT_CHAR`/`CLEAR`'s
+  `ink`/`paper` fields (§4) are, and always were, the same post-
+  resolution `0xRRGGBB` values `blitGlyph`/`clearScreen` receive locally
+  — never a raw `INK`/`PAPER` index. A board with an active palette just
+  resolves before framing a message, exactly like Rebel-Sim's own local
+  `Screen.writeChar()` does; this protocol carries no separate
+  index-carrying message and needs no version bump for it.
 - Bandwidth stays tiny — a handful of bytes per changed cell, not a
   framebuffer's worth of pixels per frame — which matters over a serial
   link.
@@ -398,7 +409,17 @@ can implement against it directly.
    (paint one glyph cell; clear the whole screen) — through `PLOT_CHAR`/
    `CLEAR` frames instead of a local display driver. `CURSOR` is an
    optional, allowed substitute specifically for inversion-only cursor
-   changes; it is never required.
+   changes; it is never required. Per `spec/01-HAL.md` §3.6 — **REQUIRED**
+   for every display-capable target, this board included, running in
+   remote-terminal mode is not an exemption — any indexed-color
+   resolution (`INK`/`PAPER` values 0-15 through an active
+   `PALETTE-BASE` map) **MUST** already have happened locally by the
+   time a call reaches this step: `PLOT_CHAR`'s `ink`/`paper` fields
+   (§4) are the resolved `0xRRGGBB` colors, never a raw palette index.
+   The board's own `PAL`/`ATTR` banks and `PALETTE-BASE` sysvar are as
+   required as `CHAR`/`INK`/`PAPER` themselves — this protocol has
+   nothing to say about them beyond that resolution having already
+   happened.
 4. Feed every incoming `KEY_EVENT` frame into the board's own keyboard-
    input pipeline at exactly the point real raw HID/co-processor
    usage-code events would normally enter it. `usageCode`/`pressed` here
