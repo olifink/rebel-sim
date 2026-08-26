@@ -44,10 +44,11 @@
   max-width: 100%;
   aspect-ratio: 4 / 3;
   image-rendering: pixelated;
-  border: 1px solid #0f0;
+  border: 1px solid #AAA;
   background: #000;
   flex-shrink: 0;
-  outline: none; /* the whole page is the "terminal" now (M7a) — no DOM
+  outline: none;
+  /* the whole page is the "terminal" now (M7a) — no DOM
                     text field to visually distinguish focus from */
 }
 
@@ -125,7 +126,7 @@
   display: none;
 }
 
-.inspector-section + .inspector-section {
+.inspector-section+.inspector-section {
   margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid #0f0;
