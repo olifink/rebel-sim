@@ -2,11 +2,32 @@
 
 ## 0. What this document is (and isn't)
 
-**Status: design-only. Nothing described here is implemented on either
-side.** This is a wire-protocol and architecture spec for a feature that
-doesn't exist yet in Rebel-Sim, written to be precise enough to build
-against later — on this side, and on a separate, not-yet-started RP2350
-firmware project.
+**Status: the wire protocol (§3/§4) and a software loopback test harness
+now exist in `packages/engine`** — `remote-terminal-protocol.ts` (framing,
+checksum, resync, per-message encode/decode), `remote-board.ts` (the
+"board" role, §8: a real `Machine` whose screen HAL calls serialize to the
+wire), and `remote-terminal.ts` (the "terminal" role, §7, scoped down: no
+`Machine`/`Arena` of its own, but it can now drive a real, caller-supplied
+`ScreenHal` in addition to its shadow grid — see that file's own header
+comment), exercised end-to-end by `remote-terminal-loopback.test.ts`
+against an in-memory transport instead of real `navigator.serial`.
+
+**A hands-on way to try this exists too, in `packages/app`**: `TERMINAL`
+(rebel-opcodes.json 147) — typed at the real running REPL — connects the
+session to an in-process simulated board (built the same way the engine's
+own loopback harness is) and reuses the app's own already-attached
+`CanvasScreenHal` to render the board's output onto the same visible
+canvas, rerouting real keyboard input to it. Ctrl+Escape returns control
+to the local machine; the board persists across a disconnect/reconnect.
+See `app.ts`'s `connectToRemote()`/`disconnectFromRemote()`/`tickRemote()`.
+
+**Still design-only:** a real `navigator.serial` connection to actual
+RP2350 hardware, and the RP2350 firmware project itself (§8) — both remain
+unbuilt, and can only be validated against real hardware. `TERMINAL`'s
+current implementation is a stand-in (an in-process simulated board, not a
+real transport) — swapping in real `navigator.serial` later is meant to be
+a transport-layer change under the same `ByteSink` interface, not a
+protocol redesign.
 
 **The scenario:** porting Rebel's Forth engine to real RP2350 hardware
 means, at some point, running with only the bare module attached — no

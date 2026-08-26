@@ -1138,6 +1138,11 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
+    // TERMINAL (147) never reaches here — inner.ts's dispatch() special-cases
+    // it before executePrimitive is ever called, the same shape as COLD
+    // (132) above: connecting to a target board is host-level orchestration
+    // (packages/app's app.ts), not anything this switch can do.
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

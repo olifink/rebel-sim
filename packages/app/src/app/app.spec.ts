@@ -260,6 +260,50 @@ describe('App', () => {
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('WORDS');
   }, 10_000);
 
+  // TERMINAL (rebel-opcodes.json 147): connects to an in-process
+  // simulated board and reroutes real keyboard input to it, leaving the
+  // local machine's own stack untouched — proven here via readEvent() on
+  // the board's own keyboard queue rather than canvas pixel content
+  // (jsdom's getContext('2d') returns null, so no CanvasScreenHal/
+  // rendering exists in this test environment at all — see
+  // ngAfterViewInit's own comment on that degradation). Ctrl+Escape then
+  // returns control to local, proven the same way "typing a line" above
+  // does (a real DOM key event reaching the local stack again). Async
+  // board boot (a second fetch('system.fth')) needs the same generous
+  // timeout the COLD test above already uses for its own reboot.
+  it('TERMINAL connects to a simulated board and reroutes keyboard input, Ctrl+Escape returns it', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const app = fixture.componentInstance as unknown as {
+      remoteChannel: { push(text: string): void };
+      connectedToRemote: boolean;
+      remoteBoard?: { machine: { keyboard: { readEvent(): { char: number } | undefined } } };
+    };
+
+    typeIntoRepl(app, 'TERMINAL\n');
+    await waitFor(() => app.connectedToRemote === true, 8000);
+    expect(app.remoteBoard).toBeTruthy();
+
+    press('KeyA'); // routed to the board now, not the local machine
+    const boardEvent = app.remoteBoard!.machine.keyboard.readEvent();
+    expect(boardEvent?.char).toBe('a'.charCodeAt(0));
+    expect(compiled.querySelector('.stack-values')?.textContent).toContain('(empty)');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', ctrlKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Escape', ctrlKey: true, bubbles: true }));
+    expect(app.connectedToRemote).toBe(false);
+
+    // toArray()/the stack panel are top-of-stack-first, so plain "2 3"
+    // displays as "3 2" — same reason the "typing a line" test above
+    // types "2 3 SWAP" instead when it wants to see "2 3" literally.
+    for (const code of ['Digit2', 'Space', 'Digit3', 'Enter']) {
+      press(code);
+    }
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('3 2'), 5000);
+    expect(compiled.querySelector('.stack-values')?.textContent).toContain('3 2');
+  }, 20_000);
+
   it('the left-side sysvars panel lists live FORTH.STATE/.BASE values and updates as they change', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();

@@ -10,8 +10,8 @@ import {
   OnDestroy,
   declareExperimentalWebMcpTool,
 } from '@angular/core';
-import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, listSysvars, RemoteChannel } from '@rebel-sim/engine';
-import type { Bank, DictionaryEntry, StepStatus, SysvarEntry } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, listSysvars, RemoteChannel, RemoteBoard, RemoteTerminal } from '@rebel-sim/engine';
+import type { Bank, ByteSink, DictionaryEntry, StepStatus, SysvarEntry } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
@@ -86,6 +86,25 @@ export class App implements AfterViewInit, OnDestroy {
   // during Machine's own constructor and paints through the HAL
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
+
+  // Set alongside this.machine in constructMachine() — was a local
+  // variable there until TERMINAL (rebel-opcodes.json 147) needed to
+  // reuse the exact same instance to render a connected board's output
+  // onto the same offscreen canvas (its already-loaded FONT bank is what
+  // makes that reuse possible — see connectToRemote()'s own comment).
+  private canvasScreenHal?: CanvasScreenHal;
+
+  // TERMINAL (147): the in-process simulated board a connected session
+  // controls, and the terminal-role decoder rendering its output through
+  // `canvasScreenHal` above. `undefined` until the first TERMINAL call;
+  // persists across a Ctrl+Escape disconnect so reconnecting resumes the
+  // same session rather than rebooting it (see connectToRemote()).
+  private remoteBoard?: RemoteBoard;
+  private remoteTerminal?: RemoteTerminal;
+  // Whether tick()/handleKeyEvent currently route to the board instead of
+  // this.machine — plain field, not a signal: purely internal routing
+  // state, nothing in the template reads it (same category as pumping).
+  private connectedToRemote = false;
 
   // M9 (WebMCP): fed by registered tools' execute() handlers, merged
   // with keyboard input via Machine's own CompositeChannel wiring
@@ -235,9 +254,9 @@ export class App implements AfterViewInit, OnDestroy {
    * rather than empty. */
   private constructMachine(bootProject?: string): void {
     const storageHal = createLocalStorageHalIfSupported();
-    const canvasScreenHal = this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined;
+    this.canvasScreenHal = this.offscreenCtx ? new CanvasScreenHal(this.offscreenCtx) : undefined;
     this.machine = new Machine({
-      screenHal: canvasScreenHal,
+      screenHal: this.canvasScreenHal,
       storageHal,
       timingHal: PERFORMANCE_TIMING_HAL,
       remoteChannel: this.remoteChannel,
@@ -247,7 +266,7 @@ export class App implements AfterViewInit, OnDestroy {
     // (FONT-BASE sysvar) on every blit, but it's constructed before the
     // Machine that owns that arena — attach() supplies the reference
     // now that one exists, before anything can possibly blitGlyph().
-    canvasScreenHal?.attach(this.machine.arena, this.machine.sysvars);
+    this.canvasScreenHal?.attach(this.machine.arena, this.machine.sysvars);
     // Zone-wrapped (unlike the original inline ngAfterViewInit code) since
     // this also runs from tick()'s 'cold' branch, which is already
     // outside the Angular zone — signals set from there need an explicit
@@ -312,6 +331,62 @@ export class App implements AfterViewInit, OnDestroy {
     await this.loadVocabularyAndStartRepl();
   }
 
+  /** TERMINAL (rebel-opcodes.json 147, `tick()`'s `'terminal'` status):
+   * connects this session to `this.remoteBoard` — building it (and its
+   * `RemoteTerminal` decoder) the first time, or just resuming an
+   * already-running one on a reconnect after Ctrl+Escape (see the class
+   * field comments for why it persists). The two `ByteSink`s below close
+   * over `this.remoteBoard`/`this.remoteTerminal` rather than local
+   * variables — unlike the engine's own loopback test harness (which
+   * closes over `let` variables only assigned *after* `new RemoteBoard()`
+   * returns), reading `this.*` fields is safe the moment `board.start()`
+   * runs below, since both fields are already assigned by then (ordinary
+   * sequential statements, not nested inside either constructor's own
+   * call stack) — no reentrancy hazard. */
+  private async connectToRemote(): Promise<void> {
+    if (!this.remoteBoard) {
+      const boardSink: ByteSink = { writeBytes: (b) => this.remoteTerminal?.receiveBytes(b) };
+      const terminalSink: ByteSink = { writeBytes: (b) => this.remoteBoard?.receiveBytes(b) };
+      // Reuses this.canvasScreenHal — the SAME instance the local machine
+      // already attached to its own arena/FONT bank. That's enough:
+      // BoardScreenHal (remote-board.ts) never reads glyph pixels, only
+      // forwards charCode numbers over the wire, so only the terminal
+      // side's already-loaded font ever matters for rendering — no
+      // separate Arena/FONT bank needed for the board (REMOTE-TERMINAL.md
+      // §7's own suggestion, made unnecessary here by already having a
+      // live local Machine with a real font loaded).
+      this.remoteTerminal = new RemoteTerminal(terminalSink, 80, 60, this.canvasScreenHal);
+      this.remoteBoard = new RemoteBoard(boardSink, { headless: true, screenCols: 80, screenRows: 60 });
+      await this.loadSystemVocabulary(this.remoteBoard.machine);
+      this.zone.runOutsideAngular(() => {
+        this.remoteBoard!.machine.interpret('VERSION');
+        this.remoteBoard!.machine.startRepl();
+      });
+      this.remoteBoard.start();
+    }
+    // Repaints the board's actual current CHAR-bank content onto the
+    // shared canvas — essential on a reconnect (the canvas currently
+    // shows whatever the local machine last drew while disconnected);
+    // a harmless near-duplicate of the board's own just-ran boot cls()
+    // on a fresh connect.
+    this.remoteBoard!.machine.screen.redrawAll();
+    this.connectedToRemote = true;
+    this.wake();
+  }
+
+  /** Ctrl+Escape (`handleKeyEvent`): returns keyboard/rendering control to
+   * the local machine. The board itself is left running, untouched — see
+   * the class field comments for why (persists across disconnect). */
+  private disconnectFromRemote(): void {
+    this.connectedToRemote = false;
+    // Restores the canvas to the local machine's own actual content,
+    // undoing the board's last-drawn pixels left on the shared offscreen
+    // canvas (same Screen.redrawAll() connectToRemote() uses, the other
+    // direction).
+    this.machine.screen.redrawAll();
+    this.wake();
+  }
+
   // Fetched relative to <base href> — public/system.fth is copied to
   // the build root by angular.json's assets glob, same as
   // manifest.webmanifest/favicon.ico already are, so this resolves
@@ -325,7 +400,7 @@ export class App implements AfterViewInit, OnDestroy {
   // way registerWebMcpTools() is — a broken system vocabulary is a bug
   // in *our* source, not a missing browser feature, and should fail
   // loudly rather than silently boot without WORDS/SEE.
-  private async loadSystemVocabulary(): Promise<void> {
+  private async loadSystemVocabulary(machine: Machine = this.machine): Promise<void> {
     const response = await fetch('system.fth');
     if (!response.ok) {
       throw new Error(`failed to fetch system.fth: ${response.status} ${response.statusText}`);
@@ -333,7 +408,7 @@ export class App implements AfterViewInit, OnDestroy {
     const text = await response.text();
     this.zone.runOutsideAngular(() => {
       for (const line of text.split('\n')) {
-        this.machine.interpret(line);
+        machine.interpret(line);
       }
     });
   }
@@ -422,12 +497,27 @@ export class App implements AfterViewInit, OnDestroy {
       }
       return;
     }
+    // TERMINAL's escape chord (rebel-opcodes.json 147) — the classic
+    // telnet/SSH "drop out of a remote session" convention. Only ever
+    // disconnects; pressing it while not connected is a no-op. Checked on
+    // both keydown/keyup, same reasoning as the monitor toggle above.
+    if (e.ctrlKey && e.code === 'Escape') {
+      e.preventDefault();
+      if (pressed && this.connectedToRemote) {
+        this.disconnectFromRemote();
+      }
+      return;
+    }
     const usageCode = codeToUsage(e.code);
     if (usageCode === undefined) {
       return;
     }
     e.preventDefault();
-    this.machine.keyboard.pushRawEvent(usageCode, pressed);
+    if (this.connectedToRemote) {
+      this.remoteTerminal!.sendKeyEvent(usageCode, pressed);
+    } else {
+      this.machine.keyboard.pushRawEvent(usageCode, pressed);
+    }
     this.wake();
   }
 
@@ -828,6 +918,17 @@ export class App implements AfterViewInit, OnDestroy {
   // not OPFS) — they run to completion inside a single step() call like
   // any other word, no separate suspend/resume phase to gate on here.
   private readonly tick = (): void => {
+    // TERMINAL (147): while connected, the board's Machine is what gets
+    // stepped/drawn each frame — the local machine is simply never
+    // step()-ped during this time (freezing it needs no separate
+    // mechanism, it falls out of this branch never reaching the body
+    // below), so there's no risk of local and board output interleaving
+    // on the shared canvas. See tickRemote()'s own comment for why no
+    // monitor-panel diffing happens on this path.
+    if (this.connectedToRemote) {
+      this.tickRemote();
+      return;
+    }
     let status: StepStatus | undefined;
     try {
       if (this.pausedWord() === undefined) {
@@ -844,6 +945,23 @@ export class App implements AfterViewInit, OnDestroy {
       // mistake. Nothing left to drive the page with; surface it loudly.
       this.pumping = false;
       console.error('Rebel-Sim REPL loop crashed', e);
+      return;
+    }
+    if (status === 'terminal') {
+      // TERMINAL (rebel-opcodes.json 147): connecting is async (fetching
+      // system.fth for the board the first time) — connectToRemote()
+      // itself flips connectedToRemote and calls wake() once ready. This
+      // tick() call itself is ending the RAF chain right here (no
+      // trailing requestAnimationFrame below, same as the cold/restart-
+      // project branches above) without ever having gone through the
+      // normal "stop pumping" exit path further down — pumping must be
+      // reset here for the same reason resetUiSnapshotsForReboot() resets
+      // it for those two branches: wake()'s own "if not already pumping"
+      // guard would otherwise treat the stale `true` left over from this
+      // still-running frame as "a chain is already scheduled" and
+      // silently skip rescheduling one, permanently starving the pump.
+      this.pumping = false;
+      void this.connectToRemote();
       return;
     }
     if (status === 'cold') {
@@ -955,6 +1073,52 @@ export class App implements AfterViewInit, OnDestroy {
     }
     requestAnimationFrame(this.tick);
   };
+
+  /** `tick()`'s connected-to-board counterpart (TERMINAL, 147). Much
+   * smaller than the local body above: the board's `PLOT_CHAR`/`CLEAR`
+   * frames already painted the shared `offscreen` canvas in real time
+   * via `canvasScreenHal` (reused, `connectToRemote()`), so the one
+   * shared `drawImage` present step is all the rendering this needs — no
+   * separate render path. Deliberately doesn't diff/update the stack/
+   * dictionary/banks/sysvars monitor panels (they keep showing the local
+   * machine's last, frozen state while connected) — a named
+   * simplification for this pass, not silently dropped. */
+  private tickRemote(): void {
+    let status: StepStatus | undefined;
+    try {
+      status = this.remoteBoard!.machine.step(App.STEP_BUDGET);
+    } catch (e) {
+      this.pumping = false;
+      console.error('Rebel-Sim remote board crashed', e);
+      return;
+    }
+    if (status === 'cold' || status === 'restart-project') {
+      // Rebuilding just the board, not the local machine — same "throw
+      // this one away" shape performBoot() uses for local COLD/RESTORE,
+      // scoped to the board only. 'restart-project' can't actually occur
+      // in practice today (the board has no storageHal, so RESTORE never
+      // finds a saved-size mismatch to trigger it) but is handled the
+      // same way defensively rather than left to fall through unhandled.
+      this.remoteBoard = undefined;
+      this.remoteTerminal = undefined;
+      // Same reason the local 'terminal' branch above resets this before
+      // its own async call — this frame's RAF chain ends right here, so
+      // connectToRemote()'s later wake() needs a truthful `false` to
+      // actually reschedule one instead of silently no-op-ing.
+      this.pumping = false;
+      void this.connectToRemote();
+      return;
+    }
+    if (this.presentCtx) {
+      const canvas = this.screenRef.nativeElement;
+      this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
+    }
+    if (status !== 'more-to-run') {
+      this.pumping = false;
+      return;
+    }
+    requestAnimationFrame(this.tick);
+  }
 }
 
 function arraysEqual<T>(a: readonly T[], b: readonly T[]): boolean {

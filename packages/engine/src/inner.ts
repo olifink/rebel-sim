@@ -88,6 +88,7 @@ const SLIT_TOKEN = opcodes.primitives.find((p) => p.name === '(SLIT)')!.id;
 const EXECUTE_TOKEN = opcodes.primitives.find((p) => p.name === 'EXECUTE')!.id;
 const COLD_TOKEN = opcodes.primitives.find((p) => p.name === 'COLD')!.id;
 const RESTORE_TOKEN = opcodes.primitives.find((p) => p.name === 'RESTORE')!.id;
+const TERMINAL_TOKEN = opcodes.primitives.find((p) => p.name === 'TERMINAL')!.id;
 
 /** Not a valid arena offset (offsets are unsigned), so it's safe as the
  * return-stack sentinel meaning "top-level call, stop when popped." */
@@ -98,7 +99,7 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold' | 'restart-project';
+export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
 
 export class Inner {
   /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
@@ -278,6 +279,17 @@ export class Inner {
       // actual reconstruction; this token never reaches executePrimitive,
       // same shape as ACCEPT/EXECUTE below.
       yield 'cold';
+      return;
+    }
+    if (token === TERMINAL_TOKEN) {
+      // TERMINAL (rebel-opcodes.json 147): connecting to a target board
+      // is entirely host-level orchestration (constructing/reaching a
+      // board over whatever transport this target actually has) — same
+      // "this dispatcher and executePrimitive can't do it" shape as
+      // COLD/RESTORE above, and just as with COLD, no payload is needed
+      // on the signal itself (nothing further to consume from the input
+      // line). Never reaches executePrimitive.
+      yield 'terminal';
       return;
     }
     if (token === RESTORE_TOKEN) {
