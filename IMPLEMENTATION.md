@@ -4284,6 +4284,58 @@ TS-only grep that missed it the first time) updated 28→36 alongside the
 TS-side change, not after. *Implementation:* `mmap.ts`, `repl.ts`,
 `app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth`.
 
+### 1.79 `BANK-SIZE` becomes `IMMEDIATE`, dual-mode — same fix as §1.65's `BANK@` (M67)
+
+Found by Oliver trying `: FOO BANK-SIZE SYSV ;` — it aborted at compile
+time with `unrecognized word: SYSV`, the identical failure §1.65
+diagnosed for `BANK@`, and for the identical reason: `BANK-SIZE` (144)
+was a plain, non-`IMMEDIATE` primitive, so `interpretCompiling`
+compiled a call to it and moved straight on to its own next token
+(`SYSV`), trying to look that up as an ordinary word right there at
+compile time — long before `FOO` itself could ever run and give
+`BANK-SIZE`'s own `nextInputToken()` call a chance to consume it.
+
+`BANK-SIZE` was added (M50, §1.62) as `BANK@`'s read-only counterpart
+and has shared its parsed-word/name-lookup mechanics ever since, but
+M53's `IMMEDIATE` fix was applied only to `BANK@` at the time — nobody
+had tried compiling `BANK-SIZE` into a definition yet, so the identical
+latent bug in its own dispatch case went unnoticed until now.
+
+**Fix: identical to `BANK@`'s (case 99), applied to `BANK-SIZE` (case
+144)** — `IMMEDIATE`, dual-mode on `STATE`, baking in a resolved `LIT`
+value (the bank's `size` rather than its `base`):
+
+```ts
+const name = ctx.nextInputToken().toUpperCase();
+const bank = ctx.banks.findBankByName(name);
+if (bank === undefined) {
+  throw new Error(`unknown bank: ${name}`);
+}
+if (ctx.sysvars.getState() === -1) {
+  compileCell(ctx, findWord(ctx, 'LIT')!.cfa);
+  compileCell(ctx, bank.size);
+} else {
+  s.push(bank.size);
+}
+```
+
+Same tradeoff as `BANK@`'s, stated up front rather than rediscovered:
+the size gets baked in once, at the *defining* line's own compile time
+— correct for any bank already created and stable when the word
+compiling it is defined, stale if that bank is later resized
+(`BANK-RESIZE`, §1.66) or dropped and recreated afterward. Interactive
+use (`BANK-SIZE SYSV`, `BANKS`' own internals) is observably identical
+either way — only the compiled-into-a-definition case changes, from
+"doesn't work" to "works."
+
+*Implementation:* `primitives.ts` (case 144), `rebel-opcodes.json`
+(token 144's `immediate` flag + note). *Spec:* `02-MEMORY-MODEL.md`
+§4.7 (the `IMMEDIATE`/dual-mode requirement now stated for both
+`BANK@` and `BANK-SIZE`), `04-FORTH-CORE.md` §5.3 (`BANK-SIZE` added
+alongside `BANK@` to the "baked into the definition" list). *Tests:*
+`bank-access.test.ts`'s new "`BANK-SIZE` compiled into a definition"
+suite, mirroring `BANK@`'s M53 suite.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4457,5 +4509,6 @@ exactly as it would be on the bare-metal target.
 | **M64** | `REMOTE-TERMINAL.md`'s wire protocol + a software loopback harness (§1.76), Oliver's idea: validates the design before real RP2350 hardware exists. Three new files, no existing engine file touched: `remote-terminal-protocol.ts` (framing/checksum/`FrameDecoder` resync, per-message codec, §3/§4), `remote-board.ts` (the "board" role, §8: `BoardScreenHal implements ScreenHal` serializes to the wire instead of drawing; `RemoteBoard` wraps a real `Machine` via existing `MachineOptions.screenHal`/`personality`, no engine changes needed), `remote-terminal.ts` (the "terminal" role, §7, scoped down: a shadow `{charCode,ink,paper}` grid, no `Machine`/`Arena`/real pixel rendering — deferred until real `CanvasScreenHal` wiring happens). A real reentrancy bug found and fixed this session: `HELLO`-sending moved out of `RemoteBoard`'s constructor into an explicit `start()`, since a fully-synchronous two-role harness has the terminal's `HELLO_ACK` reply try to reach a `board` variable that isn't assigned until the constructor returns — confirmed harmless that this means `Machine`'s own unconditional boot-time `Screen.cls()` now fires (and its `CLEAR` frame lands) before `HELLO`, since `RemoteTerminal` ignores screen frames until its own `HELLO` handling has sized the shadow grid. Message-ID table stays hand-coded, not JSON-driven (§9's own deferred stance — no second consumer exists yet). `packages/app`/`navigator.serial` wiring (§7's actual UI) explicitly out of scope, confirmed with Oliver — `REMOTE-TERMINAL.md` §0 updated with a status note distinguishing what's now implemented from what's still design-only. | `remote-terminal-protocol.ts`, `remote-board.ts`, `remote-terminal.ts`, `remote-terminal-protocol.test.ts`, `remote-terminal-loopback.test.ts`, `REMOTE-TERMINAL.md` |
 | **M65** | `TERMINAL`: a hands-on connection to a simulated board (§1.77), Oliver's idea. New portable HAL-level primitive (147), confirmed cross-target from the start (real targets implement it later via their own transport) — follows `COLD`/`RESTORE`'s exact host-signal plumbing (`inner.ts` dispatch()-level token check, a new `'terminal'` `StepSignal`, no payload). `app.ts`'s `connectToRemote()` builds a `RemoteBoard`/`RemoteTerminal` pair (persists across disconnect), reusing the already-attached `canvasScreenHal` as the render target; `tick()` branches to a new `tickRemote()` while connected, freezing the local machine for free; Ctrl+Escape disconnects. A real bug found and fixed via a failing `app.spec.ts` test (isolated with `it.only` + temporary diagnostics): the `'terminal'`/board-`'cold'` branches didn't reset `this.pumping` before their async call, permanently starving the RAF pump after connecting (`wake()`'s "already pumping" guard silently no-opped forever) — fixed by resetting it first, mirroring `resetUiSnapshotsForReboot()`. `RemoteTerminal` gained an optional `hal?: ScreenHal` param (no cursor-specific logic needed — no separate cursor HAL primitive exists anywhere in this codebase). Verified live in a real browser: `TERMINAL`, board banner/prompt appear, typed a line, Ctrl+Escape, reconnected and confirmed the board's session resumed rather than rebooting. | `rebel-opcodes.json`, `inner.ts`, `repl.ts`, `primitives.ts`, `remote-terminal.ts`, `index.ts`, `app.ts`, `app.spec.ts`, `terminal.test.ts`, `remote-terminal-loopback.test.ts`, `REMOTE-TERMINAL.md` |
 | **M66** | `Personality` gains `INK`/`PAPER` (§1.78), Oliver's idea: a `TERMINAL`-connected board booting into a deliberately different color scheme (yellow-on-blue, palette indices 6/1) than local's green-on-black is a cheap, immediate visual "different machine" signal. `MMAP`'s header grows a third time, 28→36 bytes; `DEFAULT_PERSONALITY` gains `ink: 4, paper: 0` (replacing `repl.ts`'s now-removed `DEFAULT_INK`/`DEFAULT_PAPER` constants, unchanged default-boot colors). `HEADER_VERSION` bumped 2→3. `system.fth`'s `MMAP-HDR` constant updated 28→36 alongside the TS-side change this time, not after (§1.75's own hidden-bug lesson applied). Verified live: connecting via `TERMINAL` now visibly repaints the canvas, Ctrl+Escape snaps straight back. | `mmap.ts`, `repl.ts`, `app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth` |
+| **M67** | `BANK-SIZE` (§1.79) becomes `IMMEDIATE` and dual-mode on `STATE`, same fix as M53's `BANK@`, found by Oliver trying `: FOO BANK-SIZE SYSV ;` — a plain non-`IMMEDIATE` `BANK-SIZE` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, identical to `BANK@`'s M53 bug. Bakes in a resolved `LIT` size rather than raw text, same `S"`/`."` STATE-dispatch pattern `BANK@` already uses. Interactive behavior (`BANK-SIZE SYSV`) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
