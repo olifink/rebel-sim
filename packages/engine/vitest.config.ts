@@ -12,8 +12,18 @@ export default defineConfig({
     // parallel CPU contention, was measured tripping the 5000ms default
     // (control-flow.test.ts, then empty.test.ts, on separate runs — the
     // failure moves around, it isn't one specific test's own fault).
-    // 20s is generous headroom for several bootMachine() calls under
-    // load without masking a genuine hang.
-    testTimeout: 20_000,
+    // 20s was generous headroom for several bootMachine() calls under
+    // load without masking a genuine hang -- until M68's GRAPHICS
+    // vocabulary (system.fth) added ~34 more dictionary entries (LINE/
+    // RECT/CIRCLE and their internal state VARIABLEs). Every one of
+    // those definitions' own word references pays the same O(dictionary
+    // -size) FIND chain-walk this comment already describes, and there
+    // are now more entries to walk past -- several screen-editor tests
+    // (EDITOR, a separate vocabulary branching the same way GRAPHICS
+    // does) started tripping the old 20s ceiling under full-suite
+    // parallel contention, not from any bug in either vocabulary. 40s
+    // is the same fix M48 already applied once for the same underlying
+    // reason, just doubled again rather than re-litigated.
+    testTimeout: 40_000,
   },
 });

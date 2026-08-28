@@ -66,12 +66,25 @@ project a self-contained contract; it does not design its internals.
 
 Rebel-Sim already renders Forth's screen output through a small,
 arena-decoupled HAL interface (`ScreenHal`, `packages/engine/src/
-screen.ts:20-26`) with exactly two calls: `blitGlyph(col, row, charCode,
-ink, paper)` and `clearScreen(paper)`. Every visible thing the *local*
-interpreter draws — text, cursor, `CLS` — goes through those two calls
-and nothing else; there is no separate framebuffer/pixel HAL implemented
-anywhere in this codebase yet (`spec/01-HAL.md` §3.4's optional raw-pixel
-functions are unimplemented on every target).
+screen.ts`). At the time this document was first written, that
+interface had exactly two calls, `blitGlyph(col, row, charCode, ink,
+paper)` and `clearScreen(paper)`, and no raw-pixel HAL existed anywhere
+in this codebase (`spec/01-HAL.md` §3.4's optional raw-pixel functions
+were unimplemented on every target). **That second half is no longer
+true**: M68 (`IMPLEMENTATION.md` §1.80) added `drawPixel`/`readPixel` to
+`ScreenHal` and a `GRAPHICS` Forth vocabulary (`PLOT`/`POINT`/`LINE`/
+`RECT`/`CIRCLE`/...) built on them — but only for the *local*
+interpreter's own screen. Nothing below in this document changes as a
+result: this protocol still only carries `blitGlyph`/`clearScreen`
+equivalents (`PLOT_CHAR`/`CLEAR`, §4), and `BoardScreenHal`
+(`remote-board.ts`) — the "board" role's `ScreenHal` implementation —
+still implements `drawPixel`/`readPixel` as inert no-ops (there is no
+wire message to carry a raw pixel op, per §10 item 3 below), so a
+program using `GRAPHICS` while connected via `TERMINAL` draws nothing
+remotely even though the same program works fine locally. Every visible
+thing the *local* interpreter's text/cursor/`CLS` path draws still goes
+through `blitGlyph`/`clearScreen` alone, which is the only part of
+`ScreenHal` this protocol was ever designed to mirror.
 
 That gives this design its central choice: **forward at the char-cell
 HAL level, not raw pixels.** Concretely, this means:
@@ -102,12 +115,19 @@ HAL level, not raw pixels.** Concretely, this means:
 
 The tradeoff, named plainly rather than glossed over: this protocol
 **cannot show raw graphics** (sprites, lines, filled rects below
-char-cell granularity) until a raw-pixel HAL surface exists on both sides
-— today it doesn't, on either. That's a real limitation, and it's a
-deliberate one: building the pixel-level version now would mean designing
-a HAL surface neither side has, in a spec nobody's implemented against
-yet. §10 names it as a future extension rather than pretending it's
-solved here.
+char-cell granularity) over the wire, even though — as of M68 — a
+raw-pixel HAL surface now exists locally on Rebel-Sim's own side
+(`ScreenHal.drawPixel`/`readPixel`, the `GRAPHICS` vocabulary). That
+local existence doesn't close the gap this section originally named:
+nothing about M68 touched this protocol, `BoardScreenHal`, or
+`RemoteTerminal` — there is still no wire message carrying a raw pixel
+op, and a real RP2350 board's own firmware has no HAL surface of its
+own to route `GRAPHICS`-vocabulary drawing through in the first place.
+Extending this protocol to carry `PLOT`/`POINT`-equivalent frames is
+a smaller step now than it was when this section was first written
+(one side already has a concrete `hal_draw_pixel`/`hal_read_pixel`
+implementation to mirror), but it's still real, undesigned work — §10
+names it as a future extension rather than pretending it's solved here.
 
 ---
 
@@ -497,8 +517,11 @@ ignored:
    redraw) — open.
 3. **Raw-pixel graphics extension.** A `hal_draw_*`-equivalent message
    family (pixel/line/rect) is explicitly out of scope for this protocol
-   version — it would need its own message-ID range and its own HAL
-   surface on both sides (§1), not a redesign of what's here.
+   version — it would need its own message-ID range (§1: Rebel-Sim's own
+   side now has a concrete `hal_draw_pixel`/`hal_read_pixel` to mirror,
+   M68, but nothing on the wire or on `BoardScreenHal` carries it, and a
+   real board's own firmware still has no HAL surface of its own to route
+   it through), not a redesign of what's here.
 4. **Char-cell size negotiation beyond the fixed 8×8 v1 constraint** —
    open, and tied directly to Sim's font source being local-only (§5);
    solving it means either negotiable rendering or a font-transfer

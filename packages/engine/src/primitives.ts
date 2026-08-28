@@ -1158,6 +1158,20 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     // (132) above: connecting to a target board is host-level orchestration
     // (packages/app's app.ts), not anything this switch can do.
 
+    case 148: { // PLOT ( x y -- ) M68: the one primitive GRAPHICS is built on
+      const y = s.pop();
+      const x = s.pop();
+      ctx.screen.plot(x, y);
+      break;
+    }
+
+    case 149: { // POINT ( x y -- color ) M68
+      const y = s.pop();
+      const x = s.pop();
+      s.push(ctx.screen.point(x, y));
+      break;
+    }
+
     default:
       throw new Error(`unknown primitive token ${tokenId}`);
   }

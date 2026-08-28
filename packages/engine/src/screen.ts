@@ -23,11 +23,30 @@ export interface ScreenHal {
   blitGlyph(col: number, row: number, charCode: number, ink: number, paper: number): void;
   /** Clears the whole framebuffer to `paper` (CScreenModule::Cls). */
   clearScreen(paper: number): void;
+  /** Sets one framebuffer pixel to a raw `0xRRGGBB` color — spec/01-HAL.md
+   * §3.4's `hal_draw_pixel`. Framebuffer-only: never touches CHAR/ATTR or
+   * the character grid, and (like `PALETTE-BASE`'s color-resolution rule,
+   * §3.6) never gets any palette awareness — `color` is always a literal
+   * truecolor value here, even while a palette is active for character
+   * writes. `x`/`y` are already bounds-checked by `Screen.plot()` before
+   * this is called, same contract as `blitGlyph`'s col/row. */
+  drawPixel(x: number, y: number, color: number): void;
+  /** Reads one framebuffer pixel back as a raw `0xRRGGBB` color —
+   * spec/01-HAL.md §3.4's `hal_read_pixel`, added alongside
+   * `hal_draw_pixel` for the classic PLOT/POINT pairing. Optional at the
+   * cross-target HAL contract level (a target with no readback path, or
+   * no display at all, may always return a fixed sentinel); `x`/`y` are
+   * already bounds-checked by `Screen.point()`. */
+  readPixel(x: number, y: number): number;
 }
 
 export const NULL_SCREEN_HAL: ScreenHal = {
   blitGlyph(): void {},
   clearScreen(): void {},
+  drawPixel(): void {},
+  readPixel(): number {
+    return -1;
+  },
 };
 
 const SPACE = 32;
@@ -41,6 +60,8 @@ const FALSE = 0;
 export class Screen {
   readonly cols: number;
   readonly rows: number;
+  readonly pixelWidth: number;
+  readonly pixelHeight: number;
 
   constructor(
     private readonly arena: Arena,
@@ -54,6 +75,8 @@ export class Screen {
     // deferred" applies here too), so these are effectively boot-fixed.
     this.cols = sysvars.get('SCREEN', 'CHAR-COLS');
     this.rows = sysvars.get('SCREEN', 'CHAR-ROWS');
+    this.pixelWidth = sysvars.get('SCREEN', 'SCREEN-WIDTH');
+    this.pixelHeight = sysvars.get('SCREEN', 'SCREEN-HEIGHT');
   }
 
   private charAddress(col: number, row: number): number {
@@ -68,6 +91,10 @@ export class Screen {
 
   private inBounds(col: number, row: number): boolean {
     return col >= 0 && col < this.cols && row >= 0 && row < this.rows;
+  }
+
+  private pixelInBounds(x: number, y: number): boolean {
+    return x >= 0 && x < this.pixelWidth && y >= 0 && y < this.pixelHeight;
   }
 
   /** spec/01-HAL.md §3.6's color-resolution rule, the one rule both
@@ -331,6 +358,45 @@ export class Screen {
         this.redrawCursorAt(col, row, inverted);
       }
     }
+  }
+
+  /** PLOT — sets one raw framebuffer pixel to `ink` (default: the current
+   * INK sysvar, GRAPHICS' PLOT/system.fth's classic-BASIC-style implicit
+   * color convention — see `system.fth`'s GRAPHICS vocabulary). Pixel
+   * space, not character-cell space: bounds-checked against
+   * `pixelWidth`/`pixelHeight`, not `cols`/`rows`. Out-of-range
+   * coordinates are silently ignored, same convention as `writeChar`.
+   *
+   * `ink` is resolved through the active palette exactly like
+   * `writeChar`'s ink/paper (spec/01-HAL.md §3.6) — required, not
+   * optional, since M62 boots with the default palette already active
+   * (this file's own DEFAULT_PALETTE note): the raw INK sysvar value at
+   * boot is the *index* `4`, not literal green, so skipping resolution
+   * here would make a default-configuration `PLOT` silently draw
+   * near-black pixels (`0x000004`) the first time anyone tries it. This
+   * does **not** give `hal.drawPixel` itself any palette awareness
+   * (spec/01-HAL.md §3.4/§3.6's actual rule, and `ScreenHal.drawPixel`'s
+   * own doc comment): resolution happens here, once, before the call —
+   * the HAL still only ever receives a literal, already-resolved
+   * `0xRRGGBB` value, never an index or a palette reference. */
+  plot(x: number, y: number, ink: number = this.getInk()): void {
+    if (!this.pixelInBounds(x, y)) {
+      return;
+    }
+    this.hal.drawPixel(x, y, this.resolveColor(ink, this.getPaletteBase()));
+  }
+
+  /** POINT — reads one raw framebuffer pixel back. Out-of-range
+   * coordinates return `-1`, a sentinel no legitimate `0xRRGGBB` value
+   * can produce — the pixel-space counterpart of `readChar`'s
+   * out-of-range space, chosen instead of reusing 0 (a real, plottable
+   * color: black) specifically so "nothing there" is never
+   * indistinguishable from "black was plotted there." */
+  point(x: number, y: number): number {
+    if (!this.pixelInBounds(x, y)) {
+      return -1;
+    }
+    return this.hal.readPixel(x, y);
   }
 
   /** Reads one row as a plain string — a diagnostics/test convenience,

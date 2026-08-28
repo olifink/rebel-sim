@@ -213,6 +213,7 @@ HAL expects, unmodified, end to end.
 
 ```c
 void hal_draw_pixel(uint32_t x, uint32_t y, uint32_t color);
+uint32_t hal_read_pixel(uint32_t x, uint32_t y);
 void hal_draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t color);
 void hal_draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 void hal_draw_rect_outline(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
@@ -223,6 +224,27 @@ with the character grid or cursor. **OPTIONAL**: a target with no
 graphics-capable display MAY omit these, or provide no-op stubs, or
 route them to a serial diagnostic console instead. Where provided, `x`/
 `y` are pixel coordinates, independent of the character-cell grid.
+
+`hal_draw_pixel`/`hal_read_pixel` are the classic PLOT/POINT pairing —
+`hal_read_pixel` reads one pixel back as whatever `hal_draw_pixel`
+would have written there. A target providing `hal_draw_pixel` but with
+no cheap readback path (e.g. write-only display memory, or a
+framebuffer not addressable for reads) MAY implement `hal_read_pixel`
+as an always-failing stub (Rebel-Sim's own convention: return a
+sentinel no legitimate color value can produce, rather than a
+plottable color like `0`) — the two are independently optional, not a
+package deal.
+
+`color` at this boundary is always a literal, already-resolved value —
+never a palette index and never `hal_draw_pixel`'s caller's problem to
+resolve. `hal_draw_line`/`hal_draw_rect`/`hal_draw_rect_outline` are
+named here as an optional acceleration path for a target whose display
+hardware can draw them faster than a portable per-pixel loop; a
+conformant portable Forth layer MUST NOT assume they exist — line/
+rect/circle drawing built from `hal_draw_pixel` alone (Rebel-Sim's
+GRAPHICS vocabulary, `system.fth`) MUST remain fully correct on a
+target that implements only `hal_draw_pixel`/`hal_read_pixel` and
+nothing else in this section.
 
 ### 3.5 Optional: visible text cursor
 
@@ -1008,7 +1030,7 @@ somewhere, not before:
 |---|---|---|---|
 | `hal_blit_glyph` | A (target implements) | **REQUIRED** if display-capable | Screen §3.3 |
 | `hal_clear_screen` | A | **REQUIRED** if display-capable | Screen §3.3 |
-| `hal_draw_pixel`/`line`/`rect`/`rect_outline` | A | OPTIONAL | Screen §3.4 |
+| `hal_draw_pixel`/`read_pixel`/`line`/`rect`/`rect_outline` | A | OPTIONAL | Screen §3.4 |
 | `PAL`/`ATTR` banks + `PALETTE-BASE` field | data/bank | **REQUIRED** if display-capable | Screen §3.6, `02-MEMORY-MODEL.md` §4.6 |
 | `keyboard_push_raw_event` | B (target calls in) | **REQUIRED** if input-capable | Keyboard §4.2 |
 | `keyboard_has_event` / `keyboard_read_event` | portable | n/a — never reimplement | Keyboard §4.3 |

@@ -65,6 +65,8 @@ describe('remote-terminal loopback: RemoteBoard <-> RemoteTerminal over an in-me
     const hal: ScreenHal = {
       blitGlyph: (col, row, charCode, ink, paper) => blits.push([col, row, charCode, ink, paper]),
       clearScreen: (paper) => clears.push(paper),
+      drawPixel: () => {},
+      readPixel: () => -1,
     };
     const { board, terminal } = connect({ headless: false, screenCols: 10, screenRows: 5 }, hal);
 

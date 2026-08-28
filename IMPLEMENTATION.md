@@ -4336,6 +4336,81 @@ alongside `BANK@` to the "baked into the definition" list). *Tests:*
 `bank-access.test.ts`'s new "`BANK-SIZE` compiled into a definition"
 suite, mirroring `BANK@`'s M53 suite.
 
+### 1.80 `GRAPHICS` vocabulary: `PLOT`/`POINT` primitives, LINE/RECT/CIRCLE in pure Forth (M68)
+
+Two new primitives, `PLOT` (148, `x y --`) and `POINT` (149, `x y --
+color`) — the classic Sinclair-BASIC-style pixel pair, and the only new
+native surface this needed. `PLOT` calls `Screen.plot()`
+(`screen.ts`), which resolves the current `INK` sysvar through the
+active palette exactly like `writeChar` does before calling
+`ScreenHal.drawPixel` (spec `01-HAL.md` §3.4's `hal_draw_pixel`) — this
+turned out not to be optional: M62 boots with the default palette
+already active, so the raw `INK` sysvar value at boot is the palette
+*index* `4`, not literal green, and skipping resolution made a
+default-configuration `PLOT` draw near-black pixels the first time it
+was tried. `POINT` is the read-side counterpart (`ScreenHal.
+readPixel`, spec's new `hal_read_pixel`, added alongside
+`hal_draw_pixel` in this same pass); out-of-range coordinates return
+`-1` for both `Screen.point()` and `PLOT`'s own silent no-op, mirroring
+`CHAR@`'s out-of-range space convention with a sentinel no real
+`0xRRGGBB` value can produce. Both are bounds-checked against
+`SCREEN-WIDTH`/`SCREEN-HEIGHT` (pixel space), a new `Screen.
+pixelWidth`/`pixelHeight` pair cached at construction the same way
+`cols`/`rows` already are, not the character-cell grid.
+
+Everything else — `LINE` (Bresenham, plus a `LINE-WIDTH`-driven
+dominant-axis offset for a cheap thick-stroke approximation), `RECT`/
+`RECT-FILL`, and `CIRCLE`/`CIRCLE-FILL` (the classic midpoint circle
+algorithm — pure integer, no `SQRT` or trigonometry anywhere) — is pure
+Forth in a new `GRAPHICS` vocabulary (`system.fth`, branching off
+`FORTH` right after the `EDITOR` section closes, same `VOCABULARY`/
+`DEFINITIONS` idiom `EDITOR` itself uses), per `CLAUDE.md`'s "primitives
+only if absolutely necessary" rule. `ARC` and a `MATH` vocabulary
+(needed for testing whether a point falls inside an angular range, not
+for `CIRCLE` itself) are deliberately not built in this pass — named as
+follow-up work in `system.fth`'s own `GRAPHICS` section comment, not
+designed here.
+
+One sharp edge worth recording since it cost real debugging time: this
+codebase's `(` comment word consumes input up to the next *token that
+merely ends in* `)`, not up to a standalone `)` token (`consumeQuotedText`,
+`primitives.ts`). A comment referencing something like "token 148" as
+`(148)` — a nested, unspaced parenthetical aside — closes the comment
+early and dumps the rest of the sentence into the dictionary as live
+code; the first draft of `system.fth`'s `GRAPHICS` section did exactly
+this and broke `bootMachine()` for every test in the suite with a `DSTK
+stack underflow` (the leaked word `AND` executing against an empty
+stack), traced by interpreting `system.fth` one line at a time until the
+exact line surfaced. Every comment in `GRAPHICS` was rewritten
+paren-free to avoid it, and the section's own opening comment now
+documents the hazard for the next person adding one.
+
+Second, smaller effect: `GRAPHICS` adds roughly 34 dictionary entries
+(`LINE`/`RECT`/`CIRCLE` and their internal state `VARIABLE`s), and
+every one of their own word references pays the self-hosted
+`INTERPRET`'s usual O(dictionary-size) `FIND` chain-walk against a now-
+larger dictionary — the same cost model `vitest.config.ts`'s own
+comment already names. Several `EDITOR`-vocabulary tests (a separate,
+unrelated vocabulary branching the same way) started tripping the
+existing 20s `testTimeout` ceiling under full-suite parallel
+contention. Fixed the same way M48 already fixed the identical problem
+once before: doubled `testTimeout` to 40s, not a per-test workaround.
+
+*Implementation:* `screen.ts` (`ScreenHal.drawPixel`/`readPixel`,
+`Screen.plot`/`point`, `pixelWidth`/`pixelHeight`), `primitives.ts`
+(cases 148/149), `rebel-opcodes.json` (tokens 148/149),
+`canvas-screen-hal.ts` (real `drawPixel`/`readPixel` via
+`fillRect`/`getImageData`), `remote-board.ts` (`BoardScreenHal` gains
+no-op `drawPixel`/`readPixel` stubs — `REMOTE-TERMINAL.md`'s wire
+protocol has no raw-pixel message yet, §10 item 3), `system.fth` (the
+new `GRAPHICS` vocabulary). *Spec:* `01-HAL.md` §3.4 (`hal_read_pixel`
+added alongside `hal_draw_pixel`, both named as independently optional)
+and its §11 conformance table. *Tests:* `screen.test.ts`'s new
+"PLOT/POINT" suite (bounds-checking, palette resolution, HAL
+forwarding), `graphics.test.ts` (new — `LINE`/`RECT`/`CIRCLE` and their
+width/fill variants, exercised by loading real `system.fth` source via
+`bootMachine()`).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4510,5 +4585,6 @@ exactly as it would be on the bare-metal target.
 | **M65** | `TERMINAL`: a hands-on connection to a simulated board (§1.77), Oliver's idea. New portable HAL-level primitive (147), confirmed cross-target from the start (real targets implement it later via their own transport) — follows `COLD`/`RESTORE`'s exact host-signal plumbing (`inner.ts` dispatch()-level token check, a new `'terminal'` `StepSignal`, no payload). `app.ts`'s `connectToRemote()` builds a `RemoteBoard`/`RemoteTerminal` pair (persists across disconnect), reusing the already-attached `canvasScreenHal` as the render target; `tick()` branches to a new `tickRemote()` while connected, freezing the local machine for free; Ctrl+Escape disconnects. A real bug found and fixed via a failing `app.spec.ts` test (isolated with `it.only` + temporary diagnostics): the `'terminal'`/board-`'cold'` branches didn't reset `this.pumping` before their async call, permanently starving the RAF pump after connecting (`wake()`'s "already pumping" guard silently no-opped forever) — fixed by resetting it first, mirroring `resetUiSnapshotsForReboot()`. `RemoteTerminal` gained an optional `hal?: ScreenHal` param (no cursor-specific logic needed — no separate cursor HAL primitive exists anywhere in this codebase). Verified live in a real browser: `TERMINAL`, board banner/prompt appear, typed a line, Ctrl+Escape, reconnected and confirmed the board's session resumed rather than rebooting. | `rebel-opcodes.json`, `inner.ts`, `repl.ts`, `primitives.ts`, `remote-terminal.ts`, `index.ts`, `app.ts`, `app.spec.ts`, `terminal.test.ts`, `remote-terminal-loopback.test.ts`, `REMOTE-TERMINAL.md` |
 | **M66** | `Personality` gains `INK`/`PAPER` (§1.78), Oliver's idea: a `TERMINAL`-connected board booting into a deliberately different color scheme (yellow-on-blue, palette indices 6/1) than local's green-on-black is a cheap, immediate visual "different machine" signal. `MMAP`'s header grows a third time, 28→36 bytes; `DEFAULT_PERSONALITY` gains `ink: 4, paper: 0` (replacing `repl.ts`'s now-removed `DEFAULT_INK`/`DEFAULT_PAPER` constants, unchanged default-boot colors). `HEADER_VERSION` bumped 2→3. `system.fth`'s `MMAP-HDR` constant updated 28→36 alongside the TS-side change this time, not after (§1.75's own hidden-bug lesson applied). Verified live: connecting via `TERMINAL` now visibly repaints the canvas, Ctrl+Escape snaps straight back. | `mmap.ts`, `repl.ts`, `app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth` |
 | **M67** | `BANK-SIZE` (§1.79) becomes `IMMEDIATE` and dual-mode on `STATE`, same fix as M53's `BANK@`, found by Oliver trying `: FOO BANK-SIZE SYSV ;` — a plain non-`IMMEDIATE` `BANK-SIZE` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, identical to `BANK@`'s M53 bug. Bakes in a resolved `LIT` size rather than raw text, same `S"`/`."` STATE-dispatch pattern `BANK@` already uses. Interactive behavior (`BANK-SIZE SYSV`) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
+| **M68** | `GRAPHICS` vocabulary (§1.80): two new primitives, `PLOT`/`POINT` (148/149) — the classic PLOT/POINT pixel pair, `Screen.plot`/`point` resolving `INK` through the active palette before reaching `ScreenHal.drawPixel`/`readPixel` (spec `01-HAL.md` §3.4, `hal_read_pixel` newly added alongside `hal_draw_pixel`). Everything else — `LINE` (Bresenham, `LINE-WIDTH`-driven thick-stroke approximation), `RECT`/`RECT-FILL`, `CIRCLE`/`CIRCLE-FILL` (midpoint circle, no `SQRT`/trig) — is pure Forth in a new `GRAPHICS` vocabulary, `system.fth`, branching off `EDITOR`'s close per `CLAUDE.md`'s "primitives only if necessary" rule. `ARC`/a `MATH` vocabulary deliberately deferred. Hit the `(`-comment-closes-early footgun a fourth time (M46/M48 hit it before) via a nested `(148)`-style aside — every comment in the new section rewritten paren-free. `testTimeout` doubled to 40s (same fix as M48) once the bigger dictionary started tripping the old 20s ceiling on unrelated `EDITOR` tests under full-suite contention. | `screen.ts`, `primitives.ts`, `rebel-opcodes.json`, `canvas-screen-hal.ts`, `remote-board.ts`, `system.fth`, `01-HAL.md`, `screen.test.ts`, `graphics.test.ts`, `vitest.config.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

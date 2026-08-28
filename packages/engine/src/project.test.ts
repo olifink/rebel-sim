@@ -100,6 +100,8 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
     const screenHal: ScreenHal & { blitGlyph: ReturnType<typeof vi.fn> } = {
       blitGlyph: vi.fn(),
       clearScreen: vi.fn(),
+      drawPixel: vi.fn(),
+      readPixel: vi.fn(() => -1),
     };
     const m2 = new Machine({ storageHal: hal, screenHal });
     screenHal.blitGlyph.mockClear();

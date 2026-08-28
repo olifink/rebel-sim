@@ -34,6 +34,22 @@ export class BoardScreenHal implements ScreenHal {
   clearScreen(paper: number): void {
     this.sink.writeBytes(encodeClear({ paper }));
   }
+
+  /** No-op: REMOTE-TERMINAL.md's wire protocol carries no raw-pixel
+   * message (§1, §10 item 3 — "no hal_draw_*-equivalent message family...
+   * not designed here"). A board running GRAPHICS-vocabulary Forth code
+   * in remote-terminal mode has nowhere to send PLOT today; this is that
+   * limitation surfacing here as silence rather than a thrown error,
+   * matching this class's char-cell methods' own "forward or silently
+   * drop" shape. */
+  drawPixel(): void {}
+
+  /** Same limitation as `drawPixel` — no wire message exists to ask the
+   * terminal what a pixel currently shows, so this can only ever report
+   * "nothing there" (`Screen.point()`'s own out-of-range sentinel). */
+  readPixel(): number {
+    return -1;
+  }
 }
 
 export class RemoteBoard {

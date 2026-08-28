@@ -3,8 +3,13 @@ import { Machine } from './repl.js';
 import { ScreenHal } from './screen.js';
 import { bootMachine } from './test-support.js';
 
-function spyHal(): ScreenHal & { blitGlyph: ReturnType<typeof vi.fn>; clearScreen: ReturnType<typeof vi.fn> } {
-  return { blitGlyph: vi.fn(), clearScreen: vi.fn() };
+function spyHal(): ScreenHal & {
+  blitGlyph: ReturnType<typeof vi.fn>;
+  clearScreen: ReturnType<typeof vi.fn>;
+  drawPixel: ReturnType<typeof vi.fn>;
+  readPixel: ReturnType<typeof vi.fn>;
+} {
+  return { blitGlyph: vi.fn(), clearScreen: vi.fn(), drawPixel: vi.fn(), readPixel: vi.fn(() => -1) };
 }
 
 describe('Screen', () => {
@@ -427,5 +432,46 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     m.interpret('CURSEN');
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(3, 4, 65, 0x0000ff, 0xff0000); // swapped
+  });
+});
+
+describe('PLOT/POINT (M68: the one primitive the GRAPHICS vocabulary is built on)', () => {
+  it('PLOT sets a pixel using the current INK, implicit-color, same convention as EMIT/CHAR!', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    // Default boot INK is the palette index 4 (M62: palette active by
+    // default), which PLOT must resolve to green (0x00ff00) exactly like
+    // writeChar does — see Screen.plot()'s own doc comment for why this
+    // isn't optional.
+    m.interpret('4 5 PLOT');
+    expect(hal.drawPixel).toHaveBeenCalledWith(4, 5, 0x00ff00);
+    m.screen.setPaletteBase(0); // disable: INK now means literal RGB
+    m.interpret('16711680 INK 7 8 PLOT'); // 0xff0000
+    expect(hal.drawPixel).toHaveBeenCalledWith(7, 8, 0xff0000);
+  });
+
+  it('PLOT is bounds-checked against pixel space (SCREEN-WIDTH/HEIGHT), not character-cell space', () => {
+    const hal = spyHal();
+    const m = new Machine({ screenHal: hal });
+    m.interpret(`${m.screen.pixelWidth} 0 PLOT`); // one past the last valid column
+    m.interpret('-1 0 PLOT');
+    expect(hal.drawPixel).not.toHaveBeenCalled();
+    m.interpret(`${m.screen.pixelWidth - 1} ${m.screen.pixelHeight - 1} PLOT`); // last valid pixel
+    expect(hal.drawPixel).toHaveBeenCalledTimes(1);
+  });
+
+  it('POINT reads a pixel back through the HAL', () => {
+    const hal = spyHal();
+    hal.readPixel.mockReturnValue(0x123456);
+    const m = new Machine({ screenHal: hal });
+    m.interpret('4 5 POINT');
+    expect(hal.readPixel).toHaveBeenCalledWith(4, 5);
+    expect(m.stack.pop()).toBe(0x123456);
+  });
+
+  it('POINT returns -1 for out-of-range coordinates without calling the HAL', () => {
+    const m = new Machine();
+    m.interpret('-1 0 POINT');
+    expect(m.stack.pop()).toBe(-1);
   });
 });

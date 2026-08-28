@@ -70,4 +70,14 @@ export class CanvasScreenHal implements ScreenHal {
     this.ctx.fillStyle = toCssColor(paper);
     this.ctx.fillRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
   }
+
+  drawPixel(x: number, y: number, color: number): void {
+    this.ctx.fillStyle = toCssColor(color);
+    this.ctx.fillRect(x, y, 1, 1);
+  }
+
+  readPixel(x: number, y: number): number {
+    const [r, g, b] = this.ctx.getImageData(x, y, 1, 1).data;
+    return (r << 16) | (g << 8) | b;
+  }
 }
