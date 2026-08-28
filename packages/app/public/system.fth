@@ -238,6 +238,94 @@ VARIABLE CURRENT-VOCAB
   DROP
 ;
 
+\ SEARCH-ROOT -- addr : the exact one-line rule WORDS above and FIND
+\ below both already inline -- pulled out as its own word here (M70)
+\ specifically so SEE/HIDE's own fixes, further down, can share it
+\ instead of a fourth copy. WORDS/FIND themselves are left calling
+\ their own existing inline copies, untouched -- they already work,
+\ and duplicating one line three times over is the ordinary case this
+\ project's own "three similar lines beats a premature abstraction"
+\ rule is about, not a defect to clean up while fixing something else.
+: SEARCH-ROOT ( -- addr )
+  CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
+;
+
+\ FIND relocated here from much further down in this file (M70) --
+\ moved, not rewritten: SEE/HIDE's own fix (further down) needs FIND
+\ already defined at their own compile time, and FIND has no real
+\ dependency standing in the way of moving it this early -- just
+\ CONTEXT/CURRENT-VOCAB (declared above, right before WORDS) and
+\ ordinary Batch 1-4 stack/control-flow words, all long since
+\ available by here. Only HIDE FIND-ADDR/HIDE FIND-LEN, which used to
+\ immediately follow FIND's own definition, couldn't come along --
+\ HIDE itself doesn't exist yet this early. They now run later,
+\ folded into the cleanup batch right after HIDE's own definition,
+\ where they belong once HIDE actually exists to call.
+\
+\ FIND uses two scratch variables rather than juggling addr/len on
+\ the data or return stack across the whole chain-walk -- simpler to
+\ get right than deep PICK arithmetic or R-stack parking, and this
+\ isn't a hot path. Hidden below, once FIND itself no longer needs
+\ to find them by name.
+VARIABLE FIND-ADDR
+VARIABLE FIND-LEN
+
+\ FIND addr len -- entry-addr flag : chain-walk from the current
+\ search context toward 0, skipping HIDDEN entries, comparing each
+\ candidate's already-uppercase stored name against addr len
+\ case-insensitively. entry-addr is 0 when flag is 0 -- meaningless
+\ either way, per spec's own contract. The per-character comparison
+\ uppercases the *input* byte only, since a stored name is already
+\ uppercase -- written that way at definition time -- lowercase
+\ a-z, ASCII 97-122, shift down by 32.
+\ Walks CONTEXT's own target -- not the bare LATEST compile-chain
+\ pointer this used before CONTEXT existed. Ordinary interpreted/
+\ compiled word dispatch, INTERPRET below, always wants what's
+\ currently visible while browsing, which is exactly CONTEXT's own
+\ job -- not what's currently being compiled into, which stays
+\ LATEST's job alone, untouched here -- compileCell/CREATE/etc.
+\ still act on it directly, unrelated to this search.
+\ Same LATEST-vs-stored-position check WORDS above already needs:
+\ a vocabulary's own remembered cell only gets refreshed when
+\ DEFINITIONS switches away from it, not continuously as new words
+\ compile in, so browsing whatever you're also compiling into has
+\ to read LATEST directly to see the live picture -- CONTEXT's own
+\ stored position is only accurate for some other, dormant
+\ vocabulary nothing is currently compiling into.
+: FIND ( addr len -- entry-addr flag )
+  FIND-LEN ! FIND-ADDR !
+  CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
+  BEGIN
+    DUP
+  WHILE
+    DUP 4 + C@
+    DUP 64 AND
+    IF
+      DROP
+    ELSE
+      31 AND FIND-LEN @ =
+      IF
+        DUP 5 +
+        -1
+        FIND-LEN @ 0 DO
+          OVER I + C@
+          FIND-ADDR @ I + C@
+          DUP 96 > OVER 123 < AND IF 32 - THEN
+          =
+          AND
+        LOOP
+        IF
+          DROP -1 EXIT
+        THEN
+        DROP
+      THEN
+    THEN
+    @
+  REPEAT
+  DROP
+  0 0
+;
+
 ( BANKS, M51: dev-ergonomics sibling to WORDS above, requested by )
 ( Oliver -- lists every active bank's name, space separated, same )
 ( "browse what actually exists right now" motivation as WORDS. Walks )
@@ -396,7 +484,12 @@ VARIABLE DUMP-NEXT
 ( matches it. Prints a bare question mark for an xt with no )
 ( matching entry, though that should not arise in practice -- )
 ( every xt SEE ever passes in came from a real compiled call. )
-: XT-NAME >R LATEST BEGIN DUP WHILE DUP >CFA R@ = IF DUP 4 + C@ 31 AND OVER 5 + SWAP TYPE DROP R> DROP EXIT THEN @ REPEAT DROP R> DROP 63 EMIT ;
+\ Walks from SEARCH-ROOT (M70), not raw LATEST as this used to --
+\ LATEST alone only ever sees whatever's currently CURRENT-VOCAB, so
+\ decompiling a word that calls into some other, merely-browsed
+\ vocabulary's own helper used to print a bare "?" for it instead of
+\ its real name.
+: XT-NAME >R SEARCH-ROOT BEGIN DUP WHILE DUP >CFA R@ = IF DUP 4 + C@ 31 AND OVER 5 + SWAP TYPE DROP R> DROP EXIT THEN @ REPEAT DROP R> DROP 63 EMIT ;
 
 ( Named constants for the inline-data tokens SEE must special )
 ( case while walking a Parameter Field -- LIT's literal, )
@@ -409,6 +502,27 @@ VARIABLE DUMP-NEXT
 ' 0BRANCH CONSTANT 0BRANCH-XT
 ' (SLIT) CONSTANT SLIT-XT
 
+\ (TICK) "name" -- xt : SEE/HIDE's own context-aware replacement for
+\ native ' (token 94, M6), used only by the two of them (M70). Native
+\ ' resolves via the engine's own findWord(), which walks the raw
+\ LATEST sysvar directly -- it predates VOCABULARY entirely and was
+\ never taught about CONTEXT once vocabularies could branch, so it
+\ silently misses any word in a vocabulary that's merely being
+\ browsed (USE) rather than currently compiled into (DEFINITIONS).
+\ FIND (above, M70: moved here specifically so this could reuse it)
+\ already gets this right; (TICK) is just FIND plus >CFA, with the
+\ same "print the bad token, then ABORT" error convention NUMBER's
+\ own fallback already uses below, rather than trying to reproduce
+\ native tick's own distinct "unrecognized word: NAME" wording.
+: (TICK) ( "name" -- xt )
+  BL WORD 2DUP FIND
+  IF
+    NIP NIP >CFA
+  ELSE
+    DROP TYPE SPACE ABORT
+  THEN
+;
+
 ( SEE -- SEE <name>: decompiles a colon-definition back to )
 ( source-ish form. Only DOCOL-coded words are supported for )
 ( this pass -- CONSTANT/VARIABLE/DOES>'d words print )
@@ -418,7 +532,7 @@ VARIABLE DUMP-NEXT
 ( same "minimum real mechanism first" discipline as everywhere )
 ( else in this project. )
 : SEE
-  '
+  (TICK)
   DUP @ 0=
   IF
     ." :" 32 EMIT DUP XT-NAME 32 EMIT
@@ -464,10 +578,17 @@ VARIABLE DUMP-NEXT
 ( after each helper: SEE itself still needs to find XT-NAME and )
 ( the -XT constants by name, right up until its own closing )
 ( semicolon. )
+\ Both ' and LATEST below were the raw-LATEST-rooted native/inline
+\ forms this used before M70 -- neither saw a merely-browsed (USE,
+\ not DEFINITIONS) vocabulary's own words at all, so HIDEing one threw
+\ "unrecognized word" for the initial lookup, and even resolving the
+\ xt some other way still would not have found its entry from here,
+\ since this walk started from LATEST too. (TICK)/SEARCH-ROOT fix
+\ both halves the same way FIND/XT-NAME's own fixes just did, above.
 : HIDE
-  '
+  (TICK)
   >R
-  LATEST
+  SEARCH-ROOT
   BEGIN
     DUP
   WHILE
@@ -541,6 +662,17 @@ HIDE EXIT-XT
 HIDE BRANCH-XT
 HIDE 0BRANCH-XT
 HIDE SLIT-XT
+HIDE (TICK)
+\ SEARCH-ROOT/FIND-ADDR/FIND-LEN (M70) join the same cleanup batch --
+\ SEARCH-ROOT is plumbing FIND/XT-NAME/HIDE's own bodies already
+\ compiled a direct call to by now, same "hiding never disturbs an
+\ already-compiled caller" rule this whole batch already relies on.
+\ FIND-ADDR/FIND-LEN moved here from right after FIND's own old
+\ location, since HIDE -- needed to hide them at all -- did not exist
+\ yet back there.
+HIDE SEARCH-ROOT
+HIDE FIND-ADDR
+HIDE FIND-LEN
 
 ( VOCABULARY/USE/DEFINITIONS, DEVELOPING.md section 8, revised for )
 ( the real classic CONTEXT/CURRENT split. Browsing a vocabulary )
@@ -819,71 +951,11 @@ HIDE PICK-SLOT
 ( it is the first point where the driving loop can switch from the )
 ( native fallback tokenizer to this real self-hosted one. )
 
-( FIND uses two scratch variables rather than juggling addr/len on )
-( the data or return stack across the whole chain-walk -- simpler to )
-( get right than deep PICK arithmetic or R-stack parking, and this )
-( isn't a hot path. Hidden below, once FIND itself no longer needs )
-( to find them by name. )
-VARIABLE FIND-ADDR
-VARIABLE FIND-LEN
-
-( FIND addr len -- entry-addr flag : chain-walk from the current )
-( search context toward 0, skipping HIDDEN entries, comparing each )
-( candidate's already-uppercase stored name against addr len )
-( case-insensitively. entry-addr is 0 when flag is 0 -- meaningless )
-( either way, per spec's own contract. The per-character comparison )
-( uppercases the *input* byte only, since a stored name is already )
-( uppercase -- written that way at definition time -- lowercase )
-( a-z, ASCII 97-122, shift down by 32. )
-( Walks CONTEXT's own target -- not the bare LATEST compile-chain )
-( pointer this used before CONTEXT existed. Ordinary interpreted/ )
-( compiled word dispatch, INTERPRET below, always wants what's )
-( currently visible while browsing, which is exactly CONTEXT's own )
-( job -- not what's currently being compiled into, which stays )
-( LATEST's job alone, untouched here -- compileCell/CREATE/etc. )
-( still act on it directly, unrelated to this search. )
-( Same LATEST-vs-stored-position check WORDS above already needs: )
-( a vocabulary's own remembered cell only gets refreshed when )
-( DEFINITIONS switches away from it, not continuously as new words )
-( compile in, so browsing whatever you're also compiling into has )
-( to read LATEST directly to see the live picture -- CONTEXT's own )
-( stored position is only accurate for some other, dormant )
-( vocabulary nothing is currently compiling into. )
-: FIND ( addr len -- entry-addr flag )
-  FIND-LEN ! FIND-ADDR !
-  CONTEXT @ CURRENT-VOCAB @ = IF LATEST ELSE CONTEXT @ @ THEN
-  BEGIN
-    DUP
-  WHILE
-    DUP 4 + C@
-    DUP 64 AND
-    IF
-      DROP
-    ELSE
-      31 AND FIND-LEN @ =
-      IF
-        DUP 5 +
-        -1
-        FIND-LEN @ 0 DO
-          OVER I + C@
-          FIND-ADDR @ I + C@
-          DUP 96 > OVER 123 < AND IF 32 - THEN
-          =
-          AND
-        LOOP
-        IF
-          DROP -1 EXIT
-        THEN
-        DROP
-      THEN
-    THEN
-    @
-  REPEAT
-  DROP
-  0 0
-;
-HIDE FIND-ADDR
-HIDE FIND-LEN
+\ FIND itself now lives much further up this file (M70, right after
+\ WORDS) -- SEE/HIDE's own fix needed it defined at their own compile
+\ time, well before this point, and it had no real dependency standing
+\ in the way of moving it there. Nothing here calls it any differently
+\ for that -- INTERPRET, below, finds it by name exactly as before.
 
 ( NUMBER's own error path echoes the token that failed to parse -- the )
 ( classic fig-Forth/Forth-79 "TOKEN ?" convention -- neither had THROW )

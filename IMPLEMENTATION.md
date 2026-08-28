@@ -4456,6 +4456,71 @@ comments now has to be.
 including embedded parens, `IMMEDIATE` inside a colon-definition, a
 bare `\` as a no-op, and that it never spans past its own line).
 
+### 1.82 `SEE`/`HIDE` fixed to resolve names through `CONTEXT`, not raw `LATEST` (M70)
+
+Found by Oliver, using the machine: `SEE`/`HIDE` worked on a word in
+`EDITOR` once `EDITOR DEFINITIONS` had run, but threw `unrecognized
+word` on the identical word after only `USE EDITOR` — merely browsing
+it. Root cause, confirmed directly against both code paths: `SEE`/
+`HIDE` (M12, before vocabularies existed at all) resolve their target
+name via the native `'` primitive (token 94), which finds a word
+through the engine's own `findWord()` (`dictionary.ts`) — a walk rooted
+at the raw `LATEST` sysvar, i.e. whatever `CURRENT-VOCAB` currently is.
+Every *other* dictionary search — ordinary word dispatch, `WORDS` — goes
+through the self-hosted, `CONTEXT`-aware `FIND` (`system.fth`) instead,
+added at M48 specifically so browsing (`CONTEXT`) and compiling
+(`CURRENT-VOCAB`/`LATEST`) could be independent. `'` was never updated
+for that split — it predates `VOCABULARY` (M13) entirely, and the
+original single-pointer `USE` (superseded at M48) happened to keep `'`
+working by moving `LATEST` on every `USE`, which masked the gap until
+M48's revision decoupled the two for real.
+
+**Fix, entirely in `system.fth`, no engine change:**
+
+1. **`FIND` relocated** from deep in the self-hosted-interpreter section
+   (just above `NUMBER`) to right after `WORDS`, near the top of the
+   file — moved, not rewritten. Its only real dependencies (`CONTEXT`/
+   `CURRENT-VOCAB`, declared just above `WORDS`, plus ordinary Batch
+   1-4 words) were already available that early; only `HIDE FIND-ADDR`/
+   `HIDE FIND-LEN`, which used to follow it immediately, couldn't come
+   along, since `HIDE` doesn't exist yet at that point — they now run
+   in the same cleanup batch as `HIDE XT-NAME` etc., after `HIDE`
+   itself is defined.
+2. **`SEARCH-ROOT` extracted** as its own new word — the one-line rule
+   `WORDS` and `FIND` already each inline (`CONTEXT @ CURRENT-VOCAB @ =
+   IF LATEST ELSE CONTEXT @ @ THEN`) — specifically so the two *new*
+   consumers below could share it instead of a fourth copy. `WORDS`/
+   `FIND` themselves were left untouched, still using their own inline
+   copies: they already work, and three near-identical one-liners is
+   the ordinary case `CLAUDE.md`'s own "premature abstraction" warning
+   is about, not a defect to clean up in passing.
+3. **`(TICK)`, a new internal word** (`"name" -- xt`), replacing `SEE`/
+   `HIDE`'s own call to native `'`: `BL WORD 2DUP FIND IF NIP NIP >CFA
+   ELSE DROP TYPE SPACE ABORT THEN`. Errors via the same "print the bad
+   token, then `ABORT`" convention `NUMBER`'s own fallback already
+   uses, rather than reproducing `'`'s distinct "unrecognized word:
+   NAME" wording.
+4. **`XT-NAME`'s and `HIDE`'s own internal xt-to-entry walks**, both
+   previously rooted at raw `LATEST` directly (not just the initial
+   name lookup), switched to start from `SEARCH-ROOT` instead — fixing
+   `SEE`'s ability to print a called word's real name (`XT-NAME`) and
+   `HIDE`'s ability to actually locate and flag the target entry
+   (`HIDE`'s own chain-walk), both for the identical "merely browsing"
+   scenario, not just the front-door name parse.
+
+`(TICK)`/`SEARCH-ROOT`/`FIND-ADDR`/`FIND-LEN` all join the existing
+`HIDE XT-NAME`/`HIDE LIT-XT`/... cleanup batch once nothing later needs
+to find them by name — `FIND` itself stays visible, since the
+self-hosted `INTERPRET` (defined much later) still needs to find it by
+name at its own compile time.
+
+*Implementation:* `system.fth` (`FIND` relocated; new `SEARCH-ROOT`/
+`(TICK)`; `XT-NAME`/`SEE`/`HIDE` updated). *Tests:* new
+`see-hide.test.ts` (ordinary-word decompile/hide, the unrecognized-word
+error path, and the exact `USE`-without-`DEFINITIONS` regression for
+both `SEE` and `HIDE`, plus a same-vocabulary-after-`DEFINITIONS`
+non-regression check).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4632,5 +4697,6 @@ exactly as it would be on the bare-metal target.
 | **M67** | `BANK-SIZE` (§1.79) becomes `IMMEDIATE` and dual-mode on `STATE`, same fix as M53's `BANK@`, found by Oliver trying `: FOO BANK-SIZE SYSV ;` — a plain non-`IMMEDIATE` `BANK-SIZE` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, identical to `BANK@`'s M53 bug. Bakes in a resolved `LIT` size rather than raw text, same `S"`/`."` STATE-dispatch pattern `BANK@` already uses. Interactive behavior (`BANK-SIZE SYSV`) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 | **M68** | `GRAPHICS` vocabulary (§1.80): two new primitives, `PLOT`/`POINT` (148/149) — the classic PLOT/POINT pixel pair, `Screen.plot`/`point` resolving `INK` through the active palette before reaching `ScreenHal.drawPixel`/`readPixel` (spec `01-HAL.md` §3.4, `hal_read_pixel` newly added alongside `hal_draw_pixel`). Everything else — `LINE` (Bresenham, `LINE-WIDTH`-driven thick-stroke approximation), `RECT`/`RECT-FILL`, `CIRCLE`/`CIRCLE-FILL` (midpoint circle, no `SQRT`/trig) — is pure Forth in a new `GRAPHICS` vocabulary, `system.fth`, branching off `EDITOR`'s close per `CLAUDE.md`'s "primitives only if necessary" rule. `ARC`/a `MATH` vocabulary deliberately deferred. Hit the `(`-comment-closes-early footgun a fourth time (M46/M48 hit it before) via a nested `(148)`-style aside — every comment in the new section rewritten paren-free. `testTimeout` doubled to 40s (same fix as M48) once the bigger dictionary started tripping the old 20s ceiling on unrelated `EDITOR` tests under full-suite contention. | `screen.ts`, `primitives.ts`, `rebel-opcodes.json`, `canvas-screen-hal.ts`, `remote-board.ts`, `system.fth`, `01-HAL.md`, `screen.test.ts`, `graphics.test.ts`, `vitest.config.ts` |
 | **M69** | `\` — rest-of-line comment (§1.81), closing `04-FORTH-CORE.md` §9's own long-deferred "not specified here either" item. Direct fallout from M68's `(`-comment footgun hitting a fourth time: `: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE`, no new primitive — loops the already-native `WORD` (token 134) until its own "line exhausted" zero-length signal fires. Has no closing token to glue a nested paren onto, so it structurally can't suffer `(`'s failure mode. Caught a real near-miss while writing its own doc comment (the same bug, in the very comment explaining the bug), fixed by paren-free rewriting before it ever ran. | `system.fth`, `04-FORTH-CORE.md`, `comments.test.ts` |
+| **M70** | `SEE`/`HIDE` fixed to resolve names via `CONTEXT`, not raw `LATEST` (§1.82) — found by Oliver: both worked on a word in `EDITOR` once `EDITOR DEFINITIONS` had run, but threw `unrecognized word` on the same word after only `USE EDITOR`. Root cause: both predate `VOCABULARY` (M12 vs. M13) and resolve names via native `'`, which walks raw `LATEST`, never updated when M48 split browsing (`CONTEXT`) from compiling (`CURRENT-VOCAB`/`LATEST`) for real. Fixed entirely in `system.fth`: `FIND` relocated next to `WORDS` (near the top of the file) so `SEE`/`HIDE` can resolve names through it via a new `(TICK)` helper, a new shared `SEARCH-ROOT` word, and `XT-NAME`/`HIDE`'s own internal xt-to-entry walks switched from `LATEST` to `SEARCH-ROOT` too. No engine change. | `system.fth`, `see-hide.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
