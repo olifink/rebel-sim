@@ -45,11 +45,14 @@ target's own porting notes, not here.
 | 02 | [`02-MEMORY-MODEL.md`](02-MEMORY-MODEL.md) | **v1.0** | The cell, the flat per-arena address space, the bank system and its size classes/alignment rule, the arena-resident bank table (`MMAP`), multi-arena isolation. |
 | 03 | [`03-SYSVARS.md`](03-SYSVARS.md) | **v1.0** | The `SYSV` bank's header, its grouped layout, per-field byte offsets, naming convention, and the field-presence-signals-capability convention `01-HAL.md` already assumes exists. |
 | 04 | [`04-FORTH-CORE.md`](04-FORTH-CORE.md) | **v1.0** | Dictionary header, token-threaded dispatch, the outer interpreter, the full primitive catalog (KERNEL vs. BOOTSTRAP), the bootstrap Forth-source layer, the error/exception model. |
+| 05 | [`05-REMOTE-TRANSPORTS.md`](05-REMOTE-TRANSPORTS.md) | **Draft, design-only** | Not part of the portable suite below — Rebel-Sim-implementation-specific. A transport contract (`Transport` interface) for `REMOTE-TERMINAL.md`'s wire protocol, plus a survey of concrete transports (WebSerial, WebSocket bridge, Web Bluetooth) beyond the one that document already specs. |
 
-All four documents are written. This index is kept here so
-cross-references between them resolve to a real target, and so each
-document's own scope boundaries — what it deliberately does *not*
-cover because it belongs to one of the others — are legible.
+Documents `01`-`04` are written and form the portable suite proper. This
+index is kept here so cross-references between them resolve to a real
+target, and so each document's own scope boundaries — what it
+deliberately does *not* cover because it belongs to one of the others —
+are legible. `05` is listed for discoverability but is a different kind
+of document (see its own §0) — Rebel-Sim-specific, not target-generic.
 
 ## 4. Normative language
 
