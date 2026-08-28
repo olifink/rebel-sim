@@ -4411,6 +4411,51 @@ forwarding), `graphics.test.ts` (new — `LINE`/`RECT`/`CIRCLE` and their
 width/fill variants, exercised by loading real `system.fth` source via
 `bootMachine()`).
 
+### 1.81 `\` — rest-of-line comment, closing spec §9's own open item (M69)
+
+Direct follow-up to §1.80's own postscript: writing `GRAPHICS`'s ~90-line
+opening comment hit the `(`-comment-closes-early footgun (§1.80, M46,
+M48) for a *fourth* time, from a nested `(148)`-style aside — the third
+recurrence of the identical mistake in this codebase's history. Rather
+than fix it a fourth time and wait for a fifth, Oliver asked for `\`
+(rest-of-line comment) — previously named but explicitly deferred in
+`spec/04-FORTH-CORE.md` §9 ("not specified here either... added only if
+a real need surfaces") — to be built for real and added to that same
+spec, closing the open item with the evidence that surfaced it.
+
+**Needed no new primitive.** `WORD` (§6.13, native, token 134) already
+returns a zero length as its own specified "line exhausted" signal
+(`wordScan()`, `repl.ts`) — looping it with `BL` as the delimiter until
+that happens consumes exactly the rest of the current line, discarding
+each token, with no closing-token concept to glue an aside onto at all:
+
+```forth
+: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE
+```
+
+`IMMEDIATE` for the same reason `(` carries it — a `\` comment written
+inside another colon-definition must discard its text at that
+definition's own compile time, not whenever the definition later runs.
+Defined early in `system.fth` (right after `NIP`, its last real
+dependency beyond `BEGIN`/`UNTIL`/`WORD`/`BL`, all already available by
+then), so it's usable everywhere from that point on, including inside
+its own explanatory comment.
+
+**A real near-miss while writing that comment.** The first draft of
+`\`'s own doc comment — explaining the exact bug `\` exists to avoid —
+itself used stray parens (`the ( -- ) comment above`, `6.13)`,
+`needs)`) and broke the same way `GRAPHICS`'s had, caught by running the
+same token-stream simulation used to debug §1.80 before ever booting a
+`Machine`. Rewritten paren-free like everything else in this file's
+comments now has to be.
+
+*Implementation:* `system.fth` (new `\` definition, Batch 4). *Spec:*
+`04-FORTH-CORE.md` §6.7 (new `\` row, BOOTSTRAP) and §9 (the old
+"not specified here either" bullet marked resolved, pointing at §6.7).
+*Tests:* `comments.test.ts`'s new `\` suite (end-of-line discard
+including embedded parens, `IMMEDIATE` inside a colon-definition, a
+bare `\` as a no-op, and that it never spans past its own line).
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4586,5 +4631,6 @@ exactly as it would be on the bare-metal target.
 | **M66** | `Personality` gains `INK`/`PAPER` (§1.78), Oliver's idea: a `TERMINAL`-connected board booting into a deliberately different color scheme (yellow-on-blue, palette indices 6/1) than local's green-on-black is a cheap, immediate visual "different machine" signal. `MMAP`'s header grows a third time, 28→36 bytes; `DEFAULT_PERSONALITY` gains `ink: 4, paper: 0` (replacing `repl.ts`'s now-removed `DEFAULT_INK`/`DEFAULT_PAPER` constants, unchanged default-boot colors). `HEADER_VERSION` bumped 2→3. `system.fth`'s `MMAP-HDR` constant updated 28→36 alongside the TS-side change this time, not after (§1.75's own hidden-bug lesson applied). Verified live: connecting via `TERMINAL` now visibly repaints the canvas, Ctrl+Escape snaps straight back. | `mmap.ts`, `repl.ts`, `app.ts`, `mmap.test.ts`, `spec/02-MEMORY-MODEL.md`, `system.fth` |
 | **M67** | `BANK-SIZE` (§1.79) becomes `IMMEDIATE` and dual-mode on `STATE`, same fix as M53's `BANK@`, found by Oliver trying `: FOO BANK-SIZE SYSV ;` — a plain non-`IMMEDIATE` `BANK-SIZE` compiled a call to itself and left the compiler's own outer loop to choke on the following name token, identical to `BANK@`'s M53 bug. Bakes in a resolved `LIT` size rather than raw text, same `S"`/`."` STATE-dispatch pattern `BANK@` already uses. Interactive behavior (`BANK-SIZE SYSV`) is unchanged. | `primitives.ts`, `rebel-opcodes.json`, `bank-access.test.ts`, `02-MEMORY-MODEL.md`, `04-FORTH-CORE.md` |
 | **M68** | `GRAPHICS` vocabulary (§1.80): two new primitives, `PLOT`/`POINT` (148/149) — the classic PLOT/POINT pixel pair, `Screen.plot`/`point` resolving `INK` through the active palette before reaching `ScreenHal.drawPixel`/`readPixel` (spec `01-HAL.md` §3.4, `hal_read_pixel` newly added alongside `hal_draw_pixel`). Everything else — `LINE` (Bresenham, `LINE-WIDTH`-driven thick-stroke approximation), `RECT`/`RECT-FILL`, `CIRCLE`/`CIRCLE-FILL` (midpoint circle, no `SQRT`/trig) — is pure Forth in a new `GRAPHICS` vocabulary, `system.fth`, branching off `EDITOR`'s close per `CLAUDE.md`'s "primitives only if necessary" rule. `ARC`/a `MATH` vocabulary deliberately deferred. Hit the `(`-comment-closes-early footgun a fourth time (M46/M48 hit it before) via a nested `(148)`-style aside — every comment in the new section rewritten paren-free. `testTimeout` doubled to 40s (same fix as M48) once the bigger dictionary started tripping the old 20s ceiling on unrelated `EDITOR` tests under full-suite contention. | `screen.ts`, `primitives.ts`, `rebel-opcodes.json`, `canvas-screen-hal.ts`, `remote-board.ts`, `system.fth`, `01-HAL.md`, `screen.test.ts`, `graphics.test.ts`, `vitest.config.ts` |
+| **M69** | `\` — rest-of-line comment (§1.81), closing `04-FORTH-CORE.md` §9's own long-deferred "not specified here either" item. Direct fallout from M68's `(`-comment footgun hitting a fourth time: `: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE`, no new primitive — loops the already-native `WORD` (token 134) until its own "line exhausted" zero-length signal fires. Has no closing token to glue a nested paren onto, so it structurally can't suffer `(`'s failure mode. Caught a real near-miss while writing its own doc comment (the same bug, in the very comment explaining the bug), fixed by paren-free rewriting before it ever ran. | `system.fth`, `04-FORTH-CORE.md`, `comments.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

@@ -86,6 +86,25 @@
 : 2DUP OVER OVER ;
 : 2DROP DROP DROP ;
 : NIP SWAP DROP ;
+
+( backslash -- rest-of-line comment, spec/04-FORTH-CORE.md section 9's )
+( own "not specified here either; added only if a real need surfaces" )
+( item, now specified for real in section 6.7 -- the real need was )
+( this very file: the paren comment word above has independently )
+( bitten M46, M48, and M68's own GRAPHICS section, each time from a )
+( nested closing paren glued onto a word inside a long descriptive )
+( comment, closing it early and leaking the rest of the sentence into )
+( the dictionary as live code. A rest-of-line comment has no closing )
+( token to glue anything onto in the first place, so it cannot suffer )
+( that failure mode at all -- built entirely from WORD, already )
+( native, section 6.13, looping until a line is exhausted, which WORD )
+( returning a zero length already signals on its own -- no new )
+( primitive needed. Carries IMMEDIATE for the same reason the paren )
+( comment word does: written inside another colon-definition, it )
+( must discard its text at that definition's own compile time, not )
+( deferred to whenever the definition later runs. )
+: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE
+
 : TUCK SWAP OVER ;
 : 2SWAP ROT >R ROT R> ;
 ( SP@ must run first, before DEPTH pushes anything else of its own -- )

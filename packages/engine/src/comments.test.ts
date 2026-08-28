@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
 import { findWord } from './dictionary.js';
 import { CELL_SIZE } from './arena.js';
+import { bootMachine } from './test-support.js';
 
 describe('Comments (DEVELOPING.md §2, M11; discard reverted M44)', () => {
   it('a comment inside a definition has zero runtime stack effect', () => {
@@ -61,5 +62,36 @@ describe('Comments (DEVELOPING.md §2, M11; discard reverted M44)', () => {
     m.interpret('3 DOUBLE');
     m.interpret('10 DOUBLE');
     expect(m.stack.toArray()).toEqual([20, 6]); // top-first: 20 (most recent) on top, 6 underneath
+  });
+});
+
+describe('\\ (rest-of-line comment, spec/04-FORTH-CORE.md §6.7, M68 follow-up)', () => {
+  // A BOOTSTRAP word (system.fth), built on WORD, not a primitive — needs
+  // the real bootstrap layer loaded, unlike ( 's tests above.
+  it('discards everything to the end of the line, including unbalanced parens', () => {
+    const m = bootMachine();
+    m.interpret('5 3 + \\ this comment has (nested) parens and a lone 148) too');
+    expect(m.stack.toArray()).toEqual([8]);
+  });
+
+  it('works inside a colon-definition, IMMEDIATE, same as (', () => {
+    const m = bootMachine();
+    m.interpret(': FOO 1 2 + \\ adds one and two, deliberately including a )');
+    m.interpret('  3 + ;');
+    m.interpret('FOO');
+    expect(m.stack.toArray()).toEqual([6]);
+  });
+
+  it('a bare backslash with nothing following it is a no-op', () => {
+    const m = bootMachine();
+    m.interpret('42 \\');
+    expect(m.stack.toArray()).toEqual([42]);
+  });
+
+  it('only comments out the rest of its own line — a later interpret() call is unaffected', () => {
+    const m = bootMachine();
+    m.interpret('1 \\ comments out everything after it, but not the 1 before it');
+    m.interpret('2');
+    expect(m.stack.toArray()).toEqual([2, 1]); // top-first: 2 (most recent) on top, 1 underneath
   });
 });
