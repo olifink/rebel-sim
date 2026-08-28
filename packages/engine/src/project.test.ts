@@ -120,7 +120,7 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
 
     const m1 = new Machine({ storageHal: hal });
     m1.screen.setPaletteBase(m1.banks.findBank('PAL')!.base);
-    m1.interpret('4 INK 0 PAPER 65 EMIT'); // green (4) on black (0), ATTR = 0x40
+    m1.interpret('4 INK ! 0 PAPER ! 65 EMIT'); // green (4) on black (0), ATTR = 0x40
     m1.interpret('PROJECT PALPROJ SAVE');
 
     const m2 = new Machine({ storageHal: hal });

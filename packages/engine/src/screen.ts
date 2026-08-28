@@ -220,16 +220,8 @@ export class Screen {
     return this.sysvars.get('SCREEN', 'INK');
   }
 
-  setInk(color: number): void {
-    this.sysvars.set('SCREEN', 'INK', color);
-  }
-
   getPaper(): number {
     return this.sysvars.get('SCREEN', 'PAPER');
-  }
-
-  setPaper(color: number): void {
-    this.sysvars.set('SCREEN', 'PAPER', color);
   }
 
   /** CHAR! — writes the CHAR bank cell and blits the glyph. Out-of-range

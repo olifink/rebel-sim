@@ -35,14 +35,14 @@ describe('remote-terminal loopback: RemoteBoard <-> RemoteTerminal over an in-me
 
   it('forwards the board\'s EMIT output to the terminal\'s shadow grid', () => {
     const { board, terminal } = connect({ headless: false, screenCols: 40, screenRows: 25 });
-    board.machine.interpret('16711680 INK 255 PAPER 65 EMIT'); // red-on-(0,0,255) 'A'
+    board.machine.interpret('16711680 INK ! 255 PAPER ! 65 EMIT'); // red-on-(0,0,255) 'A'
     expect(terminal.cellAt(0, 0)).toEqual({ charCode: 0x41, ink: 16711680, paper: 255 });
   });
 
   it('forwards the board\'s CLS to reset every shadow cell to the given paper', () => {
     const { board, terminal } = connect({ headless: false, screenCols: 10, screenRows: 5 });
     board.machine.interpret('65 EMIT'); // dirty at least one cell first
-    board.machine.interpret('4080 PAPER CLS');
+    board.machine.interpret('4080 PAPER ! CLS');
     for (let row = 0; row < terminal.getRows(); row++) {
       for (let col = 0; col < terminal.getCols(); col++) {
         expect(terminal.cellAt(col, row)).toEqual({ charCode: 0, ink: 0, paper: 4080 });
@@ -74,11 +74,11 @@ describe('remote-terminal loopback: RemoteBoard <-> RemoteTerminal over an in-me
     expect(clears.length).toBeGreaterThan(0);
     const clearsBeforeEmit = clears.length;
 
-    board.machine.interpret('16711680 INK 255 PAPER 65 EMIT');
+    board.machine.interpret('16711680 INK ! 255 PAPER ! 65 EMIT');
     expect(blits).toContainEqual([0, 0, 0x41, 16711680, 255]);
     expect(terminal.cellAt(0, 0)).toEqual({ charCode: 0x41, ink: 16711680, paper: 255 });
 
-    board.machine.interpret('4080 PAPER CLS');
+    board.machine.interpret('4080 PAPER ! CLS');
     expect(clears.length).toBe(clearsBeforeEmit + 1);
     expect(clears[clears.length - 1]).toBe(4080);
   });

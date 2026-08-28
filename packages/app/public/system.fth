@@ -1718,45 +1718,46 @@ HIDE T-LINE
 ( section opened with. )
 FORTH DEFINITIONS
 
-( ---------------------------------------------------------------- )
-( GRAPHICS -- M68. PLOT, token 148, and POINT, token 149, are the )
-( only two new primitives this needed -- Screen.plot in engine )
-( terms, spec 01-HAL.md section 3.4's hal_draw_pixel, is the single )
-( point of contact with a raw framebuffer pixel anything in this )
-( engine has, the same "primitives only if absolutely necessary" )
-( reasoning EMIT/CLS/INK/PAPER already follow -- nothing below this )
-( point is a primitive. POINT is PLOT's read-side counterpart, )
-( hal_read_pixel, completing the classic PLOT/POINT pairing. Both )
-( use pixel-space coordinates, SCREEN-WIDTH/SCREEN-HEIGHT, not the )
-( character-cell grid, and both silently clip out-of-range x/y )
-( instead of throwing -- every word below inherits that clipping )
-( for free by going through PLOT, never checking bounds itself. )
-( )
-( PLOT takes no color argument -- like EMIT/CHAR!, it always uses )
-( the current INK sysvar, resolved through the active palette, )
-( same as Screen.plot's own doc comment explains, so "n INK" before )
-( drawing is GRAPHICS' whole color model. There is no PAPER )
-( equivalent for pixel ops -- nothing to fill "behind" a single )
-( pixel. )
-( )
-( LINE/RECT/CIRCLE are all pure Forth, built on PLOT alone -- no )
-( hal_draw_line/rect exist anywhere in this codebase, spec section )
-( 01-HAL.md 3.4 names them as an optional target-side acceleration )
-( path, never a requirement, so nothing here assumes they might. )
-( LINE-WIDTH is Forth-side state, an ordinary VARIABLE, not a )
-( sysvar, purely because it's GRAPHICS' own drawing-style setting, )
-( not portable interpreter state anything else reads. )
-( )
-( ARC and any rotation/angle math are deliberately NOT here yet -- )
-( unlike LINE/RECT/CIRCLE, pure integer, no trig needed: the )
-( midpoint circle algorithm below never calls SQRT or any )
-( trigonometric function, testing whether a point falls inside an )
-( angular range needs at least a small MATH vocabulary, a fixed- )
-( point SIN/COS table. That's real, separate design work, deferred )
-( to its own pass rather than gold-plating this one -- see this )
-( session's own scope discussion, not written down anywhere else )
-( yet. )
-( )
+\ ---------------------------------------------------------------- \
+\ GRAPHICS -- M68. PLOT, token 148, and POINT, token 149, are the
+\ only two new primitives this needed -- Screen.plot in engine
+\ terms, spec 01-HAL.md section 3.4's hal_draw_pixel, is the single
+\ point of contact with a raw framebuffer pixel anything in this
+\ engine has, the same "primitives only if absolutely necessary"
+\ reasoning EMIT/CLS already follow -- nothing below this point is
+\ a primitive. POINT is PLOT's read-side counterpart, hal_read_pixel,
+\ completing the classic PLOT/POINT pairing. Both use pixel-space
+\ coordinates, SCREEN-WIDTH/SCREEN-HEIGHT, not the character-cell
+\ grid, and both silently clip out-of-range x/y instead of throwing
+\ -- every word below inherits that clipping for free by going
+\ through PLOT, never checking bounds itself.
+\
+\ PLOT takes no color argument -- like EMIT/CHAR!, it always uses
+\ the current INK sysvar, resolved through the active palette, same
+\ as Screen.plot's own doc comment explains, so n INK ! before
+\ drawing (M71: INK/PAPER are real variables now, read with @ and
+\ written with !, not a color-consuming store word) is GRAPHICS'
+\ whole color model. There is no PAPER equivalent for pixel ops --
+\ nothing to fill "behind" a single pixel.
+\
+\ LINE/RECT/CIRCLE are all pure Forth, built on PLOT alone -- no
+\ hal_draw_line/rect exist anywhere in this codebase, spec section
+\ 01-HAL.md 3.4 names them as an optional target-side acceleration
+\ path, never a requirement, so nothing here assumes they might.
+\ LINE-WIDTH is Forth-side state, an ordinary VARIABLE, not a
+\ sysvar, purely because it's GRAPHICS' own drawing-style setting,
+\ not portable interpreter state anything else reads.
+\
+\ ARC and any rotation/angle math are deliberately NOT here yet --
+\ unlike LINE/RECT/CIRCLE, pure integer, no trig needed: the
+\ midpoint circle algorithm below never calls SQRT or any
+\ trigonometric function, testing whether a point falls inside an
+\ angular range needs at least a small MATH vocabulary, a fixed-
+\ point SIN/COS table. That's real, separate design work, deferred
+\ to its own pass rather than gold-plating this one -- see this
+\ session's own scope discussion, not written down anywhere else
+\ yet.
+\
 ( One more thing worth naming plainly: a comment word like this one )
 ( consumes input up to the next token that merely ends in a close- )
 ( paren -- not up to a standalone close-paren token. A stray, )

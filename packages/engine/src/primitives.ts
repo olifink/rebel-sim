@@ -351,11 +351,12 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       ctx.screen.setCursor(col, row);
       break;
     }
-    case 27: // INK ( color -- )
-      ctx.screen.setInk(s.pop());
+    case 27: // INK ( -- addr ) — a real variable, same fieldOffset
+      // pattern as BASE (114)/HERE-ADDR (125)/LATEST-ADDR (95)/STATE (135).
+      s.push(ctx.sysvars.fieldOffset('SCREEN', 'INK'));
       break;
-    case 28: // PAPER ( color -- )
-      ctx.screen.setPaper(s.pop());
+    case 28: // PAPER ( -- addr ) — same pattern as INK (27) above.
+      s.push(ctx.sysvars.fieldOffset('SCREEN', 'PAPER'));
       break;
     case 29: // KEY? ( -- flag )
       s.push(ctx.keyboard.hasEvent() ? TRUE : FALSE);

@@ -4521,6 +4521,30 @@ error path, and the exact `USE`-without-`DEFINITIONS` regression for
 both `SEE` and `HIDE`, plus a same-vocabulary-after-`DEFINITIONS`
 non-regression check).
 
+### 1.83 `INK`/`PAPER` become real variables, not color-consuming stores (M71, breaking change — Oliver's call, pre-1.0)
+
+Oliver's ask, for consistency: sysvars should read/write like ordinary
+`VARIABLE`s wherever possible, the same way `BASE`/`STATE`/`HERE-ADDR`/
+`LATEST-ADDR` already do (`fieldOffset()`'s own doc comment in
+`sysvars.ts` flagged this as the intended general pattern back at M24).
+`INK`/`PAPER` were the one pair of primitives still using the older,
+inconsistent shape: `n INK` popped a color and stored it directly,
+with no way to read the current value back at all. Changed both to
+push their sysvar cell's arena address instead — `n INK !` to set,
+`INK @` to read — identical to `BASE`/`STATE`. Accepted as a breaking
+change: nothing outside this repo depends on the old calling
+convention yet.
+
+*Implementation:* `primitives.ts` (tokens 27/28 now push
+`ctx.sysvars.fieldOffset('SCREEN', 'INK'/'PAPER')` instead of calling
+`Screen.setInk`/`setPaper`, which had no other callers and were
+deleted). `rebel-opcodes.json`'s notes for both tokens updated.
+`system.fth`'s `GRAPHICS` intro comment (M68, §1.80) updated to match.
+*Tests:* every `n INK`/`n PAPER` call site across `screen.test.ts`,
+`project.test.ts`, `remote-terminal-loopback.test.ts` updated to `n
+INK !`/`n PAPER !` — `Sysvars.get`/`.set` call sites in `mmap.test.ts`/
+`empty.test.ts` reach the sysvar directly and needed no change.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4698,5 +4722,6 @@ exactly as it would be on the bare-metal target.
 | **M68** | `GRAPHICS` vocabulary (§1.80): two new primitives, `PLOT`/`POINT` (148/149) — the classic PLOT/POINT pixel pair, `Screen.plot`/`point` resolving `INK` through the active palette before reaching `ScreenHal.drawPixel`/`readPixel` (spec `01-HAL.md` §3.4, `hal_read_pixel` newly added alongside `hal_draw_pixel`). Everything else — `LINE` (Bresenham, `LINE-WIDTH`-driven thick-stroke approximation), `RECT`/`RECT-FILL`, `CIRCLE`/`CIRCLE-FILL` (midpoint circle, no `SQRT`/trig) — is pure Forth in a new `GRAPHICS` vocabulary, `system.fth`, branching off `EDITOR`'s close per `CLAUDE.md`'s "primitives only if necessary" rule. `ARC`/a `MATH` vocabulary deliberately deferred. Hit the `(`-comment-closes-early footgun a fourth time (M46/M48 hit it before) via a nested `(148)`-style aside — every comment in the new section rewritten paren-free. `testTimeout` doubled to 40s (same fix as M48) once the bigger dictionary started tripping the old 20s ceiling on unrelated `EDITOR` tests under full-suite contention. | `screen.ts`, `primitives.ts`, `rebel-opcodes.json`, `canvas-screen-hal.ts`, `remote-board.ts`, `system.fth`, `01-HAL.md`, `screen.test.ts`, `graphics.test.ts`, `vitest.config.ts` |
 | **M69** | `\` — rest-of-line comment (§1.81), closing `04-FORTH-CORE.md` §9's own long-deferred "not specified here either" item. Direct fallout from M68's `(`-comment footgun hitting a fourth time: `: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE`, no new primitive — loops the already-native `WORD` (token 134) until its own "line exhausted" zero-length signal fires. Has no closing token to glue a nested paren onto, so it structurally can't suffer `(`'s failure mode. Caught a real near-miss while writing its own doc comment (the same bug, in the very comment explaining the bug), fixed by paren-free rewriting before it ever ran. | `system.fth`, `04-FORTH-CORE.md`, `comments.test.ts` |
 | **M70** | `SEE`/`HIDE` fixed to resolve names via `CONTEXT`, not raw `LATEST` (§1.82) — found by Oliver: both worked on a word in `EDITOR` once `EDITOR DEFINITIONS` had run, but threw `unrecognized word` on the same word after only `USE EDITOR`. Root cause: both predate `VOCABULARY` (M12 vs. M13) and resolve names via native `'`, which walks raw `LATEST`, never updated when M48 split browsing (`CONTEXT`) from compiling (`CURRENT-VOCAB`/`LATEST`) for real. Fixed entirely in `system.fth`: `FIND` relocated next to `WORDS` (near the top of the file) so `SEE`/`HIDE` can resolve names through it via a new `(TICK)` helper, a new shared `SEARCH-ROOT` word, and `XT-NAME`/`HIDE`'s own internal xt-to-entry walks switched from `LATEST` to `SEARCH-ROOT` too. No engine change. | `system.fth`, `see-hide.test.ts` |
+| **M71** | `INK`/`PAPER` become real variables (§1.83), Oliver's call, breaking change accepted pre-1.0: `n INK`/`n PAPER` (store, no read) replaced with `n INK !`/`n PAPER !` and the new `INK @`/`PAPER @`, matching the `BASE`/`STATE`/`HERE-ADDR`/`LATEST-ADDR` variable idiom instead of being the one remaining color-consuming-store pair. `Screen.setInk`/`setPaper` deleted (no other callers). | `primitives.ts`, `screen.ts`, `rebel-opcodes.json`, `system.fth`, `screen.test.ts`, `project.test.ts`, `remote-terminal-loopback.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

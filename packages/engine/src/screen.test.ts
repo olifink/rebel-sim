@@ -109,7 +109,7 @@ describe('Screen', () => {
     const m = new Machine({ screenHal: hal });
     hal.blitGlyph.mockClear();
 
-    m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A'
+    m.interpret('16711680 INK ! 255 PAPER ! 65 EMIT'); // red ink, blue paper, 'A'
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
   });
 
@@ -243,7 +243,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     expect(m.screen.getPaletteBase()).toBe(m.banks.findBank('PAL')!.base);
 
     hal.blitGlyph.mockClear();
-    m.interpret('16711680 INK 255 PAPER 65 EMIT'); // red ink, blue paper, 'A' -- both >=16, literal either way
+    m.interpret('16711680 INK ! 255 PAPER ! 65 EMIT'); // red ink, blue paper, 'A' -- both >=16, literal either way
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
   });
@@ -281,7 +281,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     hal.blitGlyph.mockClear();
 
     m.interpret('BANK@ PAL PALETTE-BASE !');
-    m.interpret('4 INK 0 PAPER 65 EMIT'); // green (4) on black (0)
+    m.interpret('4 INK ! 0 PAPER ! 65 EMIT'); // green (4) on black (0)
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
   });
@@ -305,7 +305,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     hal.blitGlyph.mockClear();
 
     m.interpret('2 PALETTE');
-    m.interpret('0 INK 0 PAPER 65 EMIT');
+    m.interpret('0 INK ! 0 PAPER ! 65 EMIT');
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x123456, 0x123456);
   });
@@ -338,7 +338,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
     hal.blitGlyph.mockClear();
 
-    m.interpret('4 INK 0 PAPER 65 EMIT'); // green (index 4) on black (index 0)
+    m.interpret('4 INK ! 0 PAPER ! 65 EMIT'); // green (index 4) on black (index 0)
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 0x00ff00, 0x000000);
   });
@@ -349,7 +349,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
     hal.blitGlyph.mockClear();
 
-    m.interpret('16711680 INK 255 PAPER 65 EMIT');
+    m.interpret('16711680 INK ! 255 PAPER ! 65 EMIT');
 
     expect(hal.blitGlyph).toHaveBeenCalledWith(0, 0, 65, 16711680, 255);
   });
@@ -361,7 +361,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     m.screen.showCursor(); // CURSEN
     hal.blitGlyph.mockClear();
 
-    m.interpret('16777215 INK 0 PAPER 65 EMIT'); // white 'A' on black
+    m.interpret('16777215 INK ! 0 PAPER ! 65 EMIT'); // white 'A' on black
 
     // The cell EMIT wrote must be the LAST thing painted there — not
     // clobbered a moment later by the cursor moving off it.
@@ -373,7 +373,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     const m = new Machine();
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
 
-    m.interpret('4 INK 0 PAPER 65 EMIT');
+    m.interpret('4 INK ! 0 PAPER ! 65 EMIT');
 
     const attrBank = m.banks.findBank('ATTR')!;
     expect(m.arena.readByte(attrBank.base)).toBe(0x40);
@@ -385,7 +385,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     const attrBank = m.banks.findBank('ATTR')!;
     m.arena.writeByte(attrBank.base, 0xff); // sentinel — writeChar() must leave this alone
 
-    m.interpret('4 INK 0 PAPER 65 EMIT');
+    m.interpret('4 INK ! 0 PAPER ! 65 EMIT');
 
     expect(m.arena.readByte(attrBank.base)).toBe(0xff);
   });
@@ -394,10 +394,10 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     const hal = spyHal();
     const m = new Machine({ screenHal: hal });
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
-    m.interpret('2 INK 1 PAPER 65 EMIT'); // red (2) on blue (1) at (0,0)
-    m.interpret('6 INK 0 PAPER 66 EMIT'); // yellow (6) on black (0) at (1,0)
+    m.interpret('2 INK ! 1 PAPER ! 65 EMIT'); // red (2) on blue (1) at (0,0)
+    m.interpret('6 INK ! 0 PAPER ! 66 EMIT'); // yellow (6) on black (0) at (1,0)
 
-    m.interpret('99 INK 99 PAPER'); // change the global colors to something unrelated
+    m.interpret('99 INK ! 99 PAPER !'); // change the global colors to something unrelated
     hal.blitGlyph.mockClear();
 
     m.screen.redrawAll();
@@ -410,7 +410,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     const hal = spyHal();
     const m = new Machine({ screenHal: hal });
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
-    m.interpret('3 INK 5 PAPER'); // magenta ink, cyan paper
+    m.interpret('3 INK ! 5 PAPER !'); // magenta ink, cyan paper
 
     m.interpret('CLS');
     hal.blitGlyph.mockClear();
@@ -425,7 +425,7 @@ describe('Indexed color palette + ATTR bank (spec/01-HAL.md §3.6, spec/02-MEMOR
     const hal = spyHal();
     const m = new Machine({ screenHal: hal });
     m.screen.setPaletteBase(m.banks.findBank('PAL')!.base);
-    m.interpret('2 INK 1 PAPER 3 4 65 CHAR!'); // 'A', red (2) ink / blue (1) paper, ATTR = 0x21
+    m.interpret('2 INK ! 1 PAPER ! 3 4 65 CHAR!'); // 'A', red (2) ink / blue (1) paper, ATTR = 0x21
     m.interpret('3 4 AT-XY');
     hal.blitGlyph.mockClear();
 
@@ -446,7 +446,7 @@ describe('PLOT/POINT (M68: the one primitive the GRAPHICS vocabulary is built on
     m.interpret('4 5 PLOT');
     expect(hal.drawPixel).toHaveBeenCalledWith(4, 5, 0x00ff00);
     m.screen.setPaletteBase(0); // disable: INK now means literal RGB
-    m.interpret('16711680 INK 7 8 PLOT'); // 0xff0000
+    m.interpret('16711680 INK ! 7 8 PLOT'); // 0xff0000
     expect(hal.drawPixel).toHaveBeenCalledWith(7, 8, 0xff0000);
   });
 
