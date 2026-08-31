@@ -1256,7 +1256,7 @@ VARIABLE SCR
 ( the whole display, same as a real screen editor commandeering the )
 ( terminal, instead of appending after whatever REPL output -- prior )
 ( ok prompts, command echoes -- was already on screen. )
-: L ( -- ) CLS SCR @ LIST ;
+: L ( -- ) SCR @ LIST ;
 
 ( T-LINE is a scratch variable threading a computed line address )
 ( through T, the same convention every other scratch variable in )
