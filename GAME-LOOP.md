@@ -98,7 +98,25 @@ Two directions, not decided here:
   `KEY`-suspend composition, §6.9's discussion of `ACCEPT`), saving just
   enough state (not a full second stack) to resume there next tick.
   Cheaper, fits the existing single-stack model unmodified, but more
-  restrictive about where a task may yield.
+  restrictive about where a task may yield — and more restrictive than
+  "defined call sites" alone suggests. `DSTK`/`RSTK` are singleton
+  per-arena banks (one `SP0`/`RP0` pair, `03-SYSVARS.md` §11), shared by
+  every task's turn within a tick, not one pair per task. If a task
+  yielded with anything left on that shared stack, the next task's turn
+  would push/pop against those same leftover cells with no way to tell
+  "task A's suspended values" from "task B's live computation" — a
+  single shared stack cannot hold two tasks' independent live state at
+  once. So a yield point isn't just "a defined call site," it's
+  specifically a point of *zero net stack depth* for that task's turn.
+  No stack contents ever survive a yield; "saving just enough state"
+  means saving only a resume marker (e.g. a state value a `CASE`
+  dispatches on) into the task's own table entry, never a stack
+  snapshot. This makes the option less "coroutine" and more "a
+  state-machine function re-invoked once per tick" — correct and cheap,
+  but worth naming precisely so it isn't mistaken for a smaller version
+  of §4.4's ip+stack suspension. The same zero-net-depth rule applies at
+  *every* yield for a task that yields more than once per tick (the
+  "Task table"/"YIELD" sections above), not just at turn end.
 
 This needs to be resolved — probably by looking at what
 `02-MEMORY-MODEL.md` and `03-SYSVARS.md` can absorb — before task table

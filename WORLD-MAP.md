@@ -13,6 +13,30 @@ scrolling. A room is a single fixed screen; there is no camera, no
 partial-room viewport, and no scroll offset anywhere in this format.
 Exits are room-to-room jumps, not scroll boundaries.
 
+## Relationship to 02-MEMORY-MODEL.md / 01-HAL.md
+
+Unlike `SPRITE-BANK.md`, no bank tag exists yet for this data —
+`02-MEMORY-MODEL.md` §4.6's known-tag list has nothing world/room-shaped,
+and it's explicit that list "grows... as a target's own real, load-bearing
+need" adds to it, not on spec. Given that, this format is scoped to live
+in the generic `DATA` tag ("General-purpose scratch", §4.6; `.DAT`
+extension and "ordinary content asset" persistence, `01-HAL.md` §6.3)
+rather than proposing a new tag — the format itself is opaque bytes to
+the memory model either way, and `02-MEMORY-MODEL.md` §4.7 already lets
+multiple `DATA`-tagged banks coexist, distinguished by `name` (one world
+per bank, named for the world/level), the same way `SPRITE-BANK.md`
+distinguishes multiple sprite sheets under `SPRT`. Every "Offset" below
+is relative to the bank's own base (byte 6 of a persisted `.DAT` file,
+past the standard asset header, `01-HAL.md` §6.3). A world exceeding one
+bank's `MAX_BANK_SIZE` (4 MiB, `02-MEMORY-MODEL.md` §4.3) needs
+splitting across multiple `DATA`-tagged banks — not addressed by the
+single-bank world-graph structure below.
+
+Promoting this to its own tag only becomes worth raising against
+`02-MEMORY-MODEL.md`/`01-HAL.md` if a real, load-bearing need shows up
+(e.g. a tool or loader that must distinguish "world data" from other
+`DATA`-tagged content by tag alone, not by name) — not by default.
+
 ## Two-level structure
 
 1. **Room** — a fixed-size 3D grid of cells (x, y, z) plus exit
@@ -49,6 +73,18 @@ Offset  Size   Contents
 0       1      tile bank entry index (references SPRITE-BANK.md)
 1       1      solidity flags
 ```
+
+**Open gap, not resolved here:** nothing in this format says *which*
+`SPRT`-tagged bank (`SPRITE-BANK.md`) a room's tile indices resolve
+against, and `02-MEMORY-MODEL.md` §4.7 allows several to be resident at
+once, distinguished by name. `03-SYSVARS.md` §9's `SPRITE` group is
+fully reserved with no fields defined yet — the natural home for an
+"active tile bank" pointer, the same pattern `PALETTE-BASE`/`FONT-BASE`
+already establish (`03-SYSVARS.md` §6/§8) — but that's a candidate, not
+a decision made here. Until resolved, treat a room's tile indices as
+resolving against a single implicit global tile bank, one per world at
+most (not per-room), consistent with the current "one palette" scoping
+elsewhere.
 
 ### Solidity flags (byte 1)
 
@@ -96,6 +132,20 @@ Offset  Size   Contents
 2       1      destination room index
 3       1      destination entry cell reference
 ```
+
+**Correctness gap, not a memory-model issue — an internal one:** a
+"cell reference" here is 1 byte, but the room header (below) allows
+width/height/depth each up to 255 independently, so a room whose
+`width * height * depth` exceeds 256 has cells no single byte can
+address as a linear index, and no byte in this 4-byte layout has room
+for a packed (x, y, z) triple either. Exits fire from a room's edge, so
+in practice only two of the three axes ever vary for a given direction
+(e.g. a `NORTH`/`SOUTH` exit's source only needs an (x, z) pair, `y`
+being fixed at the edge) — that may be enough to fit one byte per axis
+pair for realistic room sizes, but this format doesn't yet say so
+explicitly, and a room where even the two relevant axes multiply past
+256 (e.g. a 32x32 isometric floor) still overflows. Needs resolving
+before this is implemented, not just before it's optimized.
 
 ### Direction encoding
 
