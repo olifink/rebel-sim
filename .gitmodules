@@ -1,0 +1,3 @@
+[submodule "rebel-specs"]
+	path = rebel-specs
+	url = https://github.com/olifink/rebel-specs.git
