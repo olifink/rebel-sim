@@ -1,6 +1,6 @@
 {
-  "name": "Rebel-Sim",
-  "short_name": "Rebel-Sim",
+  "name": "Rebel Simulator",
+  "short_name": "RebelSim",
   "description": "Browser-based Forth simulator for Rebel, a bare-metal keyboard computer.",
   "display": "standalone",
   "scope": "./",
