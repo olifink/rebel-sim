@@ -120,6 +120,110 @@ interface Channel {
   of routing M7's blocking I/O through `Channel` now rather than directly
   against `Keyboard`.
 
+## 3a. Binary frame protocol (added 2026-09-02, revised 2026-09-02 — draft,
+unreviewed)
+
+**Revision note:** this section originally proposed a from-scratch
+COBS-encoded frame with a `target`-byte router multiplexing several
+subsystems over one physical link. That conflicted with a convention this
+project had *already* built and shipped: `REMOTE-TERMINAL.md` §3/§4/§6
+(Rebel-Sim ↔ RP2350 board, `remote-terminal-protocol.ts`). This revision
+drops the from-scratch design in favor of that one. See below for what
+changed and why.
+
+Motivation, unchanged: raw `Channel` bytes are enough for keyboard-shaped
+input feeding `KEY`. Some transports instead need real bidirectional
+traffic — Rebel-Net-Stick's postbox requests/responses being the first
+Rebel-ROM-side case. Rather than invent a second binary-framing style for
+that, it should follow the same shape `REMOTE-TERMINAL.md` already
+established and shipped.
+
+**Framing convention: adopt `REMOTE-TERMINAL.md` §3/§4/§6 as-is, not a
+new design.**
+
+```
+byte 0            SYNC        0xA5              fixed; never a valid MSG_ID
+byte 1            MSG_ID      u8                per-protocol catalog, own to this link
+byte 2            LEN         u8                payload length, 0-255
+byte 3..3+LEN-1   PAYLOAD     LEN bytes          per message
+byte 3+LEN        CHECKSUM    u8                (MSG_ID + LEN + Σ payload) mod 256
+```
+
+- Multi-byte payload fields little-endian, matching the same rule
+  `FORTH-ARCHITECTURE.md` fixes for every Forth cell.
+- Booleans: `0xFF` = TRUE, `0x00` = FALSE — the byte-width-scaled version
+  of the project's `TRUE = -1` HAL convention, not a new one.
+- Checksum is additive mod 256, **not** CRC — deliberately: it exists to
+  catch local framing/resync bugs, not to act as forward error correction
+  over a link (USB CDC) that already does bit-level integrity checking
+  underneath. A stronger check is something to add only if real
+  corruption is actually observed in practice.
+- Resync: scan forward for `0xA5`; trust a candidate as a real frame
+  boundary only once its trailing checksum validates, so a byte that
+  happens to equal `0xA5` inside a payload is never misread as a false
+  frame start. On checksum mismatch, discard and resume scanning from the
+  very next byte — never get stuck.
+- No per-message ACK/retransmit, and no wire-level heartbeat — the
+  transport's own connect/disconnect signal (WebSerial's `disconnect`
+  event there; the OS's USB CDC attach/detach on Rebel-ROM's side) is
+  treated as sufficient, and a dropped frame is expected to be corrected
+  by the next message that touches the same state, not retried.
+
+**What's genuinely reusable is the convention, not a shared codec.**
+`REMOTE-TERMINAL.md` doesn't multiplex several subsystems over one link
+with a routing byte — it's single-purpose per physical link, with its own
+scoped `MSG_ID` catalog (`HELLO`/`HELLO_ACK`/`PLOT_CHAR`/`CLEAR`/`CURSOR`/
+`KEY_EVENT`), and deliberately pushes unrelated traffic (human-readable
+debug logging) onto a *separate* physical UART rather than sharing the
+binary link. Net-Stick doesn't share a wire with Remote-Terminal at all —
+different physical link, different purpose — so there's no actual need
+for a shared multiplexing codec between them. What Net-Stick should reuse
+is the frame *shape* above (sync/id/len/checksum, endianness, booleans,
+resync-by-rescan, no-ACK philosophy), while defining its own `MSG_ID`
+catalog scoped to postboxes (`NET-STICK.md`, forthcoming) — the same
+relationship `REMOTE-TERMINAL.md`'s catalog has to this shared shape, not
+a new relationship.
+
+One consequence worth flagging now rather than rediscovering later:
+`LEN` is a `u8` (max 255-byte payload) in the adopted convention. Net-Stick
+response bodies — including anything condensor/summarizer output — will
+routinely exceed that and need chunking across multiple frames; that's a
+`NET-STICK.md` design point, not a change to this shape.
+
+**First real use of the reserved write side.** `SerialChannel`'s
+`write_byte()`/`write_string()`, reserved-but-unused since §3, get their
+first actual caller here — framed traffic needs real outbound bytes, not
+just `read_byte()`. Whether that means implementing those methods as
+originally reserved, or introducing a distinct duplex-capable channel
+variant (`SerialChannel` gains real write; `KeyboardChannel` stays
+read-only, since a keyboard has no write side to speak of) is an open
+question below, not assumed here.
+
+**Where structured, stateful consumers like postboxes live.** Not as a
+`Channel` — Net-Stick's postboxes are structured and asynchronous (a fixed
+number of slots, each with its own state, a ready-bitmask, no meaningful
+"next byte" to hand `KEY`). That's the same shape as the **Device services
+API** bucket in §2 (sprite compositing, pointer tracking) — stateful
+hardware access with its own internal lifecycle, not stream-shaped. The
+resulting layering:
+
+```
+Forth words (postbox-specific, e.g. NET-SEND, NET-READY?, NET-READ)
+        |
+Postbox device-services module (owns slot state, ready bitmask)
+        |
+Frame parser (this section's shape; Net-Stick's own MSG_ID catalog)
+        |
+SerialChannel (raw duplex bytes)
+        |
+Circle / USB CDC HAL
+```
+
+This mirrors how `KeyboardChannel` wraps `CKeyboardModule` today: the
+*channel* is the raw transport, a *device module* above it owns real
+state and exposes its own Forth words, and nothing about postboxes needs
+to pretend to be `KEY`-shaped to fit.
+
 ## 4. Command processor binding
 
 Rather than one interpreter instance multiplexing multiple channels, the
@@ -185,6 +289,24 @@ coherent command/response cycle looks like.
   engine, no transport layer to design.
 - ~~Whether `EMIT`/`TYPE` dispatch through a channel~~ — **resolved, §8**:
   no, they call the screen HAL directly.
+- **New, from §3a**: activate `SerialChannel`'s reserved write methods
+  as-is, or introduce a distinct duplex-capable channel variant so
+  read-only channels like `KeyboardChannel` aren't stuck implementing a
+  write interface they'll never use? Open, decide when the frame parser
+  is actually implemented.
+- ~~Checksum choice for the binary frame trailer~~ — **resolved, §3a
+  revision**: additive mod 256, adopted directly from
+  `REMOTE-TERMINAL.md` §3, not decided independently.
+- ~~Whether a shared `target`-byte multiplexing codec is needed across
+  future binary-framed subsystems~~ — **resolved, §3a revision**: no —
+  `REMOTE-TERMINAL.md` precedent is one scoped `MSG_ID` catalog per
+  physical link, not multiplexing. Net-Stick gets its own catalog on its
+  own link; revisit only if a real case for sharing one physical link
+  across subsystems ever shows up.
+- **New, from §3a revision**: `NET-STICK.md`'s own message catalog will
+  need a chunking scheme for payloads over the `u8 LEN` cap (255 bytes)
+  — postbox response bodies, condensor output — since the adopted frame
+  shape doesn't raise that ceiling. Belongs in `NET-STICK.md`, not here.
 
 ## 7. Next-phase implementation targets
 
@@ -198,6 +320,13 @@ coherent command/response cycle looks like.
 4. Prove out two independent sessions (keyboard-bound, serial-bound)
    sharing memory banks/sysvars.
 5. `RemoteChannel` + daemon (separate design pass, informed by this doc).
+6. Binary frame parser (§3a) — sync/id/len/checksum shape adopted from
+   `REMOTE-TERMINAL.md` §3, implemented in C++ for the first time (that
+   doc's version is TypeScript/Rebel-Sim-side only). Sits beside
+   `Channel` rather than inside it. First consumer is Rebel-Net-Stick's
+   postbox device-services module (`NET-STICK.md`, forthcoming), riding
+   on `SerialChannel`'s now-active write side, with its own `MSG_ID`
+   catalog rather than sharing one with Remote-Terminal's.
 
 **Rebel-Sim (M7, done — see `PLAN.md`):** the TypeScript equivalent
 of targets 1-3 above, run ahead of Rebel-ROM's Phase 11 in this
