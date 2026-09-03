@@ -44,7 +44,7 @@
   max-width: 100%;
   aspect-ratio: 4 / 3;
   image-rendering: pixelated;
-  border: 1px solid #AAA;
+  border: 1px solid #555;
   background: #000;
   flex-shrink: 0;
   outline: none;
