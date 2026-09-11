@@ -10,7 +10,7 @@ import {
   OnDestroy,
   declareExperimentalWebMcpTool,
 } from '@angular/core';
-import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, listSysvars, RemoteChannel, RemoteBoard, RemoteTerminal } from '@rebel-sim/engine';
+import { Machine, runStorageSelfTest, listDictionaryEntries, getPrimitiveNote, listSysvars, BANK_NAME_LEN, RemoteChannel, RemoteBoard, RemoteTerminal } from '@rebel-sim/engine';
 import type { Bank, ByteSink, DictionaryEntry, StepStatus, SysvarEntry } from '@rebel-sim/engine';
 import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
@@ -26,6 +26,30 @@ import { buildZip } from './zip-writer.js';
 const FRAMEBUFFER_WIDTH = 640;
 const FRAMEBUFFER_HEIGHT = 480;
 const TARGET_CSS_WIDTH = 1024; // ~2x at devicePixelRatio 1, same on-screen scale factor as before
+
+// Drag-and-drop asset import (rebel-font-editor/rebel-sprite-editor are
+// the real producers of these files today): 'R','A' + the 4-char bank
+// tag, storage.ts's own ASSET_MAGIC/ASSET_HEADER_SIZE convention for a
+// project asset file — rebel-sprite-editor's .SPR export already writes
+// this header, so a dropped .SPR round-trips through the exact same
+// on-disk shape as a saved project asset. rebel-font-editor's .FNT
+// export is header-less raw bytes (matching public/rebel.FNT, loaded
+// the same way by loadDefaultFont() below) — stripAssetHeader() only
+// strips the header when it's actually present and matches the drop
+// zone's own tag, so both shapes land on the same payload either way.
+const ASSET_HEADER_LEN = 6;
+
+function stripAssetHeader(bytes: Uint8Array, tag: string): Uint8Array {
+  if (
+    bytes.length >= ASSET_HEADER_LEN &&
+    bytes[0] === 0x52 && // 'R'
+    bytes[1] === 0x41 && // 'A'
+    String.fromCharCode(bytes[2], bytes[3], bytes[4], bytes[5]) === tag
+  ) {
+    return bytes.subarray(ASSET_HEADER_LEN);
+  }
+  return bytes;
+}
 
 @Component({
   selector: 'app-root',
@@ -57,6 +81,14 @@ export class App implements AfterViewInit, OnDestroy {
   // (Machine.storage.listProjects(), a plain localStorage scan), polled/
   // diffed in tick() exactly like bankTable/dictionaryWords below.
   protected readonly projectNames = signal<string[]>([]);
+
+  // Drag-and-drop asset import (see stripAssetHeader()'s comment above):
+  // one drop zone per tag, scoped to the two the sibling editor webapps
+  // (rebel-font-editor, rebel-sprite-editor) actually exist for today —
+  // not a generic per-tag drop zone for every bank, per CLAUDE.md's
+  // "minimum real mechanism" scoping. `readonly` array, not a signal:
+  // fixed for the app's lifetime, only ever read by the template.
+  protected readonly importableBankTags: readonly string[] = ['FONT', 'SPRT'];
 
   // DEBUGGING.md (M10) UI: `undefined` while running; the paused
   // word's name once step() returns 'breakpoint'. Both the pump loop
@@ -846,6 +878,92 @@ export class App implements AfterViewInit, OnDestroy {
     a.download = `${name}.zip`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // "import asset" drop zones (one per importableBankTags entry) —
+  // bankTable() already reflects the live table, so this needs no extra
+  // polled state of its own, same as e.g. projectBankTooltip() above.
+  protected bankNameForTag(tag: string): string | undefined {
+    return this.bankTable().find((b) => b.tag === tag)?.name;
+  }
+
+  // dragover must call preventDefault() or the browser never fires drop
+  // at all (its own default is "reject as a non-drop-target").
+  protected onAssetDragOver(event: DragEvent): void {
+    event.preventDefault();
+  }
+
+  protected onAssetDrop(tag: string, event: DragEvent): void {
+    event.preventDefault();
+    const file = event.dataTransfer?.files[0];
+    if (file) {
+      void this.importAssetFile(tag, file);
+    }
+  }
+
+  // The actual import: suggests the drop zone's existing bank name (if
+  // any) as the target via a plain window.prompt() — its native
+  // editable-default-value behavior is exactly "suggest a name, let the
+  // user overwrite it to create a different one" with no bespoke modal
+  // UI needed. Overwriting an existing name only proceeds if that bank
+  // is actually the same tag (a stale/mistyped name belonging to some
+  // other bank must not silently get the wrong bytes written into it);
+  // any other name creates a fresh bank instead, matching
+  // storage.ts's own openProject() fallback shape.
+  private async importAssetFile(tag: string, file: File): Promise<void> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const payload = stripAssetHeader(bytes, tag);
+
+    const suggested = this.bankNameForTag(tag) ?? tag;
+    const input = window.prompt(`Import "${file.name}" into a ${tag} bank named:`, suggested);
+    if (!input) {
+      return; // cancelled
+    }
+    const name = input.trim().toUpperCase().slice(0, BANK_NAME_LEN);
+    if (!name) {
+      return;
+    }
+
+    try {
+      const existing = this.machine.banks.findBankByName(name);
+      if (existing) {
+        if (existing.tag !== tag) {
+          window.alert(`${name} is a ${existing.tag} bank, not ${tag} — pick a different name.`);
+          return;
+        }
+        this.writeBankPayload(existing, payload);
+      } else {
+        const created = this.machine.banks.createBank(tag, payload.length, name);
+        this.writeBankPayload(created, payload);
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    // FONT is read live by CanvasScreenHal's own glyph blit (M59, no
+    // cache) — redrawAll() is what makes an in-place replacement visible
+    // immediately rather than only on the next natural repaint.
+    if (tag === 'FONT') {
+      this.machine.screen.redrawAll();
+    }
+    this.wake();
+  }
+
+  // Same zero-pad-if-short/throw-if-too-large contract as
+  // Storage.loadAsset()'s own inner loop (storage.ts) — this bank's size
+  // is fixed until a save/restart cycle (BankTable.resizeBank()'s own
+  // comment), so a too-large drop is a real error, not something to
+  // truncate silently.
+  private writeBankPayload(bank: Bank, payload: Uint8Array): void {
+    if (payload.length > bank.size) {
+      throw new Error(
+        `dropped file is ${payload.length} bytes, too large for ${bank.tag}/${bank.name}'s ${bank.size}-byte bank`,
+      );
+    }
+    for (let i = 0; i < bank.size; i++) {
+      this.machine.arena.writeByte(bank.base + i, i < payload.length ? payload[i] : 0);
+    }
   }
 
   // WebMCP is an experimental browser feature

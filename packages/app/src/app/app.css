@@ -187,6 +187,30 @@
   opacity: 0.6;
 }
 
+/* "import asset" drop zones (app.ts's importableBankTags) — one per
+   importable bank tag, each a dashed-border target the browser accepts
+   a file drop onto. Deliberately no separate ".drag-over" hover state:
+   the native drag cursor/outline the browser already shows over any
+   valid drop target is enough for a HUD panel this small. */
+.asset-drop-zones {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.asset-drop-zone {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px dashed #0f0;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
+
+.asset-drop-tag {
+  font-weight: bold;
+}
+
 .bank-table {
   width: 100%;
   border-collapse: collapse;

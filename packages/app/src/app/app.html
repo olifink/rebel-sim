@@ -87,6 +87,22 @@
     </div>
 
     <div class="inspector-section">
+      <div class="inspector-label">import asset (drag & drop):</div>
+      <div class="asset-drop-zones">
+        @for (tag of importableBankTags; track tag) {
+          <div
+            class="asset-drop-zone"
+            (dragover)="onAssetDragOver($event)"
+            (drop)="onAssetDrop(tag, $event)"
+          >
+            <span class="asset-drop-tag">{{ tag }}</span>
+            <span class="inspector-empty">{{ bankNameForTag(tag) ?? '(drop to create)' }}</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="inspector-section">
       <div class="inspector-label">project storage:</div>
       <div class="inspector-words">
         @for (name of projectNames(); track name) {

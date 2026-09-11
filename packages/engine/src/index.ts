@@ -4,6 +4,7 @@ export {
   roundToSizeClass,
   MIN_BANK_SIZE,
   MAX_BANK_SIZE,
+  BANK_NAME_LEN,
   BankFlagResident,
   BankFlagExternal,
   BankFlagSwappable,
