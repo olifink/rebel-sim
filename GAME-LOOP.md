@@ -46,6 +46,31 @@ design for filling that gap for the game case specifically — the game
 tick is *a* step-function shape consistent with §4.4's suspension
 model, not a reuse of one that's already been specified elsewhere.
 
+**Rebel-Sim has since closed this gap, concretely, for itself — this
+document predates that and should be updated in light of it.**
+`packages/engine/src/repl.ts`'s `Machine.step(budget)` drives the
+current outer-loop session (a JS generator, `beginLine()` + `step()`)
+for up to `budget` token-dispatch steps per call, returning a
+`StepStatus`: `'more-to-run'` if the budget ran out mid-line,
+`'blocked'` at an unresolved `KEY`, `'breakpoint'` at an armed word,
+`'idle'` once a line finishes. `packages/app/src/app/app.ts`'s `tick()`
+calls it once per `requestAnimationFrame`. That already *is* a step-
+budget/cooperative-yield mechanism satisfying §4.4's suspension model —
+not a future design, running code today, underneath every Forth word
+including entity logic. The "candidate design" framing in this
+document's header is accordingly stale for Rebel-Sim specifically
+(other, more constrained targets may still face a genuine step-budget-
+vs-interrupt-driven choice of their own — that part of §4.4's gap isn't
+universally closed, just closed *here*).
+
+One direct consequence: the entity scheduler's `YIELD` (below) does not
+need its own host-level suspend mechanism. Per the "coroutines on the
+single stack" resolution under "Cooperative entity scheduler," `YIELD`
+is pure Forth-level flow control — indistinguishable, from `step()`'s
+point of view, from any other word boundary a budget might expire
+mid-way through. The one place a *new* suspend reason is actually
+needed is frame sync, not entity switching — see "VSYNC / FLIP" below.
+
 ## Cooperative entity scheduler
 
 Game entities (player, enemies, projectiles, particles) are
@@ -227,6 +252,22 @@ per target belong in `SCREEN-MODULE.md`'s hardware-facing sections,
 not here. Nothing about the entity scheduler or render list depends on
 which mechanism a given target uses to signal "next frame."
 
+**For Rebel-Sim, this is the one place the existing `step()`/
+`StepStatus` mechanism (see "Relationship to 04-FORTH-CORE.md §4"
+above) genuinely needs something new, not just reuse.** `'blocked'`
+already means "suspended, resume only when something external gives a
+reason to" — `app.ts`'s pump lets the RAF chain die on `'blocked'`
+until a keystroke or other event calls `wake()`, which is correct for
+`KEY` but wrong for a running game: a frame-sync suspend must resume on
+the *next* `requestAnimationFrame`, unconditionally, not wait for an
+unrelated wake reason. The natural shape is one more suspend reason —
+provisionally `'frame'` — that the generator yields at the game tick's
+boundary and that `tick()` treats distinctly from `'blocked'`: always
+reschedule the next RAF, never let the chain die, regardless of whether
+its own diffing sees anything changed. This is a small, additive change
+to an already-shipped mechanism, not a new scheduler — see "Open
+questions" for what's still unresolved about its exact shape.
+
 ## Explicitly deferred
 
 - **Exact task table size, slot count, and memory layout widths** —
@@ -251,11 +292,19 @@ which mechanism a given target uses to signal "next frame."
   extension) or run as single-stack coroutines yielding only at defined
   call sites. This is the load-bearing open question in this document;
   most of the rest depends on which way it goes.
-- Whether the game tick's incremental-stepping mechanism should be
+- ~~Whether the game tick's incremental-stepping mechanism should be
   proposed as the concrete answer to `04-FORTH-CORE.md` §4.4's
   target-agnostic "step budget / cooperative yield / interrupt-driven
   preemption" gap, or stay a game-specific mechanism that doesn't try
-  to generalize to the REPL/editor case.
+  to generalize to the REPL/editor case.~~ Resolved for Rebel-Sim: it
+  already has one (`repl.ts`'s `step()`/`StepStatus`, driven by
+  `app.ts`'s RAF `tick()`) — see "Relationship to 04-FORTH-CORE.md §4"
+  above. The entity scheduler runs on top of it unmodified; only frame
+  sync needs anything new. Still open, narrower, and concrete now:
+  **the exact shape of that addition** — a new `StepStatus` value (e.g.
+  `'frame'`) vs. some other signal, where in `Inner`'s dispatch loop it
+  gets yielded from, and how a Forth-level word requests it (a `PAUSE`-
+  or `KEY`-like primitive, presumably) — see "VSYNC / FLIP" above.
 - Word names for the scheduler (`YIELD`-equivalent), slot table access
   words, and the render pass entry point — to be finalized against
   `CORE-VOCABULARY.md` once this reaches an actual milestone.
