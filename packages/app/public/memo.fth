@@ -33,6 +33,8 @@ DECIMAL
 
 \ ---- the current document ----
 VARIABLE D-SLOT                  \ its MMAP slot
+VARIABLE P-SLOT                  \ the current page document, which MEMO enters on
+VARIABLE EDIT-PENDING            \ the next entry is EDIT's, onto a block
 VARIABLE D-BLK                   \ true for a block bank
 VARIABLE D-COLS  VARIABLE D-ROWS
 VARIABLE BLK-PAGE  VARIABLE BLK-CX  VARIABLE BLK-CY   \ a block bank's place
@@ -120,6 +122,8 @@ VARIABLE SHOWN                   \ the screen holds the page right now
 : INSERT-SPACE ( -- )
   CY LINE CX + DUP 1+ D-COLS @ CX - 1- CMOVE>
   BL CY LINE CX + C!  CHANGED REDRAW ;
+\ Shift-Delete, 4.3: clear the line from the cursor to the right margin.
+: CLEAR-TO-END ( -- ) CY LINE CX + D-COLS @ CX - BLANKS CHANGED REDRAW ;
 \ Shift-Enter, 4.4: the text from the cursor moves to a new line below.
 : SPLIT-LINE ( -- )
   CY D-ROWS @ 1- = IF
@@ -258,7 +262,9 @@ VARIABLE KU  VARIABLE KS  VARIABLE KC
   K-SPACE IS? IF CY BLANK? IF SPLIT-PAGE ELSE INSERT-SPACE THEN -1 EXIT THEN
   K-ENTER IS? IF SPLIT-LINE -1 EXIT THEN
   K-BS IS? IF CX IF DELETE-CHAR ELSE JOIN-LINE THEN -1 EXIT THEN
-  K-ESC IS? IF EXECUTE-LINE -1 EXIT THEN
+  K-DEL IS? IF CLEAR-TO-END -1 EXIT THEN
+  \ Shift-Esc on a blank line leaves MEMO, as executing HOME would, 6.
+  K-ESC IS? IF CY BLANK? IF COMMIT HOME ELSE EXECUTE-LINE THEN -1 EXIT THEN
   0 ;
 : PLAIN-KEY ( -- )
   K-LEFT IS? IF CX 1- 0 MAX CY AT-XY EXIT THEN
@@ -280,7 +286,12 @@ VARIABLE KU  VARIABLE KS  VARIABLE KC
 \ ---- the environment, 8 ----
 : MEMO-STEP ( -- )
   ENV-REASON @  ENV-STEP ENV-REASON !
-  DUP ENV-ENTER = IF 0 CMD-ACTIVE ! SHOW THEN
+  DUP ENV-ENTER = IF
+    0 CMD-ACTIVE !
+    \ MEMO always enters on the page document; only EDIT enters on a block, 7.1.
+    EDIT-PENDING @ IF 0 EDIT-PENDING ! ELSE P-SLOT @ DOC! THEN
+    SHOW
+  THEN
   ENV-RECOVER = IF CMD-ACTIVE @ IF -1 FINISH-COMMAND ELSE SHOW THEN THEN
   EKEY DO-KEY ;
 ' MEMO-STEP CONSTANT MEMO-STEP-XT
@@ -310,12 +321,14 @@ VARIABLE KU  VARIABLE KS  VARIABLE KC
 : OPEN-DOC ( addr len -- flag )
   OPEN-SLOT DUP 0= IF EXIT THEN
   DUP OPENABLE? 0= IF DROP 0 EXIT THEN
+  DUP @ TAG-BLKS = 0= IF DUP P-SLOT ! THEN
   DOC! -1 ;
 VARIABLE MEMO-XT   \ MEMO itself, for EDIT -- set once MEMO exists
 : EDIT-BLOCK ( n -- )
   S" BLKS" OPEN-DOC 0= IF ." no BLKS bank, or a screen smaller than 64 x 16" ABORT THEN
   DUP 0 PAGES WITHIN 0= IF . ." - no such block" ABORT THEN
   BLK-PAGE !  0 BLK-CX !  0 BLK-CY !
+  -1 EDIT-PENDING !
   MEMO-XT @ EXECUTE ;
 
 FORTH DEFINITIONS MEMO-VOCAB

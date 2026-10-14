@@ -194,5 +194,40 @@ describe('MEMO (memo.fth, M80, spec/09-MEMO.md)', () => {
     expect(m.arena.readCell(sysv + 448)).toBe(0); // ENV-ENTRY: back at the prompt
     expect(notes(m).line(0, 0)).toBe('home'); // committed before running
   });
+
+  it('Shift-Delete clears the line from the cursor to the right margin', () => {
+    const m = enterMemo();
+    typeText(m, 'abcdef');
+    key(m, K.home);
+    key(m, K.right);
+    key(m, K.right);
+    key(m, K.del, true);
+    expect([row(m, 0), cursor(m)]).toEqual(['ab', [2, 0]]);
+  });
+
+  it('Shift-Esc on a blank line leaves MEMO for the Forth prompt, committing the page first', () => {
+    const m = enterMemo();
+    typeText(m, 'kept');
+    key(m, K.down);
+    key(m, K.esc, true);
+    const sysv = m.banks.findBankByName('SYSV')!.base;
+    expect(m.arena.readCell(sysv + 448)).toBe(0); // ENV-ENTRY: home
+    expect(notes(m).line(0, 0)).toBe('kept');
+  });
+
+  it('MEMO always re-enters on the page document, even after EDIT showed a Forth screen', () => {
+    const m = enterMemo();
+    typeText(m, 'my notes');
+    key(m, K.enter);
+    typeText(m, '0 edit');
+    key(m, K.esc, true);
+    expect(row(m, 16)).toBe('BLKS  0'); // on block 0
+    key(m, K.down);
+    key(m, K.esc, true); // blank line: back home
+    for (const u of [0x10, 0x08, 0x10, 0x12]) key(m, u); // m e m o
+    key(m, K.enter);
+    expect(row(m, 0)).toBe('my notes');
+    expect(row(m, 16)).not.toContain('BLKS'); // full-screen page, no status row
+  });
 });
 

@@ -5060,6 +5060,19 @@ wrappers (`OPEN-DOC`, `EDIT-BLOCK`, `MEMO` called through a captured
 xt), because words compiled while searching `MEMO-VOCAB` can't see what
 is added to `FORTH` afterwards. To be folded back into `09-MEMO.md`.
 
+*Follow-ups from Oliver trying it in the browser (specified in
+`09-MEMO.md` in the same change):*
+- **`MEMO` always enters on the current page document.** Before this,
+  after `0 EDIT`, `MEMO` re-entered on the Forth screen with its 64 × 16
+  layout. `P-SLOT` now tracks the current page document (set by
+  `OPEN-DOC` for any non-`BLKS` bank). `EDIT-BLOCK` sets `EDIT-PENDING`
+  before switching. On `ENV-ENTER` the step word shows the block only
+  when that is set, and otherwise switches back to `P-SLOT`.
+- **Shift-Delete** clears from the cursor to the right margin (§4.3,
+  `CLEAR-TO-END`).
+- **Shift-Esc on a blank line** commits and executes `HOME` (§6, §8),
+  writing nothing to the page.
+
 *Tests:* new `memo.test.ts` drives the real REPL loop with raw key
 events through `bootMachineWithMemo()` (a new `system+memo` boot image).
 It covers:
