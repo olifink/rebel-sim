@@ -34,6 +34,7 @@ const CODE_TO_USAGE: Readonly<Record<string, number>> = {
   F7: 0x40, F8: 0x41, F9: 0x42, F10: 0x43, F11: 0x44, F12: 0x45,
   PrintScreen: 0x46,
 
+  Home: 0x4a, Delete: 0x4c, End: 0x4d,
   ArrowRight: 0x4f, ArrowLeft: 0x50, ArrowDown: 0x51, ArrowUp: 0x52,
 
   // Modifiers — pseudo-usage-codes (0x80 + bit), matching

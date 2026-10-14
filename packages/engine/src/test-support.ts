@@ -76,7 +76,7 @@ export function loadSystemVocabulary(machine: Machine): void {
  * image whose recorded source hash no longer matches system.fth/
  * float.fth (watch mode, after an edit) is ignored and compiled fresh,
  * once per worker, as is everything when the setup didn't run. */
-export const BOOT_IMAGE_KEYS = ['system', 'system+float'] as const;
+export const BOOT_IMAGE_KEYS = ['system', 'system+float', 'system+memo'] as const;
 type BootImageKey = (typeof BOOT_IMAGE_KEYS)[number];
 
 declare module 'vitest' {
@@ -91,23 +91,20 @@ function changesLayout(options?: MachineOptions): boolean {
   return options?.arenaSize !== undefined || options?.personality !== undefined || options?.bootProject !== undefined;
 }
 
-function loadFloatWordset(machine: Machine): void {
-  machine.interpret('MODULE FLOAT');
-}
-
 function loadFor(key: BootImageKey): (m: Machine) => void {
-  return key === 'system'
-    ? loadSystemVocabulary
-    : (m) => {
-        loadSystemVocabulary(m);
-        loadFloatWordset(m);
-      };
+  if (key === 'system') return loadSystemVocabulary;
+  const module = key === 'system+float' ? 'FLOAT' : 'MEMO';
+  return (m) => {
+    loadSystemVocabulary(m);
+    m.interpret(`MODULE ${module}`);
+  };
 }
 
 /** Identifies the sources an image was compiled from. */
 export function bootImageSourceHash(key: BootImageKey): string {
   const hash = createHash('sha1').update(readFileSync(SYSTEM_FTH_PATH));
   if (key === 'system+float') hash.update(readFileSync(FLOAT_FTH_PATH));
+  if (key === 'system+memo') hash.update(readFileSync(join(PUBLIC_DIR, 'memo.fth')));
   return hash.digest('hex');
 }
 
@@ -155,6 +152,11 @@ function bootFromImage(key: BootImageKey, options?: MachineOptions): Machine {
  * floats don't pay for the bigger dictionary. */
 export function bootMachineWithFloat(options?: MachineOptions): Machine {
   return bootFromImage('system+float', options);
+}
+
+/** M80: `bootMachine()` plus `MODULE MEMO`, served from a boot image. */
+export function bootMachineWithMemo(options?: MachineOptions): Machine {
+  return bootFromImage('system+memo', options);
 }
 
 /** `new Machine()` plus the bootstrap load — what any test exercising a
