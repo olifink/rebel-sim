@@ -203,6 +203,15 @@ describe('MEMO (memo.fth, M80, spec/09-MEMO.md)', () => {
     key(m, K.right);
     key(m, K.del, true);
     expect([row(m, 0), cursor(m)]).toEqual(['ab', [2, 0]]);
+
+    // Alt-Backspace does the same, for keyboards without a real Delete.
+    key(m, K.home);
+    m.keyboard.pushRawEvent(0x82, true); // Left Alt
+    key(m, K.right);
+    key(m, K.bs);
+    m.keyboard.pushRawEvent(0x82, false);
+    settle(m);
+    expect([row(m, 0), cursor(m)]).toEqual(['a', [1, 0]]);
   });
 
   it('Shift-Esc on a blank line leaves MEMO for the Forth prompt, committing the page first', () => {

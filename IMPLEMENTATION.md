@@ -5070,7 +5070,9 @@ no longer a deviation.
   before switching. On `ENV-ENTER` the step word shows the block only
   when that is set, and otherwise switches back to `P-SLOT`.
 - **Shift-Delete** clears from the cursor to the right margin (§4.3,
-  `CLEAR-TO-END`).
+  `CLEAR-TO-END`). **Alt-Backspace** does too: on Oliver's ChromeOS
+  keyboard, where Delete is itself a remapped chord, Shift-Delete
+  never arrived.
 - **Shift-Esc on a blank line** commits and executes `HOME` (§6, §8),
   writing nothing to the page.
 

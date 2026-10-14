@@ -252,9 +252,10 @@ VARIABLE CC-LINE  VARIABLE CC-FOUND
   0 FINISH-COMMAND ;
 
 \ ---- dispatching a key ----
-VARIABLE KU  VARIABLE KS  VARIABLE KC
+VARIABLE KU  VARIABLE KS  VARIABLE KA  VARIABLE KC
 : DECODE ( event -- )
-  DUP 255 AND KU !  DUP 256 / 34 AND 0= 0= KS !  65536 / 255 AND KC ! ;
+  DUP 255 AND KU !  DUP 256 / 34 AND 0= 0= KS !  DUP 256 / 68 AND 0= 0= KA !
+  65536 / 255 AND KC ! ;
 : IS? ( usage -- f ) KU @ = ;
 : SHIFTED-KEY ( -- handled? )
   K-DOWN IS? IF NEXT-PAGE -1 EXIT THEN
@@ -280,6 +281,10 @@ VARIABLE KU  VARIABLE KS  VARIABLE KC
   KC @ TYPE-CHAR ;
 : DO-KEY ( event -- )
   DECODE
+  \ Alt-Backspace clears to the end of the line too, 4.3: on keyboards
+  \ whose Delete is itself a remapped chord, ChromeOS among them,
+  \ Shift-Delete may never arrive.
+  KA @ K-BS IS? AND IF CLEAR-TO-END EXIT THEN
   KS @ IF SHIFTED-KEY IF EXIT THEN THEN
   PLAIN-KEY ;
 
