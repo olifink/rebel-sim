@@ -94,6 +94,11 @@ export interface PrimitiveContext extends DictionaryContext {
    * `WORD`/`FIND`/`NUMBER`/`INTERPRET` machinery an ordinary typed line
    * uses. */
   setInput(addr: number, len: number): void;
+  /** spec/04-FORTH-CORE.md §6.15, M75: the shared input cursor's current
+   * position and the length still unread — exactly what `setInput()`
+   * needs to put it back, so `EVALUATE` (system.fth) can restore its
+   * caller's line. */
+  getInput(): { addr: number; len: number };
   /** M54: the size a named bank actually had the moment this `Machine`
    * finished booting — *not* `banks.findBank(name)?.size`, which reads
    * MMAP fresh and so would already reflect a `BANK-RESIZE` (146) that
@@ -1211,6 +1216,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const y = s.pop();
       const x = s.pop();
       s.push(ctx.screen.point(x, y));
+      break;
+    }
+
+    case 153: { // (GET-INPUT) ( -- addr len ) spec/04-FORTH-CORE.md §6.15,
+      // M75: the shared input cursor's position and how much of the line
+      // is left — the read half of (SET-INPUT) (142), so EVALUATE can be
+      // Forth source that saves its caller's input and restores it.
+      const { addr, len } = ctx.getInput();
+      s.push(addr);
+      s.push(len);
       break;
     }
 

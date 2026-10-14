@@ -4689,6 +4689,51 @@ name, a blanked asset can't come back without `MMAP`, and a relayout
 load (`skipLayoutRestore`) skips the asset. `bank-access.test.ts` covers
 `(BANK-REMOVE)`/`BANK-REMOVE` on a booted machine.
 
+### 1.87 `EVALUATE`, and `LOAD` rebuilt on it (M75, spec v1.1)
+
+`rebel-specs` v1.1 (`04-FORTH-CORE.md` §6.15) adds `EVALUATE ( addr len
+-- )`: interpret text held in memory as if it were one typed line, then
+restore the caller's input line and cursor so the rest of the calling
+line carries on. MEMO needs it to run the line under the cursor
+(`09-MEMO.md` §6). The spec classifies it KERNEL but lets a target make
+only the redirection native, and that's what Rebel-Sim does.
+
+*New primitive:* `(GET-INPUT) ( -- addr len )` (153), the read half of
+M48's `(SET-INPUT)` (142). It returns the shared cursor's position and
+how many bytes of the line are still unread (`Machine.getInput()`,
+implemented directly on `inputPos`/`inputEnd`). Passing a saved pair
+back to `(SET-INPUT)` puts the cursor back exactly.
+
+*`EVALUATE` is Forth* (`system.fth`, right after `INTERPRET`'s
+section): `(GET-INPUT) >R >R (SET-INPUT) INTERPRET R> R> (SET-INPUT)`.
+The saved cursor waits on the return stack, so it nests. `STATE` isn't
+touched: a definition opened inside the evaluated text stays open for
+the rest of the caller's line. An error inside abandons the saved line
+along with everything else, as §6.15 requires.
+
+*`LOAD` now evaluates each line through `EVALUATE`.* This fixes a real,
+previously unnoticed bug: `LOAD` used to leave the cursor at the end of
+the screen's last line, so anything typed after `n LOAD` on the same
+line was silently dropped. Two more changes make chaining work, i.e. a
+screen that `LOAD`s another screen:
+- `LOAD-ADDR` became `LOAD-BLK`. It holds the block number, and `BLOCK`
+  is re-fetched for every line, so a nested load evicting the outer
+  load's buffer doesn't matter.
+- `LOAD-BLK`/`LOAD-CONTEXT` are pushed onto the return stack on entry
+  and restored on exit, so the nested `LOAD` doesn't overwrite the
+  outer one's state.
+
+One limit is inherent, not new: the text is read in place, so evaluated
+text that overwrites its own source (an `S"` while evaluating text that
+lives in `PAD`, or a `BLOCK` that evicts the buffer the current line
+lives in) corrupts the rest of that line. §6.15 forbids it.
+
+*Tests:* new `evaluate.test.ts`. It covers the rest of the line
+continuing, defining a word through `EVALUATE`, a definition left open
+across it, nesting, `(GET-INPUT)`'s remaining length, recovery after an
+error inside, `LOAD` handing the caller's line back, and a screen that
+`LOAD`s another screen partway through a line.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4870,5 +4915,6 @@ exactly as it would be on the bare-metal target.
 | **M72** | HAL memory block operations (§1.84, `rebel-specs` v1.1 `01-HAL.md` §9): `Arena.copyBytes` (new, `hal_mem_copy`), `Arena.fillBytes` (`hal_mem_fill`), `Arena.writeBytes` (host payload in). Native `FILL`/`CMOVE` route through them and `system.fth`'s shadowing `DO`/`LOOP` versions are deleted; `CMOVE` keeps a byte loop for the destination-inside-source case so it still propagates the pattern. `(BLOCK-READ)`/`(BLOCK-WRITE)`, `Screen.cls()` and Storage asset loads (`loadPayload`, copy + zero-pad) switched over too. | `arena.ts`, `primitives.ts`, `screen.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `low-level-batch.test.ts`, `HAL.md` |
 | **M73** | Banks by name (§1.85, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.14): `CREATE-BANK`/`BSAVE`/`BLOAD` renamed `BANK-CREATE`/`BANK-SAVE`/`BANK-LOAD`, same tokens, no aliases; save and load resolve by name, and `BANK-LOAD` creates a missing bank. New KERNEL `(BANK-CREATE)`/`(BANK-SAVE)`/`(BANK-LOAD)` (150-152) return a slot address or 0/FALSE instead of ABORTing; `(BANK-FIND)` is pure Forth in `system.fth`. `createBank` now rejects a tag over 4 or a name over 8 characters instead of truncating, `allocate` refuses a bank past the end of the arena, and new banks are zeroed. | `primitives.ts`, `banks.ts`, `mmap.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `project.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `dump.test.ts`, `low-level-batch.test.ts`, `resize.test.ts`, `storage.test.ts`, `HAL.md`, `PORTING-WEB.md`, `FORTH-ARCHITECTURE.md` |
 | **M74** | Removing a bank (§1.86, `rebel-specs` v1.1 `02-MEMORY-MODEL.md` §4.9): new `REMOVED` flag (bit 5), inert for the rest of the session. `SAVE` blanks a removed bank's asset file instead of writing it, `BANK-SAVE`/`(BANK-SAVE)` refuse it, and `openProject` skips its asset in both load modes and frees its slot and name on an in-place load. `(BANK-REMOVE)`/`BANK-REMOVE` are Forth in `system.fth`; they refuse `MMAP` and `EXTERNAL` banks. Found a pre-existing failure: restoring a project with no `MMAP.MAP` collides with the resident boot banks. | `mmap.ts`, `banks.ts`, `index.ts`, `storage.ts`, `primitives.ts`, `system.fth`, `project.test.ts`, `bank-access.test.ts` |
+| **M75** | `EVALUATE` (§1.87, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.15): new `(GET-INPUT)` primitive (153), the read half of `(SET-INPUT)`, with `EVALUATE` written in Forth over the two, so it nests and leaves `STATE` alone. `LOAD` now evaluates each line through it, which fixes input typed after `n LOAD` being dropped, and re-fetches `BLOCK` per line while saving its own variables on the return stack, so a screen can `LOAD` another. | `primitives.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `evaluate.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

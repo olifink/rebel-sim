@@ -558,6 +558,13 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.inputEnd = addr + len;
   }
 
+  /** spec/04-FORTH-CORE.md §6.15, M75: `(GET-INPUT)`'s backing — the
+   * inverse of `setInput()`, so a saved `(addr, len)` restores the
+   * cursor exactly. */
+  getInput(): { addr: number; len: number } {
+    return { addr: this.inputPos, len: this.inputEnd - this.inputPos };
+  }
+
   private decodeBytes(addr: number, len: number): string {
     let s = '';
     for (let i = 0; i < len; i++) {

@@ -376,7 +376,7 @@ VARIABLE FIND-LEN
 ( active bank has that name, or the name is empty or longer than 8. )
 ( No slot sits at address 0, MMAP's header does, so 0 means none. )
 ( BF-ADDR/BF-LEN carry the name through the loop instead of the data )
-( stack, the same scratch-variable convention LOAD-ADDR uses. )
+( stack, the same scratch-variable convention LOAD-BLK uses. )
 VARIABLE BF-ADDR
 VARIABLE BF-LEN
 : BF-UPC ( c -- c' ) DUP 97 123 WITHIN IF 32 - THEN ;
@@ -1225,8 +1225,9 @@ VARIABLE BOOT-HERE
 ( be browsing at the time -- purely accidental, not something a )
 ( screen's own author has any control over. )
 
-( LOAD-ADDR/LOAD-CONTEXT -- found live, Oliver, spreading a colon- )
-( definition across several block lines instead of one: the block's )
+( LOAD-ADDR, now LOAD-BLK, and LOAD-CONTEXT -- found live, Oliver, )
+( spreading a colon-definition across several block lines instead )
+( of one: the block's )
 ( base address and the saved CONTEXT used to live on the data stack )
 ( itself, under whatever the interpreted lines pushed -- exactly the )
 ( kind of thing this file's own R#/SCR/T-LINE/TEXT-LEN scratch )
@@ -1247,19 +1248,39 @@ VARIABLE BOOT-HERE
 ( ABORT -- confirming this was never actually about DO/LOOP )
 ( specifically, just the first construct naturally likely to span )
 ( two lines while still leaving something on the stack in between. )
-VARIABLE LOAD-ADDR
+( EVALUATE, M75, spec 04-FORTH-CORE.md section 6.15: interprets )
+( len characters at addr as if typed as one line, then puts back the )
+( input line and cursor it found, so the rest of its caller's line )
+( carries on. Only the redirection is native -- the GET-INPUT and )
+( SET-INPUT primitives -- which 6.15 permits; the saved cursor waits )
+( on the return stack, so EVALUATE nests. STATE is left alone, and an )
+( error inside abandons the saved line along with everything else. )
+: EVALUATE ( addr len -- )
+  (GET-INPUT) >R >R
+  (SET-INPUT) INTERPRET
+  R> R> (SET-INPUT) ;
+
+( M75: LOAD evaluates each line through EVALUATE now, so it hands )
+( the caller's input line back too -- before, anything typed after )
+( n LOAD on the same line was silently dropped. LOAD-BLK and )
+( LOAD-CONTEXT are saved on the return stack across the call and )
+( restored at the end, and BLOCK is re-fetched for every line rather )
+( than once, so a screen that LOADs another screen -- the classic )
+( chaining idiom -- leaves its own load intact when control returns. )
+VARIABLE LOAD-BLK
 VARIABLE LOAD-CONTEXT
 : LOAD ( n -- )
+  LOAD-BLK @ >R  LOAD-CONTEXT @ >R
+  LOAD-BLK !
   CONTEXT @ LOAD-CONTEXT !
   CURRENT-VOCAB @ CONTEXT !
-  BLOCK LOAD-ADDR !
   L/SCR 0 DO
-    LOAD-ADDR @ I C/L * + C/L (SET-INPUT)
-    INTERPRET
+    LOAD-BLK @ BLOCK I C/L * + C/L EVALUATE
   LOOP
   LOAD-CONTEXT @ CONTEXT !
+  R> LOAD-CONTEXT !  R> LOAD-BLK !
 ;
-HIDE LOAD-ADDR
+HIDE LOAD-BLK
 HIDE LOAD-CONTEXT
 
 ( The interactive editor commands live in their own vocabulary, not )
