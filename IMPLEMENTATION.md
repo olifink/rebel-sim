@@ -5048,7 +5048,7 @@ pending command as an error. The machine's own `? …` report is on the
 scratch screen, so it is captured. A switching command never returns,
 and the next `ENV-ENTER` drops the pending note.
 
-*Deliberate deviation from §6.3 step 3:* the spec runs the line with
+*Search order (originally a deviation from §6.3 step 3, now specified):* the spec runs the line with
 MEMO's vocabulary first in the search order. With this suite's
 branching vocabularies, a vocabulary that branched off `FORTH` when
 MEMO loaded can't see any `FORTH` word defined later, the user's own
@@ -5058,7 +5058,8 @@ MEMO's internals still live in `MEMO-VOCAB`. The public `MEMO`,
 `MEMO-OPEN`, `(MEMO-OPEN)` and `EDIT` are in `FORTH`, defined as thin
 wrappers (`OPEN-DOC`, `EDIT-BLOCK`, `MEMO` called through a captured
 xt), because words compiled while searching `MEMO-VOCAB` can't see what
-is added to `FORTH` afterwards. To be folded back into `09-MEMO.md`.
+is added to `FORTH` afterwards. Folded back into `09-MEMO.md` §6.3, so it is
+no longer a deviation.
 
 *Follow-ups from Oliver trying it in the browser (specified in
 `09-MEMO.md` in the same change):*
@@ -5273,6 +5274,6 @@ exactly as it would be on the bare-metal target.
 | **M77** | Environments (§1.89, `rebel-specs` v1.1 `06-ENVIRONMENTS.md`, `03-SYSVARS.md` §12): new `ENV` sysvar group at `0x1C0`; `replLoop` runs `ENV-ENTRY`'s step word instead of reading a line when it's non-zero; the recovery path turns `ENV-REASON` from `STEP` into `RECOVER`; a new `ESCR` bank (128 KiB, created last at boot). After a switch's `WARM` the REPL prints no `ok` inside an environment and completes the line back home. `ENVIRONMENT`/`HOME`/`ESCR` save and restore/switch are all Forth in `system.fth`. `BAS`/`MEMO`/`BASW` extensions registered ahead of BASIC and MEMO. | `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `system.fth`, `environments.test.ts` |
 | **M78** | Floating point (§1.90, `rebel-specs` v1.1 `07-FLOATING-POINT.md`): a binary32 float in one cell. Eight native KERNEL words (156-163) via `float32.ts`, with a canonical NaN and a saturating `F>S`. The spec's normative `07-FLOATING-POINT.fth` is loaded unchanged as `public/float.fth` (vendored, with a drift test) right after `system.fth`, and reproduces every spec test vector. New `SEAL-BOOT` lets `EMPTY` keep the float words. Also fixes `loadDefaultFont()` writing past the `FONT` bank, and gets all 21 app tests passing (8 were already timing out at `v1.0`). | `float32.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `float.fth`, `app.ts`, `app.spec.ts`, `test-support.ts`, `float.test.ts` | 
 | **M79** | Source modules (§1.91): `MODULE name` loads `name.fth` from beside `system.fth` at most once, recorded by a `NAME.FTH` marker word so `EMPTY`/`FORGET` unload it. New optional HAL read `hal_module_read` (`01-HAL.md` §6.7, `module.ts`), KERNEL `(MODULE-READ)` (164, suspends like `KEY`, text in a `REMOVED` bank), and BOOTSTRAP `EVALUATE-LINES`/`MODULE` (`04-FORTH-CORE.md` §6.16, added to the specs). Floats load on demand (`MODULE FLOAT`), not at boot; the app fetches modules through `FetchModuleHal`. Also: the boot block bank is named `BLKS` again, and the PWA now precaches `.fth`/`.FNT` (it hadn't been). | `module.ts`, `inner.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `block-io.test.ts`, `fetch-module-hal.ts`, `app.ts`, `app.spec.ts`, `ngsw-config.json`, `rebel-specs` 01/04/06/07/08/09 |
-| **M80** | MEMO (§1.92, `09-MEMO.md`): the full-screen page editor as a source module (`MODULE MEMO`, `memo.fth`, about 330 lines of portable Forth, no engine change). The screen is the working copy, committed before every page turn, command, or switch. All §4/§5 keys; Shift-Esc runs a line as Forth with captured output and a `\ ok`/`\ error` status; `EDIT` opens Forth screens through the block buffer pool. Lines run with the caller's search order rather than MEMO's vocabulary first (a deliberate §6.3 deviation). The app key map gains Home, Delete and End. | `memo.fth`, `browser-keymap.ts`, `test-support.ts`, `memo.test.ts` |
+| **M80** | MEMO (§1.92, `09-MEMO.md`): the full-screen page editor as a source module (`MODULE MEMO`, `memo.fth`, about 330 lines of portable Forth, no engine change). The screen is the working copy, committed before every page turn, command, or switch. All §4/§5 keys; Shift-Esc runs a line as Forth with captured output and a `\ ok`/`\ error` status; `EDIT` opens Forth screens through the block buffer pool. Lines run with the caller's search order rather than MEMO's vocabulary first (now in §6.3). The app key map gains Home, Delete and End. | `memo.fth`, `browser-keymap.ts`, `test-support.ts`, `memo.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

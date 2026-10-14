@@ -9,9 +9,9 @@
 \
 \ Internal words live in the MEMO-VOCAB vocabulary; MEMO, MEMO-OPEN,
 \ (MEMO-OPEN) and EDIT go in FORTH. A command line runs with the
-\ caller's search order unchanged, not MEMO-VOCAB first as 6.3 says:
-\ with branching vocabularies, MEMO-VOCAB first would hide every FORTH
-\ word defined after MEMO was loaded, the user's own words included.
+\ caller's search order unchanged, 6.3: with branching vocabularies,
+\ MEMO-VOCAB first would hide every FORTH word defined after MEMO was
+\ loaded, the user's own words included.
 
 VOCABULARY MEMO-VOCAB
 MEMO-VOCAB DEFINITIONS
