@@ -93,6 +93,22 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
+  it('a click on the background shows the monitor overlay, a click on the screen hides it', async () => {
+    const fixture = TestBed.createComponent(App);
+    await fixture.whenStable();
+    const compiled = fixture.nativeElement as HTMLElement;
+    const inspector = () => compiled.querySelector('.inspector') as HTMLElement;
+    expect(inspector().classList.contains('hidden')).toBe(true);
+
+    (compiled.querySelector('main.repl') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(inspector().classList.contains('hidden')).toBe(false);
+
+    (compiled.querySelector('canvas.screen') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(inspector().classList.contains('hidden')).toBe(true);
+  });
+
   it('renders the screen and an empty stack', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();

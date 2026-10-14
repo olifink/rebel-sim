@@ -791,6 +791,21 @@ export class App implements AfterViewInit, OnDestroy {
     );
   }
 
+  // Pointer alternative to the Ctrl+` / Ctrl+\ shortcut: a click on the
+  // screen canvas hides the monitor overlay, a click on the background
+  // around it shows it. Clicks inside the panels themselves (breakpoint
+  // words, buttons) land on their own elements and are left alone. Web
+  // host UI only, so no spec involvement.
+  protected onBackgroundClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target === this.screenRef.nativeElement) {
+      this.monitorsVisible.set(false);
+    } else if (target === event.currentTarget || target?.classList.contains('console')) {
+      this.monitorsVisible.set(true);
+    }
+    this.screenRef.nativeElement.focus();
+  }
+
   // Ctrl+`/Ctrl+\ (handleKeyEvent) — called from outside the Angular
   // zone (the keydown listener is registered via runOutsideAngular),
   // so the write needs zone.run() to actually reach the DOM, same
