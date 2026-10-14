@@ -39,26 +39,25 @@ function memoryHal(): StorageHal {
 }
 
 describe('BLKS bank (FORTH-ARCHITECTURE.md §7, renamed from SCRS 2026-08-18)', () => {
-  it('is boot-created as a 16-block (16 KiB) resident bank tagged BLKS, named EDITOR', () => {
+  it('is boot-created as a 16-block (16 KiB) resident bank tagged and named BLKS', () => {
     // Tag stays the generic, HAL-level "1024-byte block storage" identity
     // — requireBank(tag) (the internal, TS-side lookup (BLOCK-READ)/
     // (BLOCK-WRITE) use) still resolves by tag. name is the real,
     // uniqueness-backed per-bank identity — what BANK@/BANK-SIZE resolve
-    // by now (M50) — free to say what THIS instance is actually for,
-    // since a tag is expected to repeat across banks. Named for its only
-    // consumer today, the Screen Editor.
+    // by now (M50). M50 named it EDITOR after the Screen Editor; M79
+    // renamed it BLKS, which spec/09-MEMO.md §7.1's EDIT looks up.
     const m = new Machine();
     const blks = m.banks.requireBank('BLKS');
-    expect(blks.name).toBe('EDITOR');
+    expect(blks.name).toBe('BLKS');
     expect(blks.size).toBe(16 * BLOCK_SIZE);
   });
 
-  it('is reachable via BANK@ by name, not tag', () => {
+  it('is reachable via BANK@ by its name', () => {
     const m = new Machine();
     const blks = m.banks.requireBank('BLKS');
-    m.interpret('BANK@ EDITOR');
+    m.interpret('BANK@ BLKS');
     expect(m.stack.toArray()).toEqual([blks.base]);
-    expect(() => m.interpret('BANK@ BLKS')).toThrow('unknown bank: BLKS');
+    expect(() => m.interpret('BANK@ EDITOR')).toThrow('unknown bank: EDITOR');
   });
 });
 
@@ -152,9 +151,9 @@ describe('(BLOCK-READ) / (BLOCK-WRITE) ( addr n -- ) — FORTH-ARCHITECTURE.md �
     m1.interpret('PROJECT BLKPROJ');
     m1.interpret('SAVE');
 
-    // Asset basename is the bank's name (EDITOR), not its tag (BLKS) —
+    // Asset basename is the bank's name (BLKS, the same as its tag) —
     // storage.ts's own SAVE writes `${bank.name}.${ext}`.
-    expect(hal.readFile('/PROJECTS/BLKPROJ/EDITOR.BLK')).toBeDefined();
+    expect(hal.readFile('/PROJECTS/BLKPROJ/BLKS.BLK')).toBeDefined();
 
     const m2 = new Machine({ storageHal: hal });
     m2.interpret('RESTORE BLKPROJ');

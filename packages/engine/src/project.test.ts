@@ -224,13 +224,14 @@ describe('BANK-SAVE / BANK-LOAD (M33 as BSAVE/BLOAD; renamed and resolved by nam
     expect(hal.readFile('/PROJECTS/ONEBANK/MMAP.MAP')).toBeUndefined();
   });
 
-  it('BANK-SAVE resolves by name, not tag — the BLKS-tagged bank is EDITOR', () => {
+  it('BANK-SAVE resolves by name, not tag', () => {
     const hal = memoryHal();
     const m = new Machine({ storageHal: hal });
+    m.banks.createBank('DATA', 64, 'LEVEL1');
     m.interpret('PROJECT P');
-    expect(() => m.interpret('BANK-SAVE BLKS')).toThrow(/unknown bank: BLKS/);
-    m.interpret('BANK-SAVE EDITOR');
-    expect(hal.readFile('/PROJECTS/P/EDITOR.BLK')).toBeDefined();
+    expect(() => m.interpret('BANK-SAVE DATA')).toThrow(/unknown bank: DATA/);
+    m.interpret('BANK-SAVE LEVEL1');
+    expect(hal.readFile('/PROJECTS/P/LEVEL1.DAT')).toBeDefined();
   });
 
   it('BANK-LOAD refreshes a resident bank in place, zero-padding a short payload', () => {

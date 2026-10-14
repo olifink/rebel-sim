@@ -745,7 +745,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // other one). Every boot bank now has an explicit name (repl.ts),
       // so `BANK@ SYSV`-style lookups for the fixed system banks are
       // unaffected by this — only banks that share a tag (BLKS ->
-      // EDITOR, project DATA assets, ...) need their real name instead.
+      // project DATA assets, ...) need their real name instead.
       //
       // IMMEDIATE + dual-mode (Oliver, M53): a plain non-immediate
       // BANK@ compiled a call to itself into the definition, then left

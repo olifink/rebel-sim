@@ -267,16 +267,16 @@ describe('(BANK-FIND) (system.fth, M73, spec/04-FORTH-CORE.md §6.14)', () => {
       return m.stack.pop();
     };
 
-    expect(find('EDITOR')).toBe(m.banks.slotAddress('EDITOR'));
+    expect(find('BLKS')).toBe(m.banks.slotAddress('BLKS'));
     expect(find('char')).toBe(m.banks.slotAddress('CHAR'));
     expect(find('MMAP')).toBe(m.banks.slotAddress('MMAP')); // slot 0 still isn't address 0
     expect(find('MMAP')).not.toBe(0);
-    m.interpret(`S" EDITOR" (BANK-FIND) 12 + @`);
-    expect(m.stack.pop()).toBe(m.banks.findBankByName('EDITOR')!.base);
+    m.interpret(`S" BLKS" (BANK-FIND) 12 + @`);
+    expect(m.stack.pop()).toBe(m.banks.findBankByName('BLKS')!.base);
 
     expect(find('NOSUCH')).toBe(0);
-    expect(find('BLKS')).toBe(0); // a tag, not a name
-    expect(find('EDITOR12')).toBe(0); // 8 chars, no such bank
+    expect(find('DATA')).toBe(0); // a tag, not a name
+    expect(find('NOSUCHBK')).toBe(0); // 8 chars, no such bank
     expect(find('NINECHARS')).toBe(0); // longer than any name
     m.interpret(`PAD 0 (BANK-FIND)`);
     expect(m.stack.pop()).toBe(0); // empty name
@@ -306,8 +306,8 @@ describe('(BANK-REMOVE) / BANK-REMOVE (system.fth, M74, spec/04-FORTH-CORE.md §
     expect(flags('EXT') & BankFlagRemoved).toBe(0);
     expect(remove('NOSUCH')).toBe(0);
 
-    m.interpret('BANK-REMOVE EDITOR');
-    expect(flags('EDITOR') & BankFlagRemoved).toBeTruthy();
+    m.interpret('BANK-REMOVE BLKS');
+    expect(flags('BLKS') & BankFlagRemoved).toBeTruthy();
     expect(() => m.interpret('BANK-REMOVE NOSUCH')).toThrow();
     expect(m.stack.toArray()).toEqual([]);
   });
