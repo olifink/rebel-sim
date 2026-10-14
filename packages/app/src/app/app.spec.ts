@@ -12,11 +12,31 @@ import { App } from './app';
 // failure here means the actual shipped file broke, not a stale fixture.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const systemFthText = readFileSync(join(__dirname, '../../public/system.fth'), 'utf-8');
+// M78: the float wordset's Forth layer, fetched right after system.fth.
+const floatFthText = readFileSync(join(__dirname, '../../public/float.fth'), 'utf-8');
+// The real default font, so the font load doesn't write system.fth's
+// text into the arena (it used to, overrunning every bank after FONT).
+const fontBytes = new Uint8Array(readFileSync(join(__dirname, '../../public/rebel.FNT')));
+
+/** Serves each fetched asset by name. */
+function assetResponse(url: string): Response {
+  if (url.endsWith('float.fth')) return new Response(floatFthText, { status: 200 });
+  if (url.endsWith('rebel.FNT')) return new Response(fontBytes, { status: 200 });
+  return new Response(systemFthText, { status: 200 });
+}
 
 // M7a: the outer loop is driven entirely by a requestAnimationFrame pump
 // now (no more synchronous submit()) — poll for the expected DOM state
 // instead of asserting immediately after dispatch.
-async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+// M78: every test here boots a full Machine (system.fth plus float.fth)
+// in jsdom, which takes several seconds and varies a lot from run to
+// run — longer than vitest's 5s default once the float wordset joined
+// the boot. 60s per test, 120s for the two that boot twice (COLD,
+// TERMINAL), and waitFor polling for up to 15s (45s for COLD's reboot)
+// leave room for a slow machine without slowing passing tests.
+vi.setConfig({ testTimeout: 60_000 });
+
+async function waitFor(check: () => boolean, timeoutMs = 15_000): Promise<void> {
   const start = Date.now();
   while (!check()) {
     if (Date.now() - start > timeoutMs) {
@@ -54,7 +74,7 @@ describe('App', () => {
   beforeEach(async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(systemFthText, { status: 200 })),
+      vi.fn(async (url: string) => assetResponse(String(url))),
     );
     await TestBed.configureTestingModule({
       imports: [App],
@@ -251,14 +271,14 @@ describe('App', () => {
     await waitFor(() => (compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'));
 
     typeIntoRepl(app, 'COLD\n');
-    await waitFor(() => !(compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'), 4000);
+    await waitFor(() => !(compiled.querySelector('.dictionary-list')?.textContent ?? '').includes('SQUARE'), 45_000);
     fixture.detectChanges();
 
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').not.toContain('SQUARE');
     // The fresh boot's own vocabulary (system.fth defines WORDS) is
     // present — confirms a real reboot happened, not just a wipe.
     expect(compiled.querySelector('.dictionary-list')?.textContent ?? '').toContain('WORDS');
-  }, 10_000);
+  }, 120_000);
 
   // TERMINAL (rebel-opcodes.json 147): connects to an in-process
   // simulated board and reroutes real keyboard input to it, leaving the
@@ -282,7 +302,7 @@ describe('App', () => {
     };
 
     typeIntoRepl(app, 'TERMINAL\n');
-    await waitFor(() => app.connectedToRemote === true, 8000);
+    await waitFor(() => app.connectedToRemote === true, 30_000);
     expect(app.remoteBoard).toBeTruthy();
 
     press('KeyA'); // routed to the board now, not the local machine
@@ -300,9 +320,9 @@ describe('App', () => {
     for (const code of ['Digit2', 'Space', 'Digit3', 'Enter']) {
       press(code);
     }
-    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('3 2'), 5000);
+    await waitFor(() => (compiled.querySelector('.stack-values')?.textContent ?? '').includes('3 2'), 20_000);
     expect(compiled.querySelector('.stack-values')?.textContent).toContain('3 2');
-  }, 20_000);
+  }, 120_000);
 
   it('the left-side sysvars panel lists live FORTH.STATE/.BASE values and updates as they change', async () => {
     const fixture = TestBed.createComponent(App);
@@ -317,8 +337,10 @@ describe('App', () => {
 
     typeIntoRepl(app, '16 BASE !\n');
     await waitFor(() => {
-      const row = Array.from(compiled.querySelectorAll('.sysvar-table tr')).find((tr) =>
-        tr.textContent?.includes('BASE'),
+      // The field cell exactly, not a substring: FONT-BASE and
+      // PALETTE-BASE come before FORTH.BASE and also contain "BASE".
+      const row = Array.from(compiled.querySelectorAll('.sysvar-table tr')).find(
+        (tr) => tr.querySelectorAll('td')[1]?.textContent?.trim() === 'BASE',
       );
       return row?.textContent?.trim().endsWith('16') ?? false;
     });

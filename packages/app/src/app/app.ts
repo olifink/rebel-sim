@@ -437,17 +437,31 @@ export class App implements AfterViewInit, OnDestroy {
   // way registerWebMcpTools() is — a broken system vocabulary is a bug
   // in *our* source, not a missing browser feature, and should fail
   // loudly rather than silently boot without WORDS/SEE.
+  //
+  // M78: the float wordset's Forth layer (float.fth, a vendored copy of
+  // rebel-specs/07-FLOATING-POINT.fth) loads right after system.fth, on
+  // every boot, so the wordset is always present in full
+  // (07-FLOATING-POINT.md §7). SEAL-BOOT then moves EMPTY's reset point
+  // past it, so EMPTY keeps the float words too.
   private async loadSystemVocabulary(machine: Machine = this.machine): Promise<void> {
-    const response = await fetch('system.fth');
-    if (!response.ok) {
-      throw new Error(`failed to fetch system.fth: ${response.status} ${response.statusText}`);
-    }
-    const text = await response.text();
+    const [system, float] = await Promise.all([this.fetchText('system.fth'), this.fetchText('float.fth')]);
     this.zone.runOutsideAngular(() => {
-      for (const line of text.split('\n')) {
+      for (const line of system.split('\n')) {
         machine.interpret(line);
       }
+      for (const line of float.split('\n')) {
+        machine.interpret(line);
+      }
+      machine.interpret('SEAL-BOOT');
     });
+  }
+
+  private async fetchText(path: string): Promise<string> {
+    const response = await fetch(path);
+    if (!response.ok) {
+      throw new Error(`failed to fetch ${path}: ${response.status} ${response.statusText}`);
+    }
+    return response.text();
   }
 
   // M59: the default system font — same "fetched public asset, offline-
@@ -466,10 +480,15 @@ export class App implements AfterViewInit, OnDestroy {
       throw new Error(`failed to fetch rebel.FNT: ${response.status} ${response.statusText}`);
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
-    const fontBase = this.machine.sysvars.get('FONT', 'FONT-BASE');
-    for (let i = 0; i < bytes.length; i++) {
-      this.machine.arena.writeByte(fontBase + i, bytes[i]);
+    // M78: never write past the FONT bank — an oversized file would
+    // silently overwrite every bank laid out after it (found when the
+    // test fetch stub served system.fth here and clobbered ESCR).
+    const fontBank = this.machine.banks.findBankByName('FONT');
+    if (!fontBank || bytes.length > fontBank.size) {
+      throw new Error(`rebel.FNT is ${bytes.length} bytes, larger than the ${fontBank?.size ?? 0}-byte FONT bank`);
     }
+    const fontBase = this.machine.sysvars.get('FONT', 'FONT-BASE');
+    this.machine.arena.writeBytes(fontBase, bytes);
   }
 
   ngOnDestroy(): void {

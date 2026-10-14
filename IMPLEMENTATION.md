@@ -4840,6 +4840,80 @@ lines can be typed into the real REPL:
   reasons `ENTER`, `STEP`, then `RECOVER` after an `ABORT`, then `STEP`,
   then `HOME`; the home screen reads `TENV ok` with exactly one `ok`.
 
+### 1.90 Floating point: binary32 in a cell (M78, spec v1.1)
+
+`rebel-specs` v1.1 adds `07-FLOATING-POINT.md`, an optional, all-or-
+nothing wordset that BASIC needs. A float is an IEEE 754 **binary32
+value in one ordinary cell on the ordinary data stack**, with no float
+stack: `DUP`/`@`/`!`/`CONSTANT` all work on floats unchanged.
+`02-MEMORY-MODEL.md` explicitly reverses its old "separate float stack"
+rule for this.
+
+*KERNEL, native (156–163):* `F+ F* F/ FSQRT F< F= S>F F>S`. The new
+`float32.ts` reinterprets a cell's bits through an `Int32Array` and a
+`Float32Array` over one shared 4-byte buffer. That isn't a `DataView`,
+so the "only arena.ts touches DataView" rule stands, and since both
+views use host byte order the bit round trip is host-independent.
+Arithmetic is done in binary64 and rounded once to binary32, which §3's
+note says is exactly the correctly rounded result for these four
+operations. Every NaN result is forced to the canonical `0x7FC00000`,
+and `F>S` saturates explicitly, since JS's `| 0` would wrap.
+
+*BOOTSTRAP, Forth:* everything else (`FNEGATE`…`FLOOR`, `FEXP`, `FLN`,
+`FSIN`/`FCOS`/`FTAN`, `FATAN`, `F**`, `F**N`, `>FLOAT`, `(F.)`, `F.`,
+`F#`) is the spec's **normative** reference source,
+`rebel-specs/07-FLOATING-POINT.fth`, loaded unchanged. It loaded into
+Rebel-Sim's dialect with no edits at all, including the hex constants
+with bit 31 set, the `CREATE … HEX … ,` tables, and `F#`'s use of
+`LIT-XT`. Its first run on any Rebel target reproduced every one of the
+spec's test vectors bit for bit.
+
+*Delivery:* `packages/app/public/float.fth` is a vendored copy, because
+the deploy workflow doesn't check out the `rebel-specs` submodule.
+`float.test.ts` fails if the copy drifts from the spec file, and skips
+that check when the submodule is absent. `app.ts`'s
+`loadSystemVocabulary()` now fetches `system.fth` and `float.fth`
+together, interprets them in order (on the main machine and the
+simulated remote board alike), then runs `SEAL-BOOT`.
+
+*`SEAL-BOOT`* is a new visible word in `system.fth` that records
+LATEST/HERE as `EMPTY`'s reset point. `system.fth` itself now ends with
+a call to it instead of the two inline stores. The host calls it again
+after `float.fth`, so `EMPTY` keeps the float words.
+
+*Tests:* `test-support.ts` gains `bootMachineWithFloat()`. It's opt-in,
+so the rest of the suite doesn't pay for the bigger dictionary.
+New `float.test.ts`:
+- the KERNEL words on a bare machine: correct rounding, subnormals,
+  infinities, the canonical NaN, numeric `F<`/`F=`, ties-to-even `S>F`,
+  saturating `F>S`;
+- the vendored-copy drift check;
+- all 28 spec test vectors (§5.2 and §5.3) bit for bit, plus `>FLOAT`
+  rejecting malformed text;
+- `F#` interpreted and compiled, `F.` output, and the wordset surviving
+  `EMPTY`.
+
+*App-side fixes found while getting `app.spec.ts` green:*
+- **A real overrun bug.** The test fetch stub answered *every* request
+  with `system.fth`'s text, including `rebel.FNT`, and
+  `loadDefaultFont()` wrote whatever it got into the arena from
+  `FONT-BASE` with no size check: about 100 KB into a 2 KB bank,
+  overwriting everything after it. Since M77 that includes `ESCR`, so
+  once the second fetch changed the timing, `0 ENVIRONMENT HOME` found
+  no free slot and aborted. `loadDefaultFont()` now refuses a file
+  larger than the `FONT` bank (and copies with `Arena.writeBytes`), and
+  the stub serves each asset by name: the real `rebel.FNT`, `float.fth`,
+  and `system.fth`.
+- **A long-broken assertion.** The sysvars-panel test picked the first
+  table row *containing* `BASE`, but `FONT-BASE`/`PALETTE-BASE` come
+  first, so it could never pass. It now matches the field cell exactly.
+- **Timeouts.** Booting a `Machine` in jsdom takes several seconds and
+  varies a lot from run to run. Eight of these tests were already timing
+  out at `v1.0`, and the float wordset pushed a ninth over. The spec now
+  sets a 60 s default (`vi.setConfig`), 120 s for COLD and TERMINAL
+  (they boot twice), 15 s for `waitFor`, and 45 s for COLD's reboot
+  wait. All 21 app tests pass.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5024,5 +5098,6 @@ exactly as it would be on the bare-metal target.
 | **M75** | `EVALUATE` (§1.87, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.15): new `(GET-INPUT)` primitive (153), the read half of `(SET-INPUT)`, with `EVALUATE` written in Forth over the two, so it nests and leaves `STATE` alone. `LOAD` now evaluates each line through it, which fixes input typed after `n LOAD` being dropped, and re-fetches `BLOCK` per line while saving its own variables on the return stack, so a screen can `LOAD` another. | `primitives.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `evaluate.test.ts` |
 | **M76** | `EKEY`/`EKEY?` (§1.88, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.9): primitives 154/155 returning the next raw key press as one cell (usage, modifiers << 8, char << 16), skipping releases and modifier-only events. `EKEY` blocks on the keyboard queue the way `KEY` blocks on the channel, and the two share the one queue. | `keyboard.ts`, `primitives.ts`, `inner.ts`, `rebel-opcodes.json`, `keyboard.test.ts` |
 | **M77** | Environments (§1.89, `rebel-specs` v1.1 `06-ENVIRONMENTS.md`, `03-SYSVARS.md` §12): new `ENV` sysvar group at `0x1C0`; `replLoop` runs `ENV-ENTRY`'s step word instead of reading a line when it's non-zero; the recovery path turns `ENV-REASON` from `STEP` into `RECOVER`; a new `ESCR` bank (128 KiB, created last at boot). After a switch's `WARM` the REPL prints no `ok` inside an environment and completes the line back home. `ENVIRONMENT`/`HOME`/`ESCR` save and restore/switch are all Forth in `system.fth`. `BAS`/`MEMO`/`BASW` extensions registered ahead of BASIC and MEMO. | `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `system.fth`, `environments.test.ts` |
+| **M78** | Floating point (§1.90, `rebel-specs` v1.1 `07-FLOATING-POINT.md`): a binary32 float in one cell. Eight native KERNEL words (156-163) via `float32.ts`, with a canonical NaN and a saturating `F>S`. The spec's normative `07-FLOATING-POINT.fth` is loaded unchanged as `public/float.fth` (vendored, with a drift test) right after `system.fth`, and reproduces every spec test vector. New `SEAL-BOOT` lets `EMPTY` keep the float words. Also fixes `loadDefaultFont()` writing past the `FONT` bank, and gets all 21 app tests passing (8 were already timing out at `v1.0`). | `float32.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `float.fth`, `app.ts`, `app.spec.ts`, `test-support.ts`, `float.test.ts` | 
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

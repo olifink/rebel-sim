@@ -1189,6 +1189,13 @@ VARIABLE BOOT-HERE
   CONTEXT @ CURRENT-VOCAB !
 ;
 
+( SEAL-BOOT, M78: records the current LATEST/HERE as the point EMPTY )
+( resets to. Run once at the very end of this file, and run again by )
+( the host after it loads anything else that belongs to the boot )
+( dictionary -- the float wordset's float.fth today -- so EMPTY keeps )
+( that too. Visible, since the host calls it by name. )
+: SEAL-BOOT ( -- ) LATEST BOOT-LATEST ! HERE BOOT-HERE ! ;
+
 ( ---------------------------------------------------------------- )
 ( Screen Editor -- FORTH-ARCHITECTURE.md section 7 follow-up, )
 ( inspiration Starting-FORTH.pdf chapter 3, and )
@@ -2120,9 +2127,8 @@ FORTH DEFINITIONS
 
 ( The actual capture -- LATEST/HERE at this exact point already )
 ( include EMPTY's own just-closed definition, per the ordering note )
-( above. )
-LATEST BOOT-LATEST !
-HERE BOOT-HERE !
+( above. The host repeats it after loading float.fth, M78. )
+SEAL-BOOT
 
 ( BOOT-LATEST/BOOT-HERE are internal plumbing from here on -- hidden )
 ( the same way FIND-ADDR/NUM-ADDR already are. Safe after the fact: )

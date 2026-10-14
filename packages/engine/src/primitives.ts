@@ -19,6 +19,7 @@
 import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard, packKeyEvent } from './keyboard.js';
+import { cellToFloat, floatToCell, floatToInt } from './float32.js';
 import { Channel } from './channel.js';
 import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
@@ -1247,6 +1248,51 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       s.push(packKeyEvent(event));
       break;
     }
+
+    // --- spec/07-FLOATING-POINT.md §4, M78: the eight KERNEL float
+    // words. A float is a binary32 cell (float32.ts). F+ F* F/ FSQRT are
+    // computed in binary64 and rounded once to binary32, which §3's note
+    // says is provably the correctly rounded result for these four.
+    // Every NaN result is canonical; nothing traps.
+    case 156: { // F+ ( r1 r2 -- r1+r2 )
+      const b = cellToFloat(s.pop());
+      const a = cellToFloat(s.pop());
+      s.push(floatToCell(a + b));
+      break;
+    }
+    case 157: { // F* ( r1 r2 -- r1*r2 )
+      const b = cellToFloat(s.pop());
+      const a = cellToFloat(s.pop());
+      s.push(floatToCell(a * b));
+      break;
+    }
+    case 158: { // F/ ( r1 r2 -- r1/r2 )
+      const b = cellToFloat(s.pop());
+      const a = cellToFloat(s.pop());
+      s.push(floatToCell(a / b));
+      break;
+    }
+    case 159: // FSQRT ( r -- sqrt r ) — negative gives NaN, -0.0 gives -0.0
+      s.push(floatToCell(Math.sqrt(cellToFloat(s.pop()))));
+      break;
+    case 160: { // F< ( r1 r2 -- flag ) — FALSE if either is NaN
+      const b = cellToFloat(s.pop());
+      const a = cellToFloat(s.pop());
+      s.push(a < b ? TRUE : FALSE);
+      break;
+    }
+    case 161: { // F= ( r1 r2 -- flag ) — numeric: NaN never equal, -0 = +0
+      const b = cellToFloat(s.pop());
+      const a = cellToFloat(s.pop());
+      s.push(a === b ? TRUE : FALSE);
+      break;
+    }
+    case 162: // S>F ( n -- r ) — exact in binary64, so one rounding to binary32
+      s.push(floatToCell(s.pop()));
+      break;
+    case 163: // F>S ( r -- n ) — truncates toward zero, saturates, NaN -> 0
+      s.push(floatToInt(cellToFloat(s.pop())));
+      break;
 
     case 150: { // (BANK-CREATE) ( name-a name-l tag-a tag-l size -- slot | 0 )
       // spec/04-FORTH-CORE.md §6.14, M73. A zero-length name gets the

@@ -22,6 +22,9 @@ import { fileURLToPath } from 'node:url';
 import { Machine, MachineOptions } from './repl.js';
 
 const SYSTEM_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app/public/system.fth');
+/** M78: the float wordset's Forth layer — the app's vendored copy of
+ * rebel-specs/07-FLOATING-POINT.fth (float.test.ts checks they match). */
+export const FLOAT_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app/public/float.fth');
 
 let cachedSource: string | undefined;
 
@@ -38,6 +41,18 @@ export function loadSystemVocabulary(machine: Machine): void {
   for (const line of systemFthSource().split('\n')) {
     machine.interpret(line);
   }
+}
+
+/** M78: `bootMachine()` plus the float wordset's Forth layer, loaded
+ * after system.fth exactly as the app does. Opt-in, so tests that don't
+ * need floats don't pay for the bigger dictionary. */
+export function bootMachineWithFloat(options?: MachineOptions): Machine {
+  const machine = bootMachine(options);
+  for (const line of readFileSync(FLOAT_FTH_PATH, 'utf8').split('\n')) {
+    machine.interpret(line);
+  }
+  machine.interpret('SEAL-BOOT');
+  return machine;
 }
 
 /** `new Machine()` plus the bootstrap load — what any test exercising a
