@@ -4734,6 +4734,34 @@ across it, nesting, `(GET-INPUT)`'s remaining length, recovery after an
 error inside, `LOAD` handing the caller's line back, and a screen that
 `LOAD`s another screen partway through a line.
 
+### 1.88 `EKEY` / `EKEY?`: raw key presses (M76, spec v1.1)
+
+`KEY` reads bytes from the bound channel, so it can't see a key that has
+no character (arrows, Esc, F-keys), and it can't tell Shift-Enter from
+Enter. `rebel-specs` v1.1 (`04-FORTH-CORE.md` §6.9) adds the ANS-style
+pair for that, which MEMO needs for its full-screen keys. `EKEY ( --
+event )` returns the next key **press** as one cell: usage code in bits
+0–7, modifier mask in 8–15, translated character (0 if none) in 16–23
+(`packKeyEvent`, `keyboard.ts`). It consumes and skips releases and
+modifier-only events (usage `0x80`–`0x87`). `EKEY? ( -- flag )` is TRUE
+when a press is queued. Unlike `KEY?`, it ignores releases.
+
+*Mechanism:* `Keyboard.hasKeyPress()`/`readKeyPress()`, alongside the
+channel's `hasTranslatedEvent()`/`readTranslatedChar()`, over the same
+single ring buffer, so a key taken by `EKEY` is gone for `KEY`.
+`EKEY?`/`EKEY` are primitives 154/155. `EKEY` blocks the same way `KEY`
+does: `inner.ts`'s `dispatch()` yields `'blocked'` until
+`keyboard.hasKeyPress()` is true, so it suspends through any depth of
+Forth calls. The app already wakes the pump on every raw key event, so
+no app change was needed. `EKEY` reads the keyboard directly, not the
+channel, so it sees nothing from a remote session; that is the spec's
+intent.
+
+*Tests (`keyboard.test.ts`):* the packing, including a shifted key and a
+key with no character; skipping releases and modifiers; `EKEY?`
+ignoring a lone release; blocking until a press arrives, past a release
+that arrives first; and the queue shared with `KEY`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4916,5 +4944,6 @@ exactly as it would be on the bare-metal target.
 | **M73** | Banks by name (§1.85, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.14): `CREATE-BANK`/`BSAVE`/`BLOAD` renamed `BANK-CREATE`/`BANK-SAVE`/`BANK-LOAD`, same tokens, no aliases; save and load resolve by name, and `BANK-LOAD` creates a missing bank. New KERNEL `(BANK-CREATE)`/`(BANK-SAVE)`/`(BANK-LOAD)` (150-152) return a slot address or 0/FALSE instead of ABORTing; `(BANK-FIND)` is pure Forth in `system.fth`. `createBank` now rejects a tag over 4 or a name over 8 characters instead of truncating, `allocate` refuses a bank past the end of the arena, and new banks are zeroed. | `primitives.ts`, `banks.ts`, `mmap.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `project.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `dump.test.ts`, `low-level-batch.test.ts`, `resize.test.ts`, `storage.test.ts`, `HAL.md`, `PORTING-WEB.md`, `FORTH-ARCHITECTURE.md` |
 | **M74** | Removing a bank (§1.86, `rebel-specs` v1.1 `02-MEMORY-MODEL.md` §4.9): new `REMOVED` flag (bit 5), inert for the rest of the session. `SAVE` blanks a removed bank's asset file instead of writing it, `BANK-SAVE`/`(BANK-SAVE)` refuse it, and `openProject` skips its asset in both load modes and frees its slot and name on an in-place load. `(BANK-REMOVE)`/`BANK-REMOVE` are Forth in `system.fth`; they refuse `MMAP` and `EXTERNAL` banks. Found a pre-existing failure: restoring a project with no `MMAP.MAP` collides with the resident boot banks. | `mmap.ts`, `banks.ts`, `index.ts`, `storage.ts`, `primitives.ts`, `system.fth`, `project.test.ts`, `bank-access.test.ts` |
 | **M75** | `EVALUATE` (§1.87, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.15): new `(GET-INPUT)` primitive (153), the read half of `(SET-INPUT)`, with `EVALUATE` written in Forth over the two, so it nests and leaves `STATE` alone. `LOAD` now evaluates each line through it, which fixes input typed after `n LOAD` being dropped, and re-fetches `BLOCK` per line while saving its own variables on the return stack, so a screen can `LOAD` another. | `primitives.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `evaluate.test.ts` |
+| **M76** | `EKEY`/`EKEY?` (§1.88, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.9): primitives 154/155 returning the next raw key press as one cell (usage, modifiers << 8, char << 16), skipping releases and modifier-only events. `EKEY` blocks on the keyboard queue the way `KEY` blocks on the channel, and the two share the one queue. | `keyboard.ts`, `primitives.ts`, `inner.ts`, `rebel-opcodes.json`, `keyboard.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

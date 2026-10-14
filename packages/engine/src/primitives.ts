@@ -18,7 +18,7 @@
 
 import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
-import { Keyboard } from './keyboard.js';
+import { Keyboard, packKeyEvent } from './keyboard.js';
 import { Channel } from './channel.js';
 import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
@@ -1226,6 +1226,25 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const { addr, len } = ctx.getInput();
       s.push(addr);
       s.push(len);
+      break;
+    }
+
+    case 154: // EKEY? ( -- flag ) spec/04-FORTH-CORE.md §6.9, M76: TRUE if
+      // EKEY would return at once — a key press is queued. Reads the
+      // keyboard directly, not the bound channel.
+      s.push(ctx.keyboard.hasKeyPress() ? TRUE : FALSE);
+      break;
+
+    case 155: { // EKEY ( -- event ) §6.9, M76: the next raw key press as
+      // one cell (packKeyEvent). Releases and modifier-only events are
+      // consumed and skipped. inner.ts's dispatch() suspends on the
+      // keyboard queue before this runs, the same way KEY suspends on the
+      // channel, so a press is always there by now.
+      const event = ctx.keyboard.readKeyPress();
+      if (event === undefined) {
+        throw new Error('EKEY: no key press queued');
+      }
+      s.push(packKeyEvent(event));
       break;
     }
 

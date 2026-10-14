@@ -41,6 +41,21 @@ export interface KeyEvent {
   readonly pressed: boolean;
 }
 
+/** First pseudo-usage-code of the modifier range (docs/KEYBOARD.md §10:
+ * 0x80 + modifier bit, 0x80-0x87). */
+const MODIFIER_USAGE_BASE = 0x80;
+
+function isKeyPress(event: KeyEvent): boolean {
+  return event.pressed && event.usageCode < MODIFIER_USAGE_BASE;
+}
+
+/** spec/04-FORTH-CORE.md §6.9, M76: `EKEY`'s one-cell encoding — usage
+ * code in bits 0-7, modifier mask in 8-15, translated character (0 if
+ * none) in 16-23. */
+export function packKeyEvent(event: KeyEvent): number {
+  return (event.usageCode & 0xff) | ((event.modifiers & 0xff) << 8) | ((event.char & 0xff) << 16);
+}
+
 export class Keyboard {
   private readonly queue: KeyEvent[] = new Array(KEYBOARD_QUEUE_SIZE);
   private head = 0;
@@ -203,6 +218,30 @@ export class Keyboard {
       }
     }
     return false;
+  }
+
+  /** spec/04-FORTH-CORE.md §6.9, M76: is a real key *press* queued?
+   * Releases and modifier-only events (usage 0x80-0x87) don't count —
+   * `EKEY` skips them. Non-destructive, like `hasTranslatedEvent()`. */
+  hasKeyPress(): boolean {
+    for (let i = this.tail; i !== this.head; i = (i + 1) % KEYBOARD_QUEUE_SIZE) {
+      if (isKeyPress(this.queue[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** `EKEY`'s read: pops and discards events until (and including) the
+   * next key press, returning it, or undefined once the queue runs out.
+   * Same single physical queue `KEY` (via the channel) drains, so a key
+   * taken by one is gone for the other. */
+  readKeyPress(): KeyEvent | undefined {
+    let event = this.readEvent();
+    while (event !== undefined && !isKeyPress(event)) {
+      event = this.readEvent();
+    }
+    return event;
   }
 
   /** Pops and discards events until (and including) the next one with a

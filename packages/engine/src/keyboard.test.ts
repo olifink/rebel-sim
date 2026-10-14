@@ -130,3 +130,49 @@ describe('Keyboard', () => {
     expect(m.stack.pop()).toBe('a'.charCodeAt(0));
   });
 });
+
+describe('EKEY / EKEY? (M76, spec/04-FORTH-CORE.md §6.9)', () => {
+  const pack = (usage: number, mods: number, char: number): number => usage | (mods << 8) | (char << 16);
+
+  it('returns key presses packed as usage | modifiers << 8 | char << 16, skipping releases and modifier-only events', () => {
+    const m = new Machine();
+    m.keyboard.pushRawEvent(LSHIFT, true); // modifier-only: skipped
+    m.keyboard.pushRawEvent(0x04, true); // shifted 'a' -> 'A'
+    m.keyboard.pushRawEvent(0x04, false); // release: skipped
+    m.keyboard.pushRawEvent(LSHIFT, false); // modifier-only: skipped
+    m.keyboard.pushRawEvent(0x3a, true); // F1: no translated char
+    m.keyboard.pushRawEvent(0x28, true); // Enter, unshifted
+
+    m.interpret('EKEY EKEY EKEY');
+    expect(m.stack.toArray()).toEqual([pack(0x28, 0, 10), pack(0x3a, 0, 0), pack(0x04, 0x02, 65)]);
+    m.stack.clear();
+
+    m.interpret('EKEY?');
+    expect(m.stack.pop()).toBe(0); // queue now empty
+    m.keyboard.pushRawEvent(0x04, false); // only a release queued
+    m.interpret('EKEY?');
+    expect(m.stack.pop()).toBe(0);
+    m.keyboard.pushRawEvent(0x05, true);
+    m.interpret('EKEY?');
+    expect(m.stack.pop()).toBe(-1);
+  });
+
+  it('blocks like KEY until a press arrives, ignoring a release that arrives first', () => {
+    const m = new Machine();
+    m.beginLine('EKEY 1 +');
+    expect(m.step(10)).toBe('blocked');
+    m.keyboard.pushRawEvent(0x04, false);
+    expect(m.step(10)).toBe('blocked');
+    m.keyboard.pushRawEvent(0x04, true); // 'a'
+    expect(m.step(1000)).toBe('idle');
+    expect(m.stack.toArray()).toEqual([pack(0x04, 0, 97) + 1]);
+  });
+
+  it('shares the one keyboard queue with KEY: a key EKEY takes is gone for KEY', () => {
+    const m = new Machine();
+    m.keyboard.pushRawEvent(0x04, true); // 'a'
+    m.keyboard.pushRawEvent(0x05, true); // 'b'
+    m.interpret('EKEY DROP KEY');
+    expect(m.stack.toArray()).toEqual([98]);
+  });
+});

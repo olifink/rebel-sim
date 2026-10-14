@@ -80,6 +80,7 @@ const DODOES_TOKEN = opcodes.dodoesTokenId;
 const EXIT_TOKEN = opcodes.primitives.find((p) => p.name === 'EXIT')!.id;
 const LIT_TOKEN = opcodes.primitives.find((p) => p.name === 'LIT')!.id;
 const KEY_TOKEN = opcodes.primitives.find((p) => p.name === 'KEY')!.id;
+const EKEY_TOKEN = opcodes.primitives.find((p) => p.name === 'EKEY')!.id;
 const ACCEPT_TOKEN = opcodes.primitives.find((p) => p.name === 'ACCEPT')!.id;
 const BRANCH_TOKEN = opcodes.primitives.find((p) => p.name === 'BRANCH')!.id;
 const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
@@ -326,6 +327,13 @@ export class Inner {
     }
     if (token === KEY_TOKEN) {
       while (!this.ctx.channel.hasData()) {
+        yield 'blocked';
+      }
+    }
+    if (token === EKEY_TOKEN) {
+      // spec/04-FORTH-CORE.md §6.9, M76: EKEY suspends exactly as KEY
+      // does, waiting on the keyboard queue instead of the channel.
+      while (!this.ctx.keyboard.hasKeyPress()) {
         yield 'blocked';
       }
     }
