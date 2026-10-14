@@ -20,7 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
-import { type Bank, BankTable, BLOCK_SIZE } from './banks.js';
+import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
 import {
@@ -943,7 +943,15 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
         throw new Error('no project name set - use PROJECT name first');
       }
       for (const bank of ctx.banks.getAllBanks()) {
-        ctx.storage.saveAsset(project, bank);
+        // spec/02-MEMORY-MODEL.md §4.9, M74: a bank marked REMOVED is not
+        // saved; its stale asset file, if any, is blanked instead. MMAP
+        // itself is still saved with the flag set, which is what keeps
+        // the next load from reconstructing the slot.
+        if (bank.flags & BankFlagRemoved) {
+          ctx.storage.blankAsset(project, bank);
+        } else {
+          ctx.storage.saveAsset(project, bank);
+        }
       }
       break;
     }

@@ -45,7 +45,7 @@
 
 import { Arena } from './arena.js';
 import { Bank, BankTable, BANK_NAME_LEN, roundToSizeClass } from './banks.js';
-import { MMAP_TAG } from './mmap.js';
+import { BankFlagRemoved, MMAP_TAG, removedSlotNames } from './mmap.js';
 
 const PROJECTS_ROOT = '/PROJECTS';
 const CARTS_ROOT = '/CARTS';
@@ -255,19 +255,22 @@ export class Storage {
     const mmapExt = TAG_TO_EXTENSION[MMAP_TAG];
     const mmapFile = files.find((f) => f.toUpperCase() === `${MMAP_TAG}.${mmapExt}`);
     let mmapRestored = skipLayoutRestore;
+    const mmapBytes = mmapFile ? this.hal.readFile(`${dir}/${mmapFile}`) : undefined;
+    const mmapPayload =
+      mmapBytes && mmapBytes.length >= ASSET_HEADER_SIZE ? mmapBytes.subarray(ASSET_HEADER_SIZE) : undefined;
+    // spec/02-MEMORY-MODEL.md §4.9, M74: banks the saved table marks
+    // REMOVED are not brought back by either load mode — their asset
+    // files are skipped below, so the fresh-create fallback can't
+    // resurrect them either.
+    const removed = new Set(mmapPayload ? removedSlotNames(mmapPayload) : []);
 
     if (!skipLayoutRestore) {
-      const mmapBank = mmapFile ? this.banks.findBank(MMAP_TAG, MMAP_TAG) : undefined;
-      if (mmapFile && mmapBank) {
-        const bytes = this.hal.readFile(`${dir}/${mmapFile}`);
-        if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
-          const payload = bytes.subarray(ASSET_HEADER_SIZE);
-          if (payload.length <= mmapBank.size) {
-            this.loadPayload(mmapBank, payload);
-            mmapRestored = true;
-            loaded.push(mmapBank);
-          }
-        }
+      const mmapBank = mmapPayload ? this.banks.findBank(MMAP_TAG, MMAP_TAG) : undefined;
+      if (mmapPayload && mmapBank && mmapPayload.length <= mmapBank.size) {
+        this.loadPayload(mmapBank, mmapPayload);
+        this.banks.mmap.clearRemovedSlots();
+        mmapRestored = true;
+        loaded.push(mmapBank);
       }
     }
 
@@ -283,6 +286,7 @@ export class Storage {
       if (!bytes || bytes.length < ASSET_HEADER_SIZE) continue; // short/missing read aborts this file
       const payload = bytes.subarray(ASSET_HEADER_SIZE);
       const basename = file.slice(0, dot).toUpperCase();
+      if (removed.has(basename)) continue;
 
       if (mmapRestored) {
         const bank = this.banks.findBankByName(basename);
@@ -313,6 +317,9 @@ export class Storage {
    * own `name` becomes the file's basename; `tag` maps to the
    * extension. */
   saveAsset(projectName: string, bank: Bank): void {
+    if (bank.flags & BankFlagRemoved) {
+      throw new Error(`bank ${bank.name} is marked for removal and is not saved`);
+    }
     const ext = TAG_TO_EXTENSION[bank.tag];
     if (!ext) {
       throw new Error(`no known asset file extension for bank tag ${bank.tag}`);
@@ -332,6 +339,19 @@ export class Storage {
     }
 
     this.hal.writeFile(`${dir}/${bank.name}.${ext}`, bytes);
+  }
+
+  /** spec/01-HAL.md §6.3, M74: a whole-project save's treatment of a
+   * bank marked `REMOVED` — its asset file, if one exists, is written
+   * with zero length, which every loader already treats as missing, so
+   * even a project saved without its MMAP can't bring the bank back. */
+  blankAsset(projectName: string, bank: Bank): void {
+    const ext = TAG_TO_EXTENSION[bank.tag];
+    if (!ext) return;
+    const path = `${projectDir(projectName)}/${bank.name}.${ext}`;
+    if (this.hal.readFile(path) !== undefined) {
+      this.hal.writeFile(path, new Uint8Array(0));
+    }
   }
 
   /** Reads one bank's previously-saved asset file back into that bank's

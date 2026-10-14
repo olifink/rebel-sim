@@ -35,6 +35,7 @@ import {
   BankFlagSwappable,
   BankFlagDirty,
   BankFlagActive,
+  BankFlagRemoved,
   PersonalityFlagHeadless,
   type Personality,
   DEFAULT_PERSONALITY,
@@ -43,7 +44,7 @@ import {
 // Re-exported for this module's own existing public surface
 // (index.ts/primitives.ts import these from banks.ts today) — owned by
 // mmap.ts now, DEVELOPING.md §14, M22.
-export { BankFlagResident, BankFlagExternal, BankFlagSwappable, BankFlagDirty, BankFlagActive };
+export { BankFlagResident, BankFlagExternal, BankFlagSwappable, BankFlagDirty, BankFlagActive, BankFlagRemoved };
 export { PersonalityFlagHeadless, DEFAULT_PERSONALITY };
 export type { Personality };
 

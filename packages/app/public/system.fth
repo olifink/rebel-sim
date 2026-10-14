@@ -401,6 +401,28 @@ VARIABLE BF-LEN
     THEN
   LOOP ;
 
+( BANK-REMOVE, M74, spec 02-MEMORY-MODEL.md section 4.9 and )
+( 04-FORTH-CORE.md section 6.14: marks a bank for removal by setting )
+( REMOVED, flags bit 5, in its slot. Nothing changes this session -- )
+( the bank stays resident, findable and its name taken -- but SAVE )
+( no longer writes it and the next project load does not bring it )
+( back. Clearing the bit by hand undoes it. MMAP itself, always the )
+( slot at MMAP-HDR, and an EXTERNAL bank, flags bit 1, are refused. )
+( The non-parsing form returns a flag, the parsing form ABORTs with )
+( the bad name printed first, the same convention tick follows. )
+32 CONSTANT MMAP-REMOVED
+2  CONSTANT MMAP-EXTERNAL
+: (BANK-REMOVE) ( addr len -- flag )
+  (BANK-FIND) DUP 0= IF EXIT THEN
+  DUP MMAP-HDR = IF DROP 0 EXIT THEN
+  MMAP-FLAGS +
+  DUP @ MMAP-EXTERNAL AND IF DROP 0 EXIT THEN
+  DUP @ MMAP-REMOVED OR SWAP !
+  -1 ;
+: BANK-REMOVE ( "name" -- )
+  BL WORD 2DUP (BANK-REMOVE)
+  IF 2DROP ELSE TYPE SPACE ABORT THEN ;
+
 ( PALETTE-BASE, M62 follow-up, Oliver's request: direct read/write )
 ( access to the indexed-color-palette sysvar, spec/01-HAL.md 3.6, )
 ( spec/02-MEMORY-MODEL.md 4.6 -- PALETTE-BASE @ reads it, addr )

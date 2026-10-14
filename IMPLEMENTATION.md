@@ -4639,6 +4639,56 @@ too-long tag to be rejected rather than truncated, and
 `bank-access.test.ts` covers `(BANK-FIND)`. Every `CREATE-BANK` call in
 the tests is renamed; `dump.test.ts`'s 7-character tags became `DATA`.
 
+### 1.86 Removing a bank: the `REMOVED` flag (M74, spec v1.1)
+
+`rebel-specs` v1.1 (`02-MEMORY-MODEL.md` §4.9) adds bank removal using
+the same pattern as M54's resize: an ordinary write to the bank's
+`MMAP` descriptor that **changes nothing in the current session** and
+takes effect the next time the table is loaded. The write sets
+`REMOVED` (flags bit 5, `BankFlagRemoved` in `mmap.ts`) and leaves
+`ACTIVE` set. For the rest of the session the bank keeps its memory,
+base, slot and name; it is still found by name, and its name still
+can't be reused.
+
+*What the flag changes is persistence:*
+- `SAVE` doesn't write a `REMOVED` bank. It blanks the bank's existing
+  asset file instead (`Storage.blankAsset`, a zero-length write, which
+  every loader already treats as missing). `MMAP` is still saved with
+  the flag set.
+- `Storage.saveAsset` refuses a `REMOVED` bank, so `BANK-SAVE` aborts
+  and `(BANK-SAVE)` returns FALSE.
+- `openProject` reads the `REMOVED` names out of the saved `MMAP`
+  payload (`removedSlotNames`, decoded from the file bytes without an
+  arena), in both load modes, and skips those asset files. Otherwise the
+  fallback that creates banks missing from the table would bring them
+  back. An in-place load also calls `MemoryMap.clearRemovedSlots()`
+  right after copying the table in, which zeroes those slots so the slot
+  and the name are free again. As the spec requires, a pending removal
+  does not force a relayout load.
+
+*Forth words, BOOTSTRAP in `system.fth` next to `(BANK-FIND)`:*
+`(BANK-REMOVE) ( addr len -- flag )` is `(BANK-FIND)` plus an OR into
+the flags cell. It refuses `MMAP` (always the slot at `MMAP-HDR`), any
+`EXTERNAL` bank, and unknown names. `BANK-REMOVE name` is the parsing
+form; on failure it prints the name and ABORTs, the same convention
+`(TICK)` uses. Removing an already-removed bank succeeds, and clearing
+the bit by hand undoes a removal.
+
+*Found, not fixed (pre-existing):* opening a project that has no
+`MMAP.MAP` into a machine whose boot banks are resident throws `bank
+name SYSV already exists`. Every content file falls through to the
+fallback that creates a fresh bank, and that collides with the resident
+bank of the same name. `02-MEMORY-MODEL.md` §7 describes that case as a
+harmless no-op. This only matters for a save that skipped `MMAP`, which
+Rebel-Sim's own `SAVE` never does.
+
+*Tests:* `project.test.ts` has a new `REMOVED banks` block (bare
+machines, flag set directly): the bank is unchanged in-session, `SAVE`
+blanks it and `BANK-SAVE` refuses it, a restore frees the slot and the
+name, a blanked asset can't come back without `MMAP`, and a relayout
+load (`skipLayoutRestore`) skips the asset. `bank-access.test.ts` covers
+`(BANK-REMOVE)`/`BANK-REMOVE` on a booted machine.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4819,5 +4869,6 @@ exactly as it would be on the bare-metal target.
 | **M71** | `INK`/`PAPER` become real variables (§1.83), Oliver's call, breaking change accepted pre-1.0: `n INK`/`n PAPER` (store, no read) replaced with `n INK !`/`n PAPER !` and the new `INK @`/`PAPER @`, matching the `BASE`/`STATE`/`HERE-ADDR`/`LATEST-ADDR` variable idiom instead of being the one remaining color-consuming-store pair. `Screen.setInk`/`setPaper` deleted (no other callers). | `primitives.ts`, `screen.ts`, `rebel-opcodes.json`, `system.fth`, `screen.test.ts`, `project.test.ts`, `remote-terminal-loopback.test.ts` |
 | **M72** | HAL memory block operations (§1.84, `rebel-specs` v1.1 `01-HAL.md` §9): `Arena.copyBytes` (new, `hal_mem_copy`), `Arena.fillBytes` (`hal_mem_fill`), `Arena.writeBytes` (host payload in). Native `FILL`/`CMOVE` route through them and `system.fth`'s shadowing `DO`/`LOOP` versions are deleted; `CMOVE` keeps a byte loop for the destination-inside-source case so it still propagates the pattern. `(BLOCK-READ)`/`(BLOCK-WRITE)`, `Screen.cls()` and Storage asset loads (`loadPayload`, copy + zero-pad) switched over too. | `arena.ts`, `primitives.ts`, `screen.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `low-level-batch.test.ts`, `HAL.md` |
 | **M73** | Banks by name (§1.85, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.14): `CREATE-BANK`/`BSAVE`/`BLOAD` renamed `BANK-CREATE`/`BANK-SAVE`/`BANK-LOAD`, same tokens, no aliases; save and load resolve by name, and `BANK-LOAD` creates a missing bank. New KERNEL `(BANK-CREATE)`/`(BANK-SAVE)`/`(BANK-LOAD)` (150-152) return a slot address or 0/FALSE instead of ABORTing; `(BANK-FIND)` is pure Forth in `system.fth`. `createBank` now rejects a tag over 4 or a name over 8 characters instead of truncating, `allocate` refuses a bank past the end of the arena, and new banks are zeroed. | `primitives.ts`, `banks.ts`, `mmap.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `project.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `dump.test.ts`, `low-level-batch.test.ts`, `resize.test.ts`, `storage.test.ts`, `HAL.md`, `PORTING-WEB.md`, `FORTH-ARCHITECTURE.md` |
+| **M74** | Removing a bank (§1.86, `rebel-specs` v1.1 `02-MEMORY-MODEL.md` §4.9): new `REMOVED` flag (bit 5), inert for the rest of the session. `SAVE` blanks a removed bank's asset file instead of writing it, `BANK-SAVE`/`(BANK-SAVE)` refuse it, and `openProject` skips its asset in both load modes and frees its slot and name on an in-place load. `(BANK-REMOVE)`/`BANK-REMOVE` are Forth in `system.fth`; they refuse `MMAP` and `EXTERNAL` banks. Found a pre-existing failure: restoring a project with no `MMAP.MAP` collides with the resident boot banks. | `mmap.ts`, `banks.ts`, `index.ts`, `storage.ts`, `primitives.ts`, `system.fth`, `project.test.ts`, `bank-access.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

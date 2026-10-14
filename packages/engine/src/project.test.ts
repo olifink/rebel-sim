@@ -3,6 +3,7 @@ import { Machine } from './repl.js';
 import { StorageHal } from './storage.js';
 import { ScreenHal } from './screen.js';
 import { listDictionaryEntries } from './dictionary.js';
+import { BankFlagRemoved } from './banks.js';
 
 /** A real (not no-op) in-memory StorageHal — same role as
  * storage.test.ts's memoryHal(). Synchronous (M33: StorageHal dropped
@@ -343,6 +344,89 @@ describe('(BANK-CREATE) / (BANK-SAVE) / (BANK-LOAD) — name on the stack, 0 on 
     expect(call('(BANK-LOAD)', 'CHAR')).toBe(m.banks.slotAddress('CHAR'));
     expect(call('(BANK-LOAD)', 'NOSUCH')).toBe(0);
     expect(m.stack.toArray()).toEqual([]);
+  });
+});
+
+/** Sets REMOVED (flags bit 5) on a bank's MMAP slot directly — what
+ * system.fth's (BANK-REMOVE) does, without needing a booted Machine. */
+function markRemoved(m: Machine, name: string): void {
+  const flags = m.banks.slotAddress(name)! + 20;
+  m.arena.writeCell(flags, m.arena.readCell(flags) | BankFlagRemoved);
+}
+
+describe('REMOVED banks (M74, spec/02-MEMORY-MODEL.md §4.9, 01-HAL.md §6.3)', () => {
+  it('a REMOVED bank is unchanged for the rest of the session', () => {
+    const m = new Machine({ storageHal: memoryHal() });
+    const bank = m.banks.createBank('DATA', 64, 'GONE');
+    m.arena.writeByte(bank.base, 7);
+    markRemoved(m, 'GONE');
+    expect(m.banks.findBankByName('GONE')?.base).toBe(bank.base);
+    m.interpret('BANK@ GONE');
+    expect(m.stack.pop()).toBe(bank.base);
+    expect(m.arena.readByte(bank.base)).toBe(7);
+    expect(() => m.banks.createBank('DATA', 64, 'GONE')).toThrow(/already exists/);
+  });
+
+  it('SAVE skips a REMOVED bank and blanks its existing asset; BANK-SAVE refuses it', () => {
+    const hal = memoryHal();
+    const m = new Machine({ storageHal: hal });
+    m.banks.createBank('DATA', 64, 'GONE');
+    m.interpret('PROJECT RMP');
+    m.interpret('SAVE');
+    expect(hal.readFile('/PROJECTS/RMP/GONE.DAT')!.length).toBeGreaterThan(0);
+
+    markRemoved(m, 'GONE');
+    m.interpret('SAVE');
+    expect(hal.readFile('/PROJECTS/RMP/GONE.DAT')!.length).toBe(0);
+    expect(() => m.interpret('BANK-SAVE GONE')).toThrow(/marked for removal/);
+  });
+
+  it('a later restore does not reconstruct it; its slot and name are free again', () => {
+    const hal = memoryHal();
+    const m1 = new Machine({ storageHal: hal });
+    m1.banks.createBank('DATA', 64, 'KEEP');
+    m1.banks.createBank('DATA', 64, 'GONE');
+    markRemoved(m1, 'GONE');
+    m1.interpret('PROJECT RMP');
+    m1.interpret('SAVE');
+
+    const m2 = new Machine({ storageHal: hal });
+    m2.interpret('RESTORE RMP');
+    expect(m2.banks.findBankByName('KEEP')).toBeDefined();
+    expect(m2.banks.findBankByName('GONE')).toBeUndefined();
+    expect(() => m2.banks.createBank('DATA', 64, 'GONE')).not.toThrow();
+  });
+
+  it('a project saved without its MMAP cannot bring a REMOVED bank back either (blanked asset)', () => {
+    const hal = memoryHal();
+    const m1 = new Machine({ storageHal: hal });
+    m1.banks.createBank('DATA', 64, 'GONE');
+    m1.interpret('PROJECT RMP');
+    m1.interpret('SAVE'); // a real asset first ...
+    markRemoved(m1, 'GONE');
+    m1.interpret('SAVE'); // ... then blanked
+
+    // Only the blanked asset: with no MMAP.MAP every file takes the
+    // fresh-create fallback, which can only be exercised on its own here.
+    const noMmap = memoryHal();
+    noMmap.writeFile('/PROJECTS/RMP/GONE.DAT', hal.readFile('/PROJECTS/RMP/GONE.DAT')!);
+    const m2 = new Machine({ storageHal: noMmap });
+    m2.storage.openProject('RMP');
+    expect(m2.banks.findBankByName('GONE')).toBeUndefined();
+  });
+
+  it('a relayout load skips the asset of a slot the saved MMAP marks REMOVED', () => {
+    const hal = memoryHal();
+    const m1 = new Machine({ storageHal: hal });
+    m1.banks.createBank('DATA', 64, 'GONE');
+    m1.interpret('PROJECT RMP');
+    m1.interpret('BANK-SAVE GONE'); // a live, non-blank asset
+    markRemoved(m1, 'GONE');
+    m1.interpret('BANK-SAVE MMAP'); // only the table records the removal
+
+    const m2 = new Machine({ storageHal: hal });
+    m2.storage.openProject('RMP', true); // skipLayoutRestore, as bootProject does
+    expect(m2.banks.findBankByName('GONE')).toBeUndefined();
   });
 });
 

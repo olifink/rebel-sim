@@ -10,6 +10,7 @@ export {
   BankFlagSwappable,
   BankFlagDirty,
   BankFlagActive,
+  BankFlagRemoved,
 } from './banks.js';
 export type { Bank } from './banks.js';
 export { MemoryMap, MMAP_TAG, MMAP_MAX_SLOTS, MMAP_SIZE } from './mmap.js';

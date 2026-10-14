@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
 import { bootMachine } from './test-support.js';
+import { BankFlagActive, BankFlagExternal, BankFlagRemoved, BankFlagResident } from './banks.js';
 
 describe('BANK@ (DEVELOPING.md §10, M18)', () => {
   it('resolves a known bank name to the same base address findBank() reports', () => {
@@ -279,6 +280,35 @@ describe('(BANK-FIND) (system.fth, M73, spec/04-FORTH-CORE.md §6.14)', () => {
     expect(find('NINECHARS')).toBe(0); // longer than any name
     m.interpret(`PAD 0 (BANK-FIND)`);
     expect(m.stack.pop()).toBe(0); // empty name
+    expect(m.stack.toArray()).toEqual([]);
+  });
+});
+
+describe('(BANK-REMOVE) / BANK-REMOVE (system.fth, M74, spec/04-FORTH-CORE.md §6.14)', () => {
+  it('sets REMOVED on a named bank, refuses MMAP, EXTERNAL and unknown banks, and is idempotent', () => {
+    const m = bootMachine();
+    m.banks.createBank('DATA', 64, 'TMP');
+    m.banks.createBank('DATA', 64, 'EXT', BankFlagResident | BankFlagExternal);
+    const flags = (name: string): number => m.banks.findBankByName(name)!.flags;
+    const remove = (name: string): number => {
+      m.interpret(`S" ${name}" (BANK-REMOVE)`);
+      return m.stack.pop();
+    };
+
+    expect(remove('tmp')).toBe(-1);
+    expect(flags('TMP') & BankFlagRemoved).toBeTruthy();
+    expect(flags('TMP') & BankFlagActive).toBeTruthy(); // still active this session
+    expect(remove('TMP')).toBe(-1); // already removed: succeeds, changes nothing
+
+    expect(remove('MMAP')).toBe(0);
+    expect(flags('MMAP') & BankFlagRemoved).toBe(0);
+    expect(remove('EXT')).toBe(0);
+    expect(flags('EXT') & BankFlagRemoved).toBe(0);
+    expect(remove('NOSUCH')).toBe(0);
+
+    m.interpret('BANK-REMOVE EDITOR');
+    expect(flags('EDITOR') & BankFlagRemoved).toBeTruthy();
+    expect(() => m.interpret('BANK-REMOVE NOSUCH')).toThrow();
     expect(m.stack.toArray()).toEqual([]);
   });
 });

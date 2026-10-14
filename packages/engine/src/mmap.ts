@@ -121,6 +121,11 @@ export const BankFlagExternal = 1 << 1;
 export const BankFlagSwappable = 1 << 2; // reserved, inert
 export const BankFlagDirty = 1 << 3; // reserved, inert — DEVELOPING.md §11
 export const BankFlagActive = 1 << 4; // DEVELOPING.md §11/§14, M19/M22
+/** spec/02-MEMORY-MODEL.md §4.9, M74: marked for removal. Inert for the
+ * rest of the session — the bank stays resident, findable, and its name
+ * taken — but it is never saved, and a later project load does not
+ * reconstruct it. Set by `(BANK-REMOVE)`/`BANK-REMOVE` (system.fth). */
+export const BankFlagRemoved = 1 << 5;
 
 /** The one bit `PERSONALITY` defines today. A Rebel-Sim-first addition —
  * stored/read only in this version (repl.ts reads it back via
@@ -228,6 +233,22 @@ export class MemoryMap {
 
   private slotOffset(index: number): number {
     return this.base + HEADER_SIZE + index * SLOT_SIZE;
+  }
+
+  /** spec/02-MEMORY-MODEL.md §4.9, M74: run right after a saved table
+   * has been copied in by a project load — every slot marked
+   * `REMOVED` is cleared to an ordinary inactive slot, freeing it and
+   * its name. Returns the names it cleared. */
+  clearRemovedSlots(): string[] {
+    const cleared: string[] = [];
+    for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
+      const slot = this.getSlot(i);
+      if (slot.flags & BankFlagActive && slot.flags & BankFlagRemoved) {
+        cleared.push(slot.name);
+        this.arena.fillBytes(this.slotOffset(i), SLOT_SIZE, 0);
+      }
+    }
+    return cleared;
   }
 
   /** spec/04-FORTH-CORE.md §6.14: the arena address of slot `index`'s
@@ -379,4 +400,30 @@ export class MemoryMap {
 
     return this.getSlot(freeSlot);
   }
+}
+
+/** spec/02-MEMORY-MODEL.md §4.9, M74: the names of the active,
+ * `REMOVED` slots in a *saved* MMAP payload (an asset file's bytes past
+ * its header), decoded without an arena — a relayout load
+ * (`openProject`'s `skipLayoutRestore`) never copies the saved table in,
+ * but still needs to know which banks not to bring back. */
+export function removedSlotNames(payload: Uint8Array): string[] {
+  const cell = (at: number): number =>
+    (payload[at] | (payload[at + 1] << 8) | (payload[at + 2] << 16) | (payload[at + 3] << 24)) >>> 0;
+  const names: string[] = [];
+  for (let i = 0; i < MMAP_MAX_SLOTS; i++) {
+    const offset = HEADER_SIZE + i * SLOT_SIZE;
+    if (offset + SLOT_SIZE > payload.length) break;
+    const flags = cell(offset + SLOT_FLAGS_OFFSET);
+    if (flags & BankFlagActive && flags & BankFlagRemoved) {
+      let name = '';
+      for (let j = 0; j < NAME_SIZE; j++) {
+        const code = payload[offset + TAG_SIZE + j];
+        if (code === 0) break;
+        name += String.fromCharCode(code);
+      }
+      names.push(name);
+    }
+  }
+  return names;
 }
