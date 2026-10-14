@@ -377,14 +377,21 @@ VARIABLE FIND-LEN
 ( No slot sits at address 0, MMAP's header does, so 0 means none. )
 ( BF-ADDR/BF-LEN carry the name through the loop instead of the data )
 ( stack, the same scratch-variable convention LOAD-BLK uses. )
+( UPCHAR folds one character a-z to upper case. NAME8= compares an )
+( 8-byte NUL-padded name field with addr len folded to upper case -- )
+( shared with the environments' ESCR slot names, M77, so both are )
+( left visible. )
 VARIABLE BF-ADDR
 VARIABLE BF-LEN
-: BF-UPC ( c -- c' ) DUP 97 123 WITHIN IF 32 - THEN ;
-: BF-NAME= ( field -- flag )
+VARIABLE N8-ADDR
+VARIABLE N8-LEN
+: UPCHAR ( c -- c' ) DUP 97 123 WITHIN IF 32 - THEN ;
+: NAME8= ( field addr len -- flag )
+  N8-LEN ! N8-ADDR !
   -1 SWAP
   MMAP-NAME-LEN 0 DO
     DUP I + C@
-    I BF-LEN @ < IF BF-ADDR @ I + C@ BF-UPC ELSE 0 THEN
+    I N8-LEN @ < IF N8-ADDR @ I + C@ UPCHAR ELSE 0 THEN
     <> IF NIP 0 SWAP THEN
   LOOP
   DROP ;
@@ -395,7 +402,7 @@ VARIABLE BF-LEN
   MMAP-SLOTS 0 DO
     I MMAP-SLOT * MMAP-HDR +
     DUP MMAP-FLAGS + @ MMAP-ACTIVE AND IF
-      DUP MMAP-NAME + BF-NAME= IF NIP ELSE DROP THEN
+      DUP MMAP-NAME + BF-ADDR @ BF-LEN @ NAME8= IF NIP ELSE DROP THEN
     ELSE
       DROP
     THEN
@@ -715,12 +722,12 @@ HIDE BRANCH-XT
 HIDE 0BRANCH-XT
 HIDE SLIT-XT
 HIDE (TICK)
-\ BF-ADDR/BF-LEN/BF-UPC/BF-NAME= are (BANK-FIND)'s plumbing, M73,
+\ BF-ADDR/BF-LEN and NAME8='s N8-ADDR/N8-LEN are (BANK-FIND)'s plumbing, M73,
 \ hidden here because HIDE does not exist yet where they are defined.
 HIDE BF-ADDR
 HIDE BF-LEN
-HIDE BF-UPC
-HIDE BF-NAME=
+HIDE N8-ADDR
+HIDE N8-LEN
 \ SEARCH-ROOT/FIND-ADDR/FIND-LEN (M70) join the same cleanup batch --
 \ SEARCH-ROOT is plumbing FIND/XT-NAME/HIDE's own bodies already
 \ compiled a direct call to by now, same "hiding never disturbs an
@@ -1282,6 +1289,115 @@ VARIABLE LOAD-CONTEXT
 ;
 HIDE LOAD-BLK
 HIDE LOAD-CONTEXT
+
+\ ---- Environments, M77, spec 06-ENVIRONMENTS.md ----
+\ Other interactive programs -- MEMO, BASIC -- take over the screen and
+\ keyboard as peers of this Forth prompt. The native side is only the
+\ ENV sysvar group and one branch in repl.ts's driving loop: while
+\ ENV-ENTRY is non-zero the loop EXECUTEs it instead of reading a line.
+\ Everything below -- the saved-screen bank's header, claiming a slot,
+\ the switch itself -- is portable source and must stay that way, 6.
+
+\ The ENV group, 03-SYSVARS.md section 12, base 0x1C0 = 448 in SYSV.
+BANK@ SYSV 448 + CONSTANT ENV-ENTRY
+BANK@ SYSV 452 + CONSTANT ENV-REASON
+BANK@ SYSV 456 + CONSTANT ENV-CURRENT
+0 CONSTANT ENV-STEP
+1 CONSTANT ENV-ENTER
+2 CONSTANT ENV-RECOVER
+
+\ ESCR, 06 section 7: a 16-byte header -- slot count, slot size -- then
+\ 8 fixed slots. A slot is the name, 8 bytes NUL-padded, all zero =
+\ free; a valid flag at +8; six screen sysvars at +16; then copies of
+\ the CHAR grid and the ATTR grid from +48. The bank itself is created
+\ zeroed by repl.ts, so every slot starts free; only the header needs
+\ writing, and it must be written before HOME claims slot 0.
+: ESCR-GRID ( -- n ) BANK@ SYSV 80 + @ BANK@ SYSV 84 + @ * ;
+8 BANK@ ESCR !
+ESCR-GRID 2* 48 + 3 + -4 AND BANK@ ESCR 4 + !
+: ESCR-SLOT ( i -- slot ) BANK@ ESCR 4 + @ * BANK@ ESCR 16 + + ;
+
+\ The six saved sysvars, as offsets into SYSV: CURSOR-X, CURSOR-Y, then
+\ INK, PAPER, CURSOR-VISIBLE, PALETTE-BASE.
+: ESCR-VAR ( i -- sysv-addr )
+  DUP 2 < IF CELLS 16 + ELSE 2 - CELLS 88 + THEN BANK@ SYSV + ;
+
+\ Save copies the screen into a slot and marks it valid; restore copies
+\ it back and repaints from CHAR -- REDRAW also redraws the cursor from
+\ the restored CURSOR-VISIBLE.
+: ESCR-SAVE ( slot -- )
+  6 0 DO I ESCR-VAR @ OVER 16 + I CELLS + ! LOOP
+  BANK@ CHAR OVER 48 + ESCR-GRID CMOVE
+  BANK@ ATTR OVER 48 + ESCR-GRID + ESCR-GRID CMOVE
+  -1 SWAP 8 + ! ;
+: ESCR-RESTORE ( slot -- )
+  6 0 DO DUP 16 + I CELLS + @ I ESCR-VAR ! LOOP
+  DUP 48 + BANK@ CHAR ESCR-GRID CMOVE
+  48 + ESCR-GRID + BANK@ ATTR ESCR-GRID CMOVE
+  REDRAW ;
+
+\ Claiming a slot, 7.1: one that already carries the name is adopted as
+\ it stands, saved screen included -- how an environment reloaded after
+\ FORGET gets its screen back. Otherwise the first free slot is taken,
+\ named, and marked not valid. None free ABORTs.
+VARIABLE ENV-FOUND
+VARIABLE ENV-FREE
+: ESCR-FREE? ( slot -- flag ) DUP @ 0= SWAP CELL+ @ 0= AND ;
+: ESCR-SET-NAME ( addr len slot -- )
+  DUP 12 0 FILL
+  SWAP 0 DO OVER I + C@ UPCHAR OVER I + C! LOOP
+  2DROP ;
+: ESCR-CLAIM ( addr len -- slot )
+  0 ENV-FOUND !  0 ENV-FREE !
+  8 0 DO
+    I ESCR-SLOT
+    DUP ESCR-FREE? IF
+      ENV-FREE @ IF DROP ELSE ENV-FREE ! THEN
+    ELSE
+      DUP 2OVER NAME8= IF ENV-FOUND ! ELSE DROP THEN
+    THEN
+  LOOP
+  ENV-FOUND @ ?DUP IF NIP NIP EXIT THEN
+  ENV-FREE @ ?DUP 0= IF TYPE ."  - no free ESCR slot" ABORT THEN
+  DUP >R ESCR-SET-NAME R> ;
+
+\ The switch, 6: save the outgoing screen into the active environment's
+\ slot, repoint ENV-CURRENT and ENV-ENTRY, restore the incoming screen
+\ or clear it if it was never saved, mark ENV-ENTER, then WARM -- which
+\ discards both stacks and the rest of the line, so a switch never
+\ returns and the driving loop picks up ENV-ENTRY afresh.
+: ENV-SWITCH ( record -- )
+  ENV-CURRENT @ CELL+ @ ESCR-SAVE
+  DUP ENV-CURRENT !
+  DUP @ ENV-ENTRY !
+  CELL+ @ DUP 8 + @ IF ESCR-RESTORE ELSE DROP CLS THEN
+  ENV-ENTER ENV-REASON !
+  WARM ;
+
+\ ENVIRONMENT -- xt ENVIRONMENT name -- defines name as the word that
+\ switches into the environment whose step word is xt. The record is
+\ two cells, step xt then ESCR slot. The name is peeked first with
+\ WORD and the input cursor put back, so the slot can be claimed before
+\ CREATE consumes the name; it must be 1 to 8 characters, the slot's
+\ name field. A step xt of 0 is the home record, which ENV-CURRENT
+\ starts out pointing at.
+: ENVIRONMENT ( xt "name" -- )
+  (GET-INPUT) >R >R
+  BL WORD
+  DUP 1 9 WITHIN 0= IF TYPE ."  - environment name must be 1-8 characters" ABORT THEN
+  ESCR-CLAIM
+  R> R> (SET-INPUT)
+  CREATE HERE >R SWAP DUP >R , ,
+  R> 0= IF R@ ENV-CURRENT ! THEN R> DROP
+  DOES> ENV-SWITCH ;
+
+\ HOME, 7.2 / 06 section 4: the Forth prompt as an environment, slot 0.
+0 ENVIRONMENT HOME
+
+HIDE ENV-FOUND
+HIDE ENV-FREE
+HIDE ESCR-FREE?
+HIDE ESCR-SET-NAME
 
 ( The interactive editor commands live in their own vocabulary, not )
 ( plain FORTH's -- single-letter names collide too easily with )

@@ -4762,6 +4762,84 @@ key with no character; skipping releases and modifiers; `EKEY?`
 ignoring a lone release; blocking until a press arrives, past a release
 that arrives first; and the queue shared with `KEY`.
 
+### 1.89 Environments: `ENVIRONMENT`, `HOME`, the `ESCR` bank (M77, spec v1.1)
+
+`rebel-specs` v1.1 adds `06-ENVIRONMENTS.md`: other interactive programs
+(MEMO, BASIC) take over the screen and keyboard as *peers* of the Forth
+prompt. An environment is a step word, a switching word, a saved text
+screen, and whatever banks it owns. Exactly one is active. The prompt
+itself is the **home** environment, the only one with no step word.
+
+*Native side: two sysvar cells' worth of contract plus one branch.*
+- **Sysvars:** a new `ENV` group at `0x1C0` (`rebel-opcodes.json`):
+  `ENV-ENTRY` (step xt, 0 = home), `ENV-REASON` (0 `STEP`, 1 `ENTER`,
+  2 `RECOVER`), and `ENV-CURRENT` (the active record, portable code
+  only).
+- **The branch:** `repl.ts`'s `replLoop` now starts each iteration by
+  reading `ENV-ENTRY`. When it's non-zero, the loop `executeXT`s it
+  instead of `ACCEPT` + echo + `INTERPRET` + `ok`, and calls it again
+  when it returns.
+- **Recovery:** the recovery path, now factored into
+  `recoverTopLevel()`, gains `markRecovered()`: after `WARM`, `ABORT` or
+  any error, `ENV-REASON` goes from `STEP` to `RECOVER`, and only from
+  `STEP`, so a switch's `ENTER` survives the `WARM` that ends it.
+  `runLine` (programmatic `interpret()`) gets the same step.
+- **The `ESCR` bank** (`.ESC`) is created **last** at boot, so every
+  earlier bank keeps the base it had before environments existed. The
+  size is `16 + 8 × align4(48 + cols × rows × 2)` → 128 KiB at 80×60.
+  The bank is created zeroed, so every slot starts free.
+- **Extensions:** the `BAS`/`MEMO`/`BASW` tags and their `.BAS`/`.MEM`/
+  `.BSW` extensions are registered now, ahead of BASIC and MEMO.
+
+*The Rebel-Sim-specific part: what the REPL prints after a `WARM`*
+(`afterWarm()`). A switch ends in `WARM`, and the REPL used to print
+`ok` after every `WARM`, which would have scribbled on the incoming
+environment's freshly restored screen. Now:
+- landing in an environment prints nothing (the step word sees
+  `ENTER`/`RECOVER` and does its own thing);
+- landing at home prints `ok` + CR as before. After a switch back home
+  this completes the line typed before leaving (`TENV ok`), and the
+  `ENTER` left over from the switch, meaningless at home, is cleared.
+
+An error inside a step word is reported (`? msg` + CR) on the
+environment's screen, and the step word is re-entered with `RECOVER`.
+
+*Portable side: everything else, in `system.fth`, right after `LOAD`
+(so `EMPTY` keeps it).*
+- `ENV-ENTRY`/`ENV-REASON`/`ENV-CURRENT` as `CONSTANT` addresses, and
+  `ENV-STEP`/`ENV-ENTER`/`ENV-RECOVER`.
+- The `ESCR` header written at load (slot count 8, slot size computed
+  from `CHAR-COLS`/`CHAR-ROWS`).
+- `ESCR-SAVE`/`ESCR-RESTORE`: six screen sysvars plus `CMOVE`s of the
+  `CHAR` and `ATTR` grids, which M72 made native. Restore ends in
+  `REDRAW`, which also redraws the cursor from the restored
+  `CURSOR-VISIBLE`.
+- `ESCR-CLAIM`: adopt a slot already carrying the name, else take the
+  first free one, else ABORT.
+- `ENV-SWITCH`: save the outgoing screen, repoint, restore or `CLS` the
+  incoming one, set `ENTER`, then `WARM`.
+- `ENVIRONMENT ( xt "name" -- )`, a `CREATE … DOES> ENV-SWITCH` defining
+  word. It peeks the name with `(GET-INPUT)`/`BL WORD` and puts the
+  cursor back with `(SET-INPUT)`, so it can claim the slot before
+  `CREATE` consumes the name.
+- `0 ENVIRONMENT HOME`, which also points `ENV-CURRENT` at its record.
+- (`BANK-FIND`)'s name compare became a public `NAME8=`/`UPCHAR` pair,
+  shared with slot names.
+
+*Not done (spec §10 open questions, deliberately):* a global switch
+hotkey, per-environment `BASE`/search order, and listing environments.
+
+*Tests:* new `environments.test.ts`, using a byte-queue channel so whole
+lines can be typed into the real REPL:
+- the boot state (header, `HOME` in slot 0, `ENV-CURRENT`);
+- a switch: it saves, clears a never-saved screen, restores a saved
+  one, never returns, discards the stacks, and a slot is re-adopted
+  after `FORGET`;
+- name length validation;
+- the driving loop end to end: a typed `TENV` runs the step word with
+  reasons `ENTER`, `STEP`, then `RECOVER` after an `ABORT`, then `STEP`,
+  then `HOME`; the home screen reads `TENV ok` with exactly one `ok`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4945,5 +5023,6 @@ exactly as it would be on the bare-metal target.
 | **M74** | Removing a bank (§1.86, `rebel-specs` v1.1 `02-MEMORY-MODEL.md` §4.9): new `REMOVED` flag (bit 5), inert for the rest of the session. `SAVE` blanks a removed bank's asset file instead of writing it, `BANK-SAVE`/`(BANK-SAVE)` refuse it, and `openProject` skips its asset in both load modes and frees its slot and name on an in-place load. `(BANK-REMOVE)`/`BANK-REMOVE` are Forth in `system.fth`; they refuse `MMAP` and `EXTERNAL` banks. Found a pre-existing failure: restoring a project with no `MMAP.MAP` collides with the resident boot banks. | `mmap.ts`, `banks.ts`, `index.ts`, `storage.ts`, `primitives.ts`, `system.fth`, `project.test.ts`, `bank-access.test.ts` |
 | **M75** | `EVALUATE` (§1.87, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.15): new `(GET-INPUT)` primitive (153), the read half of `(SET-INPUT)`, with `EVALUATE` written in Forth over the two, so it nests and leaves `STATE` alone. `LOAD` now evaluates each line through it, which fixes input typed after `n LOAD` being dropped, and re-fetches `BLOCK` per line while saving its own variables on the return stack, so a screen can `LOAD` another. | `primitives.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `evaluate.test.ts` |
 | **M76** | `EKEY`/`EKEY?` (§1.88, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.9): primitives 154/155 returning the next raw key press as one cell (usage, modifiers << 8, char << 16), skipping releases and modifier-only events. `EKEY` blocks on the keyboard queue the way `KEY` blocks on the channel, and the two share the one queue. | `keyboard.ts`, `primitives.ts`, `inner.ts`, `rebel-opcodes.json`, `keyboard.test.ts` |
+| **M77** | Environments (§1.89, `rebel-specs` v1.1 `06-ENVIRONMENTS.md`, `03-SYSVARS.md` §12): new `ENV` sysvar group at `0x1C0`; `replLoop` runs `ENV-ENTRY`'s step word instead of reading a line when it's non-zero; the recovery path turns `ENV-REASON` from `STEP` into `RECOVER`; a new `ESCR` bank (128 KiB, created last at boot). After a switch's `WARM` the REPL prints no `ok` inside an environment and completes the line back home. `ENVIRONMENT`/`HOME`/`ESCR` save and restore/switch are all Forth in `system.fth`. `BAS`/`MEMO`/`BASW` extensions registered ahead of BASIC and MEMO. | `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `system.fth`, `environments.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

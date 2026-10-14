@@ -78,6 +78,10 @@ const TAG_TO_EXTENSION: Readonly<Record<string, string>> = {
   MMAP: 'MAP',
   WORK: 'WRK',
   BLKS: 'BLK',
+  ESCR: 'ESC',
+  BAS: 'BAS',
+  MEMO: 'MEM',
+  BASW: 'BSW',
   ATTR: 'ATR',
   PAL: 'PAL',
 };

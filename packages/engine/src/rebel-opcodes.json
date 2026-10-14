@@ -194,7 +194,11 @@
     "ATTR": "per-cell ink/paper attribute byte (IIIIPPPP: high nibble = ink index, low nibble = paper index), per-arena, same size and addressing as CHAR (spec/02-MEMORY-MODEL.md §4.6). Write-through mirrors CHAR's while PALETTE-BASE is non-zero; inert (not written, not consulted) while it's 0.",
     "TIB": "Terminal Input Buffer, per-arena, in use since M7a — the resident scratch region ACCEPT reads a REPL line into. Not a Rebel-ROM-derived tag (no shipped Rebel-ROM Phase 11 yet, same status as Rebel-Sim-only DATA/FORTH group precedent) and not a persistable project-asset bank — Storage never touches it.",
     "PAD": "Scratch text region, per-arena, in use since M16 (DEVELOPING.md §7) — holds the text S\" copies in while interpreting, so its addr/len can be pushed and used immediately (e.g. by TYPE) without needing dictionary space. Rebel-Sim-only, no Rebel-ROM Phase 11 precedent yet, same status as TIB. Deliberately not reused for anything else (no reentrancy/nesting support) — overwritten unconditionally on each S\" call, a documented footgun matching real Forth's own PAD semantics. Not a persistable project-asset bank — Storage never touches it.",
-    "BLKS": "Generic 1024-byte-block-addressable storage, per-arena, fixed at 16 blocks (16 KiB, exactly one size class, no rounding waste) — FORTH-ARCHITECTURE.md §7's `hal_block_read`/`hal_block_write` porting note (renamed from `SCRS` 2026-08-18: the bank carries no screen/text assumption; classic Forth source-editing screens are its first consumer, not its definition). `(BLOCK-READ)`/`(BLOCK-WRITE)` (140/141) are the only primitives that touch it directly — plain memcpy against `BLKS-base + n*1024`, bounds-checked against the 16-block capacity. A persistable project-asset bank like any other (`.BLK` extension, storage.ts's TAG_TO_EXTENSION) — SAVE/RESTORE/BANK-SAVE/BANK-LOAD round-trip it whole; FLUSHing a dirty in-Forth buffer into it (once BLOCK/BUFFER/UPDATE/FLUSH exist in system.fth) is a separate, smaller act from persisting the whole bank to disk."
+    "BLKS": "Generic 1024-byte-block-addressable storage, per-arena, fixed at 16 blocks (16 KiB, exactly one size class, no rounding waste) — FORTH-ARCHITECTURE.md §7's `hal_block_read`/`hal_block_write` porting note (renamed from `SCRS` 2026-08-18: the bank carries no screen/text assumption; classic Forth source-editing screens are its first consumer, not its definition). `(BLOCK-READ)`/`(BLOCK-WRITE)` (140/141) are the only primitives that touch it directly — plain memcpy against `BLKS-base + n*1024`, bounds-checked against the 16-block capacity. A persistable project-asset bank like any other (`.BLK` extension, storage.ts's TAG_TO_EXTENSION) — SAVE/RESTORE/BANK-SAVE/BANK-LOAD round-trip it whole; FLUSHing a dirty in-Forth buffer into it (once BLOCK/BUFFER/UPDATE/FLUSH exist in system.fth) is a separate, smaller act from persisting the whole bank to disk.",
+    "ESCR": "Saved text screens, one fixed slot per environment (spec/06-ENVIRONMENTS.md §7, M77): a 16-byte header (slot count 8, slot size), then 8 slots each holding a name, a valid flag, six screen sysvars, and copies of the CHAR and ATTR grids. Per-arena, created last at boot so every earlier bank keeps its base. system.fth writes the header.",
+    "MEMO": "A MEMO document in the page bank format (spec/09-MEMO.md §3). Not created at boot; present only where MEMO is loaded.",
+    "BAS": "A Rebel BASIC program's source text in the page bank format (spec/08-BASIC.md §3.1). Not created at boot.",
+    "BASW": "Rebel BASIC's work bank: compiled code, variables, strings, run-time stacks (spec/08-BASIC.md §10.4). Not created at boot."
   },
 
   "sysvarGroups": {
@@ -270,6 +274,16 @@
         "STATE": { "offset": 20, "note": "0 = interpreting, -1 = compiling (in use since M2)" },
         "SP": { "offset": 24, "note": "live data stack pointer (DEVELOPING.md §21, M28) — DataStack's own private sp field, relocated here so it's genuinely sysvar-backed, not an engine-side copy" },
         "RP": { "offset": 28, "note": "live return stack pointer (DEVELOPING.md §21, M28) — same relocation, for RSTK's DataStack instance" }
+      },
+      "groupSizeBytes": 64
+    },
+    "ENV": {
+      "baseOffset": 448,
+      "note": "spec/03-SYSVARS.md §12, 06-ENVIRONMENTS.md §5.1, M77: the environment mechanism, REQUIRED on any target with a self-hosted outer interpreter. Every field's fresh-boot value is 0 (arena zero-init).",
+      "fields": {
+        "ENV-ENTRY": { "offset": 0, "note": "step xt of the active environment; 0 = the Forth prompt (home). The one field native code branches on: repl.ts's replLoop executes it instead of reading a line when non-zero." },
+        "ENV-REASON": { "offset": 4, "note": "why the next step call is happening: 0 ENV-STEP, 1 ENV-ENTER (set by a switch), 2 ENV-RECOVER (set by the recovery path after WARM/ABORT/any error, only when it held 0)." },
+        "ENV-CURRENT": { "offset": 8, "note": "address of the active environment's record (system.fth's ENVIRONMENT). Read and written by portable code only." }
       },
       "groupSizeBytes": 64
     }

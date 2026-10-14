@@ -42,7 +42,7 @@
  * share one session, so only one can be active at a time.
  */
 
-import { Arena } from './arena.js';
+import { Arena, alignCell } from './arena.js';
 import { Bank, BankTable, BLOCK_SIZE, type Personality } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
@@ -109,6 +109,16 @@ const WORK_BANK_SIZE = TIB_SIZE + PAD_SIZE;
 // blocks rounds to exactly a size class (16 KiB), no rounding waste.
 const BLKS_BANK_SIZE = 16 * BLOCK_SIZE; // 16 KiB
 const DEFAULT_ARENA_SIZE = 1 << 20; // 1 MiB, plenty through M7a
+// spec/06-ENVIRONMENTS.md §7.1: ESCR's header, slot count, and per-slot
+// header (name, valid flag, six screen sysvars, reserved) ahead of the
+// CHAR and ATTR grid copies.
+// spec/06-ENVIRONMENTS.md §5.1: the ENV-REASON values.
+const ENV_STEP = 0;
+const ENV_ENTER = 1;
+const ENV_RECOVER = 2;
+const ESCR_HEADER = 16;
+const ESCR_SLOTS = 8;
+const ESCR_SLOT_HEADER = 48;
 
 // M3 boot-time screen mode. Rebel-ROM has no runtime mode-change
 // mechanism yet either (docs/SCREEN-MODULE.md §9's "mode-change
@@ -478,6 +488,14 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // `bootProject` actually finds a saved BLKS asset to copy in.
     this.arena.fillBytes(blksBank.base, blksBank.size, SPACE_CHAR_CODE);
 
+    // spec/06-ENVIRONMENTS.md §7.1, M77: every environment's saved text
+    // screen, one fixed slot each (8 slots, the home environment
+    // included). Created last so every bank above keeps the base it had
+    // before environments existed. Only the bank is native; system.fth
+    // writes its header and does all the slot work.
+    const escrSlotSize = alignCell(ESCR_SLOT_HEADER + charCols * charRows * 2);
+    this.banks.createBank('ESCR', sizeFor('ESCR', ESCR_HEADER + ESCR_SLOTS * escrSlotSize), 'ESCR');
+
     // M54: snapshot every bank's real, currently-operative size —
     // before the content-restore below runs (it never changes any
     // size), and long before any BANK-RESIZE could possibly run (pure
@@ -771,6 +789,26 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
   private *replLoop(): Generator<StepSignal, void, void> {
     while (true) {
+      // spec/06-ENVIRONMENTS.md §5.2, M77: the driving loop's one added
+      // branch. While another environment is active its step word stands
+      // in for "read a line and INTERPRET it" — no ACCEPT, no echo, no
+      // "ok". A step word that returns is simply called again.
+      const entry = this.sysvars.get('ENV', 'ENV-ENTRY');
+      if (entry !== 0) {
+        try {
+          yield* this.inner.executeXT(entry);
+        } catch (err) {
+          this.recoverTopLevel(err);
+          if (err instanceof WarmReset) {
+            this.afterWarm();
+          } else {
+            this.screen.emit(10);
+          }
+        }
+        yield 'progress';
+        continue;
+      }
+
       this.stack.push(this.tibBase);
       this.stack.push(this.tibSize);
       yield* this.inner.executeXT(this.acceptCfa);
@@ -792,39 +830,78 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
       try {
         yield* this.dispatchLine();
+        // The trailing CR belongs to the status text (`ok`/`? ...`), not
+        // to the next prompt — matches real Forth's `ok\n`, printed once
+        // ready, rather than a leading CR pushed out ahead of the prompt.
         this.emitString('ok');
+        this.screen.emit(10);
       } catch (err) {
-        if (this.sysvars.getState() === -1) {
-          abortDefinition(this);
-        }
-        // DEVELOPING.md §9, M17: any uncaught error gets back to a
-        // genuinely clean prompt, not just a printed message — fixes a
-        // real, confirmed bug (threadFrom's rstack sentinel push has no
-        // try/finally, so it leaks one entry per uncaught error
-        // otherwise) and makes ABORT's own behavior the same thing every
-        // other error already does, not a special case. Deliberately
-        // NOT applied to interpret()/runLine() — that's a separate,
-        // unchanged contract for programmatic callers.
-        this.stack.clear();
-        this.rstack.clear();
+        this.recoverTopLevel(err);
         if (err instanceof WarmReset) {
-          // WARM already did this same clearing itself (primitives.ts,
-          // case 131) before throwing — landing back here is success,
-          // classic Forth WARM/QUIT semantics: the rest of the line is
-          // abandoned, same as any other error, but it's not one, so
-          // the prompt reads "ok", not "? ...".
-          this.emitString('ok');
+          // WARM landing back here is success, classic Forth WARM/QUIT
+          // semantics: the rest of the line is abandoned, same as any
+          // other error, but it's not one — unless it ended a switch
+          // into another environment (afterWarm).
+          this.afterWarm();
         } else {
-          const message = err instanceof Error ? err.message : String(err);
-          this.reportError(message);
+          this.screen.emit(10);
         }
       }
-      // The trailing CR belongs to the status text (`ok`/`? ...`), not
-      // to the next prompt — matches real Forth's `ok\n`, printed once
-      // ready, rather than a leading CR pushed out ahead of the prompt.
-      this.screen.emit(10);
       yield 'progress';
     }
+  }
+
+  /** The interactive REPL's recovery path (DEVELOPING.md §9, M17): any
+   * uncaught error gets back to a genuinely clean top level, not just a
+   * printed message — fixes a real, confirmed bug (threadFrom's rstack
+   * sentinel push has no try/finally, so it leaks one entry per uncaught
+   * error otherwise) and makes ABORT's own behavior the same thing every
+   * other error already does. WarmReset (primitives.ts, case 131)
+   * already cleared both stacks itself and reports nothing; every other
+   * error is reported through `reportError`. Deliberately NOT applied to
+   * interpret()/runLine() — that's a separate, unchanged contract for
+   * programmatic callers — except for the environment step below. */
+  private recoverTopLevel(err: unknown): void {
+    if (this.sysvars.getState() === -1) {
+      abortDefinition(this);
+    }
+    this.stack.clear();
+    this.rstack.clear();
+    if (!(err instanceof WarmReset)) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.reportError(message);
+    }
+    this.markRecovered();
+  }
+
+  /** spec/06-ENVIRONMENTS.md §5.2 / 04-FORTH-CORE.md §8, M77: the
+   * recovery path's one added step, run after WARM, ABORT, or any
+   * uncaught error — ENV-STEP becomes ENV-RECOVER so the active
+   * environment's step word knows it was thrown back to its top level.
+   * ENV-ENTER is left alone: a switch sets it and then calls WARM. */
+  private markRecovered(): void {
+    if (this.sysvars.get('ENV', 'ENV-REASON') === ENV_STEP) {
+      this.sysvars.set('ENV', 'ENV-REASON', ENV_RECOVER);
+    }
+  }
+
+  /** What the REPL prints once a WARM has unwound to the top level
+   * (M77). Landing in another environment prints nothing — the WARM
+   * either ended a switch whose incoming screen was just restored, or
+   * the environment's own step word reports what happened. Landing at
+   * the Forth prompt prints `ok`, as WARM always has; after a switch back
+   * home that completes the line the user typed before leaving (e.g.
+   * `MEMO ok`), and the switch's ENV-ENTER, meaningless at home, is
+   * cleared. */
+  private afterWarm(): void {
+    if (this.sysvars.get('ENV', 'ENV-ENTRY') !== 0) {
+      return;
+    }
+    if (this.sysvars.get('ENV', 'ENV-REASON') === ENV_ENTER) {
+      this.sysvars.set('ENV', 'ENV-REASON', ENV_STEP);
+    }
+    this.emitString('ok');
+    this.screen.emit(10);
   }
 
   private emitString(s: string): void {
@@ -864,6 +941,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
       // the identical "does not throw" contract the interactive REPL
       // does, deliberately breaking from this method's usual
       // don't-touch-programmatic-callers stance for this one case.
+      this.markRecovered(); // spec/06-ENVIRONMENTS.md §5.2, M77
       if (err instanceof WarmReset) {
         return;
       }
