@@ -1249,10 +1249,10 @@ VARIABLE SCR
 
 ( L redisplays the current screen without changing which one that )
 ( is -- classic Forth's own split between a screen-number-taking )
-( LIST and a no-argument L. CLS first, Oliver: so the listing owns )
-( the whole display, same as a real screen editor commandeering the )
-( terminal, instead of appending after whatever REPL output -- prior )
-( ok prompts, command echoes -- was already on screen. )
+( LIST and a no-argument L. No CLS: the display is tall enough for )
+( a whole listing, so L just appends it after whatever REPL output )
+( is already on screen, the same as LIST, and earlier output stays )
+( visible above it. )
 : L ( -- ) SCR @ LIST ;
 
 ( T-LINE is a scratch variable threading a computed line address )

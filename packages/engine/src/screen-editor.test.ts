@@ -238,12 +238,14 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
     expect(rows.join('\n')).toContain('MARKER-NINE');
   });
 
-  it('L CLSes first, so it owns the whole display rather than appending after whatever was already there', () => {
+  it('L does not CLS: the listing is appended and earlier screen content stays visible', () => {
+    // M56 had L CLS first; dropped in fa914ad once the display was tall
+    // enough to hold a whole listing below earlier REPL output.
     const m = bootMachine();
     m.interpret('USE EDITOR');
     m.interpret('9 CLEAR');
     m.interpret('0 T MARKER-NINE');
-    m.screen.writeChar(0, 0, 'X'.charCodeAt(0)); // stray content L must clear away, not print after
+    m.screen.writeChar(0, 0, 'X'.charCodeAt(0)); // earlier content L must leave alone
     m.interpret('L');
 
     const rows: string[] = [];
@@ -252,7 +254,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
     }
     const full = rows.join('\n');
     expect(full).toContain('MARKER-NINE');
-    expect(m.screen.readChar(0, 0)).not.toBe('X'.charCodeAt(0));
+    expect(m.screen.readChar(0, 0)).toBe('X'.charCodeAt(0));
   });
 
   it('TOP jumps to and displays screen 0 regardless of which screen was current', () => {
