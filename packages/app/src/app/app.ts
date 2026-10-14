@@ -1036,7 +1036,7 @@ export class App implements AfterViewInit, OnDestroy {
   // idle-tab CPU use). Every place that can make step() have something
   // to do again calls wake() to restart it: a keystroke (handleKeyEvent),
   // a WebMCP `type`/breakpoint call, and the Continue button/
-  // debug_continue (resumeFromBreakpoint). SAVE/RESTORE/BSAVE/BLOAD are
+  // debug_continue (resumeFromBreakpoint). SAVE/RESTORE/BANK-SAVE/BANK-LOAD are
   // now ordinary synchronous primitives (localStorage-backed storage,
   // not OPFS) — they run to completion inside a single step() call like
   // any other word, no separate suspend/resume phase to gate on here.
@@ -1172,7 +1172,7 @@ export class App implements AfterViewInit, OnDestroy {
       this.zone.run(() => this.breakpointWords.set(currentBreakpoints));
       changed = true;
     }
-    // "project storage" panel — only PROJECT/SAVE/BSAVE (all ordinary
+    // "project storage" panel — only PROJECT/SAVE/BANK-SAVE (all ordinary
     // primitives now, M33) can ever add a new name, but there's no
     // separate "storage changed" signal to gate on the way bankCount/
     // LATEST-address stand in for their own sections, so this just

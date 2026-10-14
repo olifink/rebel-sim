@@ -228,8 +228,8 @@ premise:
   `StorageHal` (`packages/engine/src/storage.ts`) dropped every `Promise`
   from its interface as a direct result; `repl.ts`'s `'storage'`
   `StepStatus` and its suspend/resume machinery were deleted entirely;
-  `PROJECT`/`SAVE`/`RESTORE` became ordinary primitives, and `BSAVE`/
-  `BLOAD` (single-bank save/load) were added the same way, with zero
+  `PROJECT`/`SAVE`/`RESTORE` became ordinary primitives, and `BANK-SAVE`/
+  `BANK-LOAD` (single-bank save/load, `BSAVE`/`BLOAD` until M73) were added the same way, with zero
   special mechanism needed. Real costs accepted deliberately: values must
   be base64-encoded strings (localStorage has no binary payload type),
   and quota is much smaller than OPFS's effective disk-backed capacity
@@ -248,7 +248,7 @@ premise:
 - The *addressing contract* `FORTH-ARCHITECTURE.md` establishes is
   unchanged by any of this: `hal_block_read`/`hal_block_write` operate on
   an in-memory bank, and persistence to the storage backend happens at
-  project open/close time (now: `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` calls) —
+  project open/close time (now: `SAVE`/`RESTORE`/`BANK-SAVE`/`BANK-LOAD` calls) —
   a bank access, not a storage-device call on every read/write.
 - For moving state in and out of the browser sandbox entirely (sharing a
   project with someone, or with a real Rebel-ROM device) — the File

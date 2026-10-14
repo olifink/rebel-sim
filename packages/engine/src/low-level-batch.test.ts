@@ -57,7 +57,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
 
   it('FILL writes len bytes of char starting at addr', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK FILB');
+    m.interpret('64 BANK-CREATE FILB');
     const addr = m.stack.pop();
     m.interpret(`${addr} 8 42 FILL`);
     for (let i = 0; i < 8; i++) {
@@ -68,7 +68,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
 
   it('CMOVE copies len bytes low-to-high', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK CMVB');
+    m.interpret('64 BANK-CREATE CMVB');
     const addr = m.stack.pop();
     const src = addr;
     const dst = addr + 32;
@@ -85,7 +85,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     // FILL/CMOVE; both are native again now (spec/01-HAL.md §9), so this
     // pins the same no-op contract on the HAL-routed path, post-boot.
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK ZLEN');
+    m.interpret('64 BANK-CREATE ZLEN');
     const addr = m.stack.pop();
     m.interpret(`${addr} 4 66 FILL`); // 'B' sentinel across the whole region
     m.interpret(`${addr} 0 88 FILL`); // zero-length -- must not touch byte 0
@@ -103,7 +103,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     // spec/04-FORTH-CORE.md §6.3 / 01-HAL.md §9.3: the one case where
     // CMOVE must NOT behave like overlap-safe hal_mem_copy.
     const m = new Machine();
-    m.interpret('64 CREATE-BANK CMPR');
+    m.interpret('64 BANK-CREATE CMPR');
     const addr = m.stack.pop();
     m.interpret(`65 ${addr} C! 66 ${addr + 1} C!`); // "AB" then zeros
     m.interpret(`${addr} ${addr + 2} 6 CMOVE`);
@@ -117,7 +117,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
 
   it('CMOVE with the source inside the destination moves the block intact', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK CMDN');
+    m.interpret('64 BANK-CREATE CMDN');
     const addr = m.stack.pop();
     for (let i = 0; i < 6; i++) {
       m.interpret(`${10 + i} ${addr + 2 + i} C!`);
@@ -133,7 +133,7 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
 
   it('Arena.copyBytes is overlap-safe in both directions (hal_mem_copy)', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK HMEM');
+    m.interpret('64 BANK-CREATE HMEM');
     const addr = m.stack.pop();
     for (let i = 0; i < 4; i++) m.arena.writeByte(addr + i, 1 + i);
     m.arena.copyBytes(addr + 2, addr, 4); // forward overlap: memmove, no propagation

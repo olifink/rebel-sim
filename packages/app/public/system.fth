@@ -368,6 +368,39 @@ VARIABLE FIND-LEN
   LOOP
 ;
 
+( BANK-FIND, M73, spec 04-FORTH-CORE.md section 6.14: the name-on- )
+( the-stack bank lookup, BOOTSTRAP -- the same MMAP slot walk BANKS )
+( makes, comparing each active slot's NUL-padded name field with the )
+( given name folded to upper case. Returns the slot's address, which )
+( holds tag +0, name +4, base +12, size +16, flags +20; 0 if no )
+( active bank has that name, or the name is empty or longer than 8. )
+( No slot sits at address 0, MMAP's header does, so 0 means none. )
+( BF-ADDR/BF-LEN carry the name through the loop instead of the data )
+( stack, the same scratch-variable convention LOAD-ADDR uses. )
+VARIABLE BF-ADDR
+VARIABLE BF-LEN
+: BF-UPC ( c -- c' ) DUP 97 123 WITHIN IF 32 - THEN ;
+: BF-NAME= ( field -- flag )
+  -1 SWAP
+  MMAP-NAME-LEN 0 DO
+    DUP I + C@
+    I BF-LEN @ < IF BF-ADDR @ I + C@ BF-UPC ELSE 0 THEN
+    <> IF NIP 0 SWAP THEN
+  LOOP
+  DROP ;
+: (BANK-FIND) ( addr len -- slot | 0 )
+  DUP 1 MMAP-NAME-LEN 1+ WITHIN 0= IF 2DROP 0 EXIT THEN
+  BF-LEN ! BF-ADDR !
+  0
+  MMAP-SLOTS 0 DO
+    I MMAP-SLOT * MMAP-HDR +
+    DUP MMAP-FLAGS + @ MMAP-ACTIVE AND IF
+      DUP MMAP-NAME + BF-NAME= IF NIP ELSE DROP THEN
+    ELSE
+      DROP
+    THEN
+  LOOP ;
+
 ( PALETTE-BASE, M62 follow-up, Oliver's request: direct read/write )
 ( access to the indexed-color-palette sysvar, spec/01-HAL.md 3.6, )
 ( spec/02-MEMORY-MODEL.md 4.6 -- PALETTE-BASE @ reads it, addr )
@@ -660,6 +693,12 @@ HIDE BRANCH-XT
 HIDE 0BRANCH-XT
 HIDE SLIT-XT
 HIDE (TICK)
+\ BF-ADDR/BF-LEN/BF-UPC/BF-NAME= are (BANK-FIND)'s plumbing, M73,
+\ hidden here because HIDE does not exist yet where they are defined.
+HIDE BF-ADDR
+HIDE BF-LEN
+HIDE BF-UPC
+HIDE BF-NAME=
 \ SEARCH-ROOT/FIND-ADDR/FIND-LEN (M70) join the same cleanup batch --
 \ SEARCH-ROOT is plumbing FIND/XT-NAME/HIDE's own bodies already
 \ compiled a direct call to by now, same "hiding never disturbs an
@@ -912,7 +951,7 @@ INIT-BUFFERS
 ( FLUSH writes every dirty slot back via a native block write and )
 ( clears its dirty flag -- EVICT-SLOT's own logic, run unconditionally )
 ( across all #BUFFERS slots rather than duplicated here. Does not )
-( itself touch disk -- SAVE and BSAVE, already built in M5/M33, )
+( itself touch disk -- SAVE and BANK-SAVE, built in M5/M33, )
 ( persist the whole BLKS bank separately, at project-save time. )
 : FLUSH ( -- ) #BUFFERS 0 DO I EVICT-SLOT LOOP ;
 

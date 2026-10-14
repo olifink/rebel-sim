@@ -4577,6 +4577,68 @@ now pins the native path; new cases for `CMOVE`'s pattern propagation,
 `CMOVE` with the source inside the destination, and `copyBytes`
 overlap in both directions plus its out-of-arena `RangeError`.
 
+### 1.85 Banks by name: `BANK-CREATE`/`BANK-SAVE`/`BANK-LOAD` and the `(BANK-…)` words (M73, spec v1.1)
+
+`rebel-specs` v1.1 (`04-FORTH-CORE.md` §6.14) renames three words and
+adds a name-on-the-stack form for each bank operation, so a program
+holding a bank's name as data (BASIC's `LOAD "GAME"`, MEMO opening a
+document, an environment creating its work bank) can use them without
+parsing.
+
+*Renames — Oliver's call, no aliases kept:* `CREATE-BANK` →
+`BANK-CREATE`, `BSAVE` → `BANK-SAVE`, `BLOAD` → `BANK-LOAD`. The token
+IDs (100/129/130) stay the same, so a saved `DICT` still resolves.
+`BANK-SAVE`/`BANK-LOAD` now resolve **by name**, not tag (the
+`BLKS`-tagged bank is `BANK-SAVE EDITOR`). `BANK-LOAD` also creates the
+bank, with the tag taken from the file extension, when it isn't
+resident.
+
+*New KERNEL primitives:* `(BANK-CREATE)` (150)
+`( name-a name-l tag-a tag-l size -- slot | 0 )`, `(BANK-SAVE)` (151)
+`( addr len -- flag )`, `(BANK-LOAD)` (152) `( addr len -- slot | 0 )`.
+A "slot" is the address of the bank's 24-byte `MMAP` descriptor (tag +0,
+name +4, base +12, size +16, flags +20). Each pair shares one TS helper
+in `primitives.ts` (`bankCreate`/`bankSave`/`bankLoad`): the parsing word
+lets the error propagate as an ordinary ABORT, the parenthesized word
+catches it and pushes 0/FALSE. All names and tags fold to upper case.
+
+*Why the parsing words stay native:* §6.14 allows either. Defining them
+in Forth over the `(BANK-…)` words would mean every bare-`Machine` test
+that needs a scratch bank (dozens, across `mmap`/`low-level-batch`/
+`storage`/`resize`) would have to boot `system.fth` first.
+
+*`(BANK-FIND)` is BOOTSTRAP*, in `system.fth` next to `BANKS`: the same
+`MMAP` slot walk, comparing each active slot's NUL-padded name with the
+upper-cased argument. Its `BF-*` helpers are hidden later in the file,
+in the existing `HIDE` batch, since `HIDE` isn't defined yet where
+`BANKS` is.
+
+*Creation now validates and zeroes* (`BankTable.createBank`, so every
+path behaves the same): a tag must be 1–4 characters (a longer one used
+to be silently truncated), an explicit name at most 8 (it used to be
+silently sliced), and the size positive. `MemoryMap.allocate` refuses a
+bank that would run past the end of the arena (before this, nothing
+failed until the first out-of-range access). New banks are zero-filled.
+`openProject` skips an asset whose basename is longer than 8, rather
+than crashing on it.
+
+*New:* `MemoryMap.slotAddress(index)`, `BankTable.slotAddress(name)`,
+and `Storage.loadAssetByName(project, name)` (find the asset by
+basename across all known extensions, check its magic, reject an empty
+or blanked payload, then replace a resident bank's contents or create a
+new bank).
+
+*Deferred to step 3 (`REMOVED` flag):* `(BANK-REMOVE)`/`BANK-REMOVE`,
+and `(BANK-SAVE)`'s refusal to save a `REMOVED` bank.
+
+*Tests:* the old `BSAVE`/`BLOAD` block in `project.test.ts` was rewritten
+for the name-based semantics, plus a check that the old names are gone,
+and a new block for the three parenthesized words (including
+`(BANK-CREATE)`'s six failure cases). `mmap.test.ts` now expects a
+too-long tag to be rejected rather than truncated, and
+`bank-access.test.ts` covers `(BANK-FIND)`. Every `CREATE-BANK` call in
+the tests is renamed; `dump.test.ts`'s 7-character tags became `DATA`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4756,5 +4818,6 @@ exactly as it would be on the bare-metal target.
 | **M70** | `SEE`/`HIDE` fixed to resolve names via `CONTEXT`, not raw `LATEST` (§1.82) — found by Oliver: both worked on a word in `EDITOR` once `EDITOR DEFINITIONS` had run, but threw `unrecognized word` on the same word after only `USE EDITOR`. Root cause: both predate `VOCABULARY` (M12 vs. M13) and resolve names via native `'`, which walks raw `LATEST`, never updated when M48 split browsing (`CONTEXT`) from compiling (`CURRENT-VOCAB`/`LATEST`) for real. Fixed entirely in `system.fth`: `FIND` relocated next to `WORDS` (near the top of the file) so `SEE`/`HIDE` can resolve names through it via a new `(TICK)` helper, a new shared `SEARCH-ROOT` word, and `XT-NAME`/`HIDE`'s own internal xt-to-entry walks switched from `LATEST` to `SEARCH-ROOT` too. No engine change. | `system.fth`, `see-hide.test.ts` |
 | **M71** | `INK`/`PAPER` become real variables (§1.83), Oliver's call, breaking change accepted pre-1.0: `n INK`/`n PAPER` (store, no read) replaced with `n INK !`/`n PAPER !` and the new `INK @`/`PAPER @`, matching the `BASE`/`STATE`/`HERE-ADDR`/`LATEST-ADDR` variable idiom instead of being the one remaining color-consuming-store pair. `Screen.setInk`/`setPaper` deleted (no other callers). | `primitives.ts`, `screen.ts`, `rebel-opcodes.json`, `system.fth`, `screen.test.ts`, `project.test.ts`, `remote-terminal-loopback.test.ts` |
 | **M72** | HAL memory block operations (§1.84, `rebel-specs` v1.1 `01-HAL.md` §9): `Arena.copyBytes` (new, `hal_mem_copy`), `Arena.fillBytes` (`hal_mem_fill`), `Arena.writeBytes` (host payload in). Native `FILL`/`CMOVE` route through them and `system.fth`'s shadowing `DO`/`LOOP` versions are deleted; `CMOVE` keeps a byte loop for the destination-inside-source case so it still propagates the pattern. `(BLOCK-READ)`/`(BLOCK-WRITE)`, `Screen.cls()` and Storage asset loads (`loadPayload`, copy + zero-pad) switched over too. | `arena.ts`, `primitives.ts`, `screen.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `low-level-batch.test.ts`, `HAL.md` |
+| **M73** | Banks by name (§1.85, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.14): `CREATE-BANK`/`BSAVE`/`BLOAD` renamed `BANK-CREATE`/`BANK-SAVE`/`BANK-LOAD`, same tokens, no aliases; save and load resolve by name, and `BANK-LOAD` creates a missing bank. New KERNEL `(BANK-CREATE)`/`(BANK-SAVE)`/`(BANK-LOAD)` (150-152) return a slot address or 0/FALSE instead of ABORTing; `(BANK-FIND)` is pure Forth in `system.fth`. `createBank` now rejects a tag over 4 or a name over 8 characters instead of truncating, `allocate` refuses a bank past the end of the arena, and new banks are zeroed. | `primitives.ts`, `banks.ts`, `mmap.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `project.test.ts`, `mmap.test.ts`, `bank-access.test.ts`, `dump.test.ts`, `low-level-batch.test.ts`, `resize.test.ts`, `storage.test.ts`, `HAL.md`, `PORTING-WEB.md`, `FORTH-ARCHITECTURE.md` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

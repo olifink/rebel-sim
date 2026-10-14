@@ -234,11 +234,11 @@ describe('BANKS (system.fth, M51)', () => {
     expect(listed).toContain('MMAP'); // bank 0, self-registered, not in getAllBanks()
   });
 
-  it('a freshly CREATE-BANKed bank shows up too, by its real auto-generated name', () => {
+  it('a freshly BANK-CREATEed bank shows up too, by its real auto-generated name', () => {
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK DATA');
+    m.interpret('64 BANK-CREATE DATA');
     const addr = m.stack.pop();
-    // CREATE-BANK (primitives.ts case 100, M30) routes through
+    // BANK-CREATE (primitives.ts case 100, M30) routes through
     // BankTable.createBank() with no name argument, so the tag typed
     // at creation ("DATA") is not the bank's real name — it gets an
     // auto-generated serial instead (banks.ts's generateSerialName()).
@@ -255,5 +255,30 @@ describe('BANKS (system.fth, M51)', () => {
     m.interpret('BANKS');
     m.interpret('DEPTH');
     expect(m.stack.pop()).toBe(depthBefore);
+  });
+});
+
+describe('(BANK-FIND) (system.fth, M73, spec/04-FORTH-CORE.md §6.14)', () => {
+  it('returns the MMAP slot address of an active bank by name, case-folded, and 0 otherwise', () => {
+    const m = bootMachine();
+    const find = (name: string): number => {
+      m.interpret(`S" ${name}" (BANK-FIND)`);
+      return m.stack.pop();
+    };
+
+    expect(find('EDITOR')).toBe(m.banks.slotAddress('EDITOR'));
+    expect(find('char')).toBe(m.banks.slotAddress('CHAR'));
+    expect(find('MMAP')).toBe(m.banks.slotAddress('MMAP')); // slot 0 still isn't address 0
+    expect(find('MMAP')).not.toBe(0);
+    m.interpret(`S" EDITOR" (BANK-FIND) 12 + @`);
+    expect(m.stack.pop()).toBe(m.banks.findBankByName('EDITOR')!.base);
+
+    expect(find('NOSUCH')).toBe(0);
+    expect(find('BLKS')).toBe(0); // a tag, not a name
+    expect(find('EDITOR12')).toBe(0); // 8 chars, no such bank
+    expect(find('NINECHARS')).toBe(0); // longer than any name
+    m.interpret(`PAD 0 (BANK-FIND)`);
+    expect(m.stack.pop()).toBe(0); // empty name
+    expect(m.stack.toArray()).toEqual([]);
   });
 });

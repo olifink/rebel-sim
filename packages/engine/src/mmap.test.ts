@@ -51,14 +51,14 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
     expect(c.base).toBe(b.base + b.size); // right after b, no gap
   });
 
-  it('the bank-naming serial lives in MMAP\'s own header, genuinely shared between host-side createBank() and CREATE-BANK (DEVELOPING.md §20, M27)', () => {
+  it('the bank-naming serial lives in MMAP\'s own header, genuinely shared between host-side createBank() and BANK-CREATE (DEVELOPING.md §20, M27)', () => {
     const m = new Machine();
     // Interleaved on purpose: host, then Forth, then host again — no
     // collision, because both draw from the exact same MMAP.NEXT-BANK
     // cell, not two independently-incrementing counters that happen
     // not to collide by accident of nothing else calling one of them.
     const a = m.banks.createBank('DATA', 64); // host-side, no name given
-    m.interpret('64 CREATE-BANK DATA'); // Forth-side
+    m.interpret('64 BANK-CREATE DATA'); // Forth-side
     const forthAddr = m.stack.pop();
     const b = m.banks.createBank('DATA', 64); // host-side again
 
@@ -177,22 +177,20 @@ describe('MMAP (DEVELOPING.md §11/§14, M19/M22) — the real source of truth, 
   });
 });
 
-describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank creation, no host round-trip, no cached state', () => {
-  // Tags are conventionally exactly 4 characters throughout this
-  // codebase (SYSV, DICT, DATA, ...) — the tag field is a fixed 4-byte
-  // slot, so a longer tag silently truncates on write. Every tag below
-  // is deliberately 4 characters, matching real usage, except the one
-  // test that specifically demonstrates the truncation edge case.
+describe('BANK-CREATE (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank creation, no host round-trip, no cached state', () => {
+  // Tags are 1 to 4 characters (SYSV, DICT, DATA, ...) — the tag field
+  // is a fixed 4-byte slot, and since M73 a longer tag is rejected
+  // rather than silently truncated (spec/04-FORTH-CORE.md §6.14).
 
   it('creates a bank immediately findable via BANK@, by its real (auto-generated) name', () => {
     // M50: BANK@ resolves by name now, not tag — "DAT1" here is only
-    // the tag CREATE-BANK parsed (and, per M27 below, deliberately
+    // the tag BANK-CREATE parsed (and, per M27 below, deliberately
     // never what it names the bank), so the real re-lookup has to go
     // through the auto-generated name, same as any caller genuinely
-    // would (or, more idiomatically, just keep the address CREATE-BANK
+    // would (or, more idiomatically, just keep the address BANK-CREATE
     // already returned).
     const m = new Machine();
-    m.interpret('4096 CREATE-BANK DAT1');
+    m.interpret('4096 BANK-CREATE DAT1');
     const createdAddr = m.stack.pop();
     const created = m.banks.findBank('DAT1')!;
 
@@ -205,21 +203,21 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     const before = m.banks.getAllBanks();
     const expectedBase = Math.max(...before.map((b) => b.base + b.size));
 
-    m.interpret('256 CREATE-BANK SCR1');
+    m.interpret('256 BANK-CREATE SCR1');
     const addr = m.stack.pop();
     expect(addr).toBe(expectedBase);
 
     // A second creation lands right after the first, no gap — right
     // after SCR1's *rounded* size class (2048), not its raw
     // requested 256 bytes (spec/02-MEMORY-MODEL.md §4.3).
-    m.interpret('64 CREATE-BANK SCR2');
+    m.interpret('64 BANK-CREATE SCR2');
     const addr2 = m.stack.pop();
     expect(addr2).toBe(addr + 2048);
   });
 
   it('the created bank is real, usable memory — @ and ! round-trip at its address', () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK SCR3');
+    m.interpret('64 BANK-CREATE SCR3');
     const addr = m.stack.pop();
 
     m.interpret(`42 ${addr} ! ${addr} @`);
@@ -229,7 +227,7 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
   it('is now visible to BankTable.getAllBanks()/findBank() too — M22 closes the M21 visibility gap', () => {
     const m = new Machine();
     const before = m.banks.getAllBanks().length;
-    m.interpret('128 CREATE-BANK GAP1');
+    m.interpret('128 BANK-CREATE GAP1');
     const addr = m.stack.pop();
 
     expect(m.banks.getAllBanks().length).toBe(before + 1);
@@ -253,7 +251,7 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
 
   it("createBank()'s name-uniqueness check now also catches a Forth-created bank's name (M22/M27)", () => {
     const m = new Machine();
-    m.interpret('64 CREATE-BANK DUPE');
+    m.interpret('64 BANK-CREATE DUPE');
     m.stack.pop();
     // M27: the bank's real name is its auto-generated serial, not
     // "DUPE" (that's only its tag) — read it back rather than assume.
@@ -263,21 +261,26 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
 
   it('names the bank after an auto-generated serial, not the tag — M27 fixes a real name-collision bug', () => {
     const m = new Machine();
-    // Deliberately >4 chars, to confirm tag truncation still applies
-    // independently of naming (unaffected by this change).
-    m.interpret('32 CREATE-BANK LONGNAMETAG');
+    m.interpret('32 BANK-CREATE LONG');
     const addr = m.stack.pop();
     const first = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr)!;
-    expect(first.tag).toBe('LONGNAMETAG'.slice(0, 4)); // TAG_SIZE
+    expect(first.tag).toBe('LONG');
     expect(first.name).toMatch(/^\d{8}$/); // serial, not tag-derived
 
     // DEVELOPING.md §20's real motivating bug, reproduced directly:
-    // before M27, two CREATE-BANK calls sharing a tag always got the
-    // *same* name too (both derived from the tag), silently colliding.
-    m.interpret('16 CREATE-BANK LONGNAMETAG');
+    // before M27, two creations sharing a tag always got the *same*
+    // name too (both derived from the tag), silently colliding.
+    m.interpret('16 BANK-CREATE LONG');
     const addr2 = m.stack.pop();
     const second = m.banks.mmap.getAllSlots().find((sl) => sl.base === addr2)!;
     expect(second.name).not.toBe(first.name);
+  });
+
+  it('rejects a tag longer than 4 characters instead of truncating it (M73, spec/04-FORTH-CORE.md §6.14)', () => {
+    const m = new Machine();
+    const before = m.banks.getAllBanks().length;
+    expect(() => m.interpret('32 BANK-CREATE LONGNAMETAG')).toThrow(/1 to 4 characters/);
+    expect(m.banks.getAllBanks().length).toBe(before);
   });
 
   it('throws once MMAP itself is full, same as any other allocate() caller', () => {
@@ -285,9 +288,9 @@ describe('CREATE-BANK (DEVELOPING.md §13/§14, M21/M22) — Forth-side bank cre
     // Machine already created 9 banks (MMAP + 8); fill the rest.
     const remaining = MMAP_MAX_SLOTS - m.banks.getAllBanks().length;
     for (let i = 0; i < remaining; i++) {
-      m.interpret('16 CREATE-BANK FILL');
+      m.interpret('16 BANK-CREATE FILL');
       m.stack.pop();
     }
-    expect(() => m.interpret('16 CREATE-BANK OVER')).toThrow(/MMAP is full/);
+    expect(() => m.interpret('16 BANK-CREATE OVER')).toThrow(/MMAP is full/);
   });
 });

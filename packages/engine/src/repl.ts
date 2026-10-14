@@ -234,7 +234,7 @@ export interface MachineOptions {
  * word's body would run; `pausedAtWord()` names it, `step()` again to
  * resume (same "just call step() again" shape as `'blocked'`, but the
  * caller — not a data source — decides when). Storage (`PROJECT`/`SAVE`/
- * `RESTORE`/`BSAVE`/`BLOAD`) used to need its own suspend/resume status
+ * `RESTORE`/`BANK-SAVE`/`BANK-LOAD`) used to need its own suspend/resume status
  * here, back when an OPFS-backed `StorageHal` was Promise-based — now
  * that storage is synchronous (`local-storage-storage-hal.ts`), those
  * are ordinary `primitives.ts` dispatch cases that run to completion

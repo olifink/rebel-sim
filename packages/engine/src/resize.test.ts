@@ -188,11 +188,11 @@ describe('resize-triggered restart (Inner’s ‘restart-project’ StepSignal, 
     expect(m2.rstack.toArray()).toEqual([]);
   });
 
-  it('a dynamic CREATE-BANKd bank survives the restart too, at a freshly-placed base', () => {
+  it('a dynamic BANK-CREATEd bank survives the restart too, at a freshly-placed base', () => {
     const hal = memoryHal();
     const m1 = new Machine({ storageHal: hal });
     m1.interpret('70000 BANK-RESIZE DICT');
-    m1.interpret('64 CREATE-BANK DATA');
+    m1.interpret('64 BANK-CREATE DATA');
     const extraAddr = m1.stack.pop();
     m1.arena.writeByte(extraAddr, 77);
     const extraName = m1.banks.getAllBanks().find((b) => b.base === extraAddr)!.name;

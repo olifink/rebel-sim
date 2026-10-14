@@ -73,14 +73,14 @@ describe('Storage', () => {
     }
   });
 
-  it('two CREATE-BANK banks sharing a tag no longer collide on save (DEVELOPING.md §20, M27 — the real bug this fixes)', () => {
+  it('two BANK-CREATE banks sharing a tag no longer collide on save (DEVELOPING.md §20, M27 — the real bug this fixes)', () => {
     const hal = memoryHal();
     const m = new Machine();
     const storage = new Storage(m.arena, m.banks, hal);
 
-    m.interpret('64 CREATE-BANK DATA');
+    m.interpret('64 BANK-CREATE DATA');
     const addr1 = m.stack.pop();
-    m.interpret('64 CREATE-BANK DATA');
+    m.interpret('64 BANK-CREATE DATA');
     const addr2 = m.stack.pop();
     m.arena.writeByte(addr1, 111);
     m.arena.writeByte(addr2, 222);
@@ -313,12 +313,12 @@ describe('Storage', () => {
 });
 
 describe('openProject — MMAP-first two-phase restore (spec/01-HAL.md §6.3.1, M29)', () => {
-  it('restores the 8 standard banks plus an extra CREATE-BANKd bank at their exact original bases', () => {
+  it('restores the 8 standard banks plus an extra BANK-CREATEd bank at their exact original bases', () => {
     const hal = memoryHal();
 
     const m1 = new Machine({ storageHal: hal });
     m1.interpret(': FOO 42 ;');
-    m1.interpret('64 CREATE-BANK DATA');
+    m1.interpret('64 BANK-CREATE DATA');
     const extraAddr = m1.stack.pop();
     m1.arena.writeByte(extraAddr, 77);
     const extraBank = m1.banks.getAllBanks().find((b) => b.tag === 'DATA');

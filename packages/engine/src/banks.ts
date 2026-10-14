@@ -18,10 +18,11 @@
  * DEVELOPING.md §14, M22: reads (`getAllBanks()`/`findBank()`/
  * `findBankByName()`) and allocation (`createBank()`) both go through
  * `MemoryMap` (`mmap.ts`) now, not a private array/counter — no cached
- * state to drift out of sync with what Forth-side `CREATE-BANK` (M21)
- * does directly. No out-of-space validation either, matching
- * `CREATE-BANK`'s own precedent — relies on `DataView`'s bounds
- * checking at first real access, not a check here.
+ * state to drift out of sync with what Forth-side `BANK-CREATE` (M21,
+ * renamed from `CREATE-BANK` in M73) does directly. Creation refuses a
+ * bad tag/name/size, a duplicate name, a full MMAP, or a bank that
+ * would run past the end of the arena (`MemoryMap.allocate`), and zeroes
+ * the new bank (spec/04-FORTH-CORE.md §6.14).
  */
 
 import { Arena } from './arena.js';
@@ -47,6 +48,7 @@ export { PersonalityFlagHeadless, DEFAULT_PERSONALITY };
 export type { Personality };
 
 export const BANK_NAME_LEN = 8;
+export const BANK_TAG_LEN = 4;
 
 const DEFAULT_FLAGS = BankFlagResident | BankFlagActive;
 
@@ -116,7 +118,10 @@ export class BankTable {
    * tests/tooling can inspect it directly. */
   readonly mmap: MemoryMap;
 
-  constructor(arena: Arena, personality?: Personality) {
+  constructor(
+    private readonly arena: Arena,
+    personality?: Personality,
+  ) {
     // MMAP is always bank 0 — reserve its fixed space via the same
     // allocate() path every other bank uses (it naturally finds the
     // first inactive slot — slot 0, on a fresh arena — and computes
@@ -127,7 +132,7 @@ export class BankTable {
   }
 
   /** DEVELOPING.md §20, M27: draws from MMAP's own header cell now, not
-   * a private field — the same counter CREATE-BANK's primitive uses
+   * a private field — the same counter BANK-CREATE's primitive uses
    * directly, so this and Forth-side creation can never collide on an
    * auto-generated name. */
   private generateSerialName(): string {
@@ -139,7 +144,7 @@ export class BankTable {
    * (spec/02-MEMORY-MODEL.md §4.3), so this rounds `size` up to the
    * smallest class that fits before carving anything, uniformly for
    * every caller (host-side creation here, and the Forth-level
-   * `CREATE-BANK` primitive, which routes through this same method —
+   * `BANK-CREATE`/`(BANK-CREATE)` primitives, which route through this same method —
    * §4.3 names both explicitly: "this rule applies uniformly to every
    * source of a bank-size request"). `MMAP` itself is never created
    * through this method — only via `mmap.allocate()` directly
@@ -149,11 +154,23 @@ export class BankTable {
    * `MIN_BANK_SIZE`-class constant, computed the same way this method
    * would round it if it went through here. */
   createBank(tag: string, size: number, name?: string, flags = DEFAULT_FLAGS): Bank {
+    // spec/04-FORTH-CORE.md §6.14's (BANK-CREATE) failure cases, checked
+    // here so every creation path — host-side and both Forth forms —
+    // refuses the same things, before anything is carved.
+    if (tag.length < 1 || tag.length > BANK_TAG_LEN) {
+      throw new Error(`bank tag '${tag}' must be 1 to ${BANK_TAG_LEN} characters`);
+    }
+    if (name !== undefined && name.length > BANK_NAME_LEN) {
+      throw new Error(`bank name '${name}' is longer than ${BANK_NAME_LEN} characters`);
+    }
+    if (size <= 0) {
+      throw new Error(`requested bank size ${size} must be positive`);
+    }
     const roundedSize = roundToSizeClass(size);
     if (roundedSize === undefined) {
       throw new Error(`requested bank size ${size} exceeds the maximum bank size (${MAX_BANK_SIZE} bytes)`);
     }
-    const bankName = (name ?? this.generateSerialName()).slice(0, BANK_NAME_LEN);
+    const bankName = name || this.generateSerialName();
     if (this.findBankByName(bankName)) {
       throw new Error(`bank name ${bankName} already exists`);
     }
@@ -161,7 +178,18 @@ export class BankTable {
     // Bank are structurally identical, and allocate() always forces
     // ACTIVE on internally, so this stays consistent with what's
     // actually stored even when a caller's `flags` omitted it.
-    return this.mmap.allocate(tag, bankName, roundedSize, flags);
+    const bank = this.mmap.allocate(tag, bankName, roundedSize, flags);
+    // §6.14: a new bank's contents MUST be zero — the memory may have
+    // been scribbled on by a stray store before any bank claimed it.
+    this.arena.fillBytes(bank.base, bank.size, 0);
+    return bank;
+  }
+
+  /** spec/04-FORTH-CORE.md §6.14: the arena address of the active bank
+   * `name`'s MMAP slot descriptor, or `undefined` if there is none. */
+  slotAddress(name: string): number | undefined {
+    const index = this.mmap.findSlotIndex(name);
+    return index === undefined ? undefined : this.mmap.slotAddress(index);
   }
 
   /** M54 (spec/02-MEMORY-MODEL.md §7): overwrites an existing bank's own

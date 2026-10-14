@@ -13,7 +13,7 @@ describe('DUMP (system.fth, M51)', () => {
 
   it('prints one row correctly: 8-digit hex address, 8 space-separated hex bytes, 8 ASCII chars', () => {
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK DUMPTST');
+    m.interpret('64 BANK-CREATE DATA');
     const addr = m.stack.pop();
     const bytes = [0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48]; // "ABCDEFGH"
     for (let i = 0; i < bytes.length; i++) {
@@ -29,7 +29,7 @@ describe('DUMP (system.fth, M51)', () => {
 
   it('renders bytes below BL (32) as a dot, not the raw control code', () => {
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK DUMPTST2');
+    m.interpret('64 BANK-CREATE DATA');
     const addr = m.stack.pop();
     for (let i = 0; i < 8; i++) {
       m.arena.writeByte(addr + i, 0); // a fresh bank's own zeroed content
@@ -44,7 +44,7 @@ describe('DUMP (system.fth, M51)', () => {
 
   it('dumps 16 rows of 8 bytes each, addresses advancing by 8 per row', () => {
     const m = bootMachine();
-    m.interpret('128 CREATE-BANK DUMPTST3');
+    m.interpret('128 BANK-CREATE DATA');
     const addr = m.stack.pop();
 
     m.interpret(`${addr} DUMP`);
@@ -58,7 +58,7 @@ describe('DUMP (system.fth, M51)', () => {
 
   it('is stack-neutral: consumes exactly the address it was given', () => {
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK DUMPTST4');
+    m.interpret('64 BANK-CREATE DATA');
     const addr = m.stack.pop();
     m.interpret('DEPTH');
     const depthBefore = m.stack.pop();
@@ -87,7 +87,7 @@ describe('DUMP-NEXT: address-less DUMP pages forward (system.fth, M61)', () => {
 
   it('an explicit-address DUMP advances DUMP-NEXT by 128, so a following bare DUMP continues right after it', () => {
     const m = bootMachine();
-    m.interpret('256 CREATE-BANK DUMPTST5');
+    m.interpret('256 BANK-CREATE DATA');
     const addr = m.stack.pop();
 
     m.interpret(`${addr} DUMP`);
@@ -111,7 +111,7 @@ describe('DUMP-NEXT: address-less DUMP pages forward (system.fth, M61)', () => {
 
   it('DUMP-NEXT is an ordinary, pokeable variable — writing it changes where the next bare DUMP starts', () => {
     const m = bootMachine();
-    m.interpret('64 CREATE-BANK DUMPTST6');
+    m.interpret('64 BANK-CREATE DATA');
     const addr = m.stack.pop();
 
     m.interpret(`${addr} DUMP-NEXT !`);

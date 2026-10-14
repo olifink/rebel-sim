@@ -214,7 +214,7 @@ export class MemoryMap {
 
   /** DEVELOPING.md §20, M27: the shared bank-naming counter — both
    * `BankTable`'s own auto-serial fallback (when no name is given)
-   * and the `CREATE-BANK` primitive draw from this single
+   * and the `BANK-CREATE` primitive draw from this single
    * arena-resident cell, so two independently-created anonymous
    * banks (one host-side, one Forth-side) can never collide on
    * name. Returns the value *before* incrementing (matches the old
@@ -228,6 +228,18 @@ export class MemoryMap {
 
   private slotOffset(index: number): number {
     return this.base + HEADER_SIZE + index * SLOT_SIZE;
+  }
+
+  /** spec/04-FORTH-CORE.md §6.14: the arena address of slot `index`'s
+   * 24-byte descriptor — what `(BANK-CREATE)`/`(BANK-LOAD)` return as a
+   * "slot" for Forth to read with ordinary fetches (tag +0, name +4,
+   * base +12, size +16, flags +20). Never 0, since MMAP's header sits
+   * there. */
+  slotAddress(index: number): number {
+    if (index < 0 || index >= MMAP_MAX_SLOTS) {
+      throw new RangeError(`MMAP slot ${index} out of range`);
+    }
+    return this.slotOffset(index);
   }
 
   private writeFixedString(offset: number, text: string, size: number): void {
@@ -353,6 +365,9 @@ export class MemoryMap {
     // avoid-a-circular-dependency reason as NAME_SIZE/MMAP_SIZE below —
     // MUST be kept in lockstep with banks.ts's MIN_BANK_SIZE by hand.
     const alignedBase = (base + 2047) & ~2047;
+    if (alignedBase + size > this.arena.sizeBytes) {
+      throw new RangeError(`no room in the arena for a ${size}-byte bank`);
+    }
 
     const activeFlags = flags | BankFlagActive;
     const offset = this.slotOffset(freeSlot);

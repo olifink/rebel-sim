@@ -160,10 +160,10 @@ shared cross-target engine contract, not a genuine requirement (real
 hardware's storage access has no async concept at all — see below).
 Switching to `localStorage` removed that whole mechanism: `PROJECT`/
 `SAVE`/`RESTORE` are ordinary primitives now, callable inside a
-colon-definition or via `EXECUTE`, and two new ones, `BSAVE`/`BLOAD`
+colon-definition or via `EXECUTE`, and two new ones, `BANK-SAVE`/`BANK-LOAD` (`BSAVE`/`BLOAD` until M73)
 (single-bank save/load), needed no special mechanism to add. Persistence
-still happens at project open/close time (now: `SAVE`/`RESTORE`/`BSAVE`/
-`BLOAD` calls), never per-Forth-memory-access.
+still happens at project open/close time (now: `SAVE`/`RESTORE`/`BANK-SAVE`/
+`BANK-LOAD` calls), never per-Forth-memory-access.
 
 **Rebel-ROM** (`rebel-rom/src/storagemodule.h`, Phase 9): `CStorageModule`
 — `LoadCart`/`SaveCart`/`EnsureLayout`/`LoadAssetFile`, backed by real

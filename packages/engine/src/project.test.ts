@@ -159,7 +159,7 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
     // Real primitive now that storage is synchronous — no more
     // outer-loop-only special syntax, so compiling a call to SAVE works
     // exactly like compiling a call to any other word (SAVE itself
-    // parses no further input, unlike PROJECT/RESTORE/BSAVE/BLOAD below,
+    // parses no further input, unlike PROJECT/RESTORE/BANK-SAVE/BANK-LOAD below,
     // so it has none of their shared "only resolves its argument when
     // interpreted directly" caveat).
     expect(() => m.interpret(': BACKUP SAVE ;')).not.toThrow();
@@ -175,7 +175,7 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
   it('PROJECT and RESTORE are now genuine dictionary entries (found by tick, listed by listDictionaryEntries) — M33', () => {
     // PROJECT/RESTORE still consume their name via nextInputToken(), the
     // same "resolves the raw text immediately following it in the
-    // *currently interpreted* line" shape BANK@/CREATE-BANK/tick already
+    // *currently interpreted* line" shape BANK@/BANK-CREATE/tick already
     // have — that only behaves sensibly typed directly (proven by the
     // tests above/below), not compiled with a following literal (the
     // compiler would try to resolve that literal as a word of its own
@@ -193,79 +193,156 @@ describe('PROJECT / SAVE / RESTORE (spec/01-HAL.md §6, M29; synchronous primiti
   });
 });
 
-describe('BSAVE / BLOAD (DEVELOPING.md\'s storage section, M33)', () => {
-  it('BSAVE with no project name set throws a clear error', () => {
+/** Writes `texts` into a fresh host-created scratch bank and pushes
+ * each one's `addr len` — name-on-the-stack arguments for the
+ * parenthesized bank words, without S" (one shared PAD, so two S"s on
+ * one line would overwrite each other). */
+function pushStrings(m: Machine, ...texts: string[]): void {
+  const scratch = m.banks.createBank('DATA', 256);
+  let at = scratch.base;
+  for (const text of texts) {
+    for (let i = 0; i < text.length; i++) m.arena.writeByte(at + i, text.charCodeAt(i));
+    m.stack.push(at);
+    m.stack.push(text.length);
+    at += text.length;
+  }
+}
+
+describe('BANK-SAVE / BANK-LOAD (M33 as BSAVE/BLOAD; renamed and resolved by name, M73, spec/04-FORTH-CORE.md §6.14)', () => {
+  it('BANK-SAVE with no project name set throws a clear error', () => {
     const m = new Machine({ storageHal: memoryHal() });
-    expect(() => m.interpret('BSAVE DATA')).toThrow(/no project name set/);
+    expect(() => m.interpret('BANK-SAVE DICT')).toThrow(/no project name set/);
   });
 
-  it('BSAVE writes only the named bank, not the whole project', () => {
+  it('BANK-SAVE writes only the named bank, not the whole project', () => {
     const hal = memoryHal();
     const m = new Machine({ storageHal: hal });
     m.interpret('PROJECT ONEBANK');
-    m.interpret('BSAVE DICT');
-
-    // DICT is a boot-time bank created with no explicit name
-    // (repl.ts's constructor), so its real .name is an auto-generated
-    // serial, not the literal tag "DICT" — the asset filename is keyed
-    // by name, not tag (storage.ts's own contract), so resolve the
-    // actual bank rather than assume the two coincide.
-    const dictBank = m.banks.requireBank('DICT');
-    expect(hal.readFile(`/PROJECTS/ONEBANK/${dictBank.name}.DCT`)).toBeDefined();
+    m.interpret('BANK-SAVE dict'); // names fold to upper case
+    expect(hal.readFile('/PROJECTS/ONEBANK/DICT.DCT')).toBeDefined();
     expect(hal.readFile('/PROJECTS/ONEBANK/MMAP.MAP')).toBeUndefined();
   });
 
-  it('BSAVE throws for an unknown bank tag', () => {
-    const m = new Machine({ storageHal: memoryHal() });
+  it('BANK-SAVE resolves by name, not tag — the BLKS-tagged bank is EDITOR', () => {
+    const hal = memoryHal();
+    const m = new Machine({ storageHal: hal });
     m.interpret('PROJECT P');
-    expect(() => m.interpret('BSAVE NOSUCH')).toThrow(/not found/);
+    expect(() => m.interpret('BANK-SAVE BLKS')).toThrow(/unknown bank: BLKS/);
+    m.interpret('BANK-SAVE EDITOR');
+    expect(hal.readFile('/PROJECTS/P/EDITOR.BLK')).toBeDefined();
   });
 
-  it('BLOAD refreshes an existing bank in place from a previous BSAVE', () => {
+  it('BANK-LOAD refreshes a resident bank in place, zero-padding a short payload', () => {
     const hal = memoryHal();
-
-    // CREATE-BANK has no name argument (only size + tag) — its
-    // auto-generated serial name is deterministic per otherwise-fresh
-    // Machine (mmap.ts's own header counter, same assumption
-    // storage.test.ts's MMAP-restore test already relies on), so m1's
-    // and m2's first CREATE-BANK call each produce the same name and
-    // BLOAD can find m1's saved file by tag alone.
     const m1 = new Machine({ storageHal: hal });
-    m1.interpret('64 CREATE-BANK DATA');
-    const addr1 = m1.stack.pop();
-    m1.arena.writeByte(addr1, 99);
+    const a = m1.banks.createBank('DATA', 64, 'SHARED');
+    m1.arena.writeByte(a.base, 99);
     m1.interpret('PROJECT SHAREDPRJ');
-    m1.interpret('BSAVE DATA');
+    m1.interpret('BANK-SAVE SHARED');
 
     const m2 = new Machine({ storageHal: hal });
-    m2.interpret('64 CREATE-BANK DATA'); // fresh/zeroed content
-    const addr2 = m2.stack.pop();
-    expect(m2.arena.readByte(addr2)).toBe(0);
+    const b = m2.banks.createBank('DATA', 64, 'SHARED');
+    m2.arena.writeByte(b.base + 1, 77); // stale byte the load must clear
     m2.interpret('PROJECT SHAREDPRJ');
-    m2.interpret('BLOAD DATA');
-    expect(m2.arena.readByte(addr2)).toBe(99);
+    m2.interpret('BANK-LOAD SHARED');
+    expect(m2.arena.readByte(b.base)).toBe(99);
+    expect(m2.arena.readByte(b.base + 1)).toBe(0);
   });
 
-  it('BLOAD throws a clear error when nothing was ever BSAVEd for that bank', () => {
+  it('BANK-LOAD creates the bank, tag from the file extension, when it is not resident', () => {
+    const hal = memoryHal();
+    const m1 = new Machine({ storageHal: hal });
+    const a = m1.banks.createBank('DATA', 64, 'LEVEL1');
+    m1.arena.writeByte(a.base + 3, 42);
+    m1.interpret('PROJECT GAME');
+    m1.interpret('BANK-SAVE LEVEL1');
+
+    const m2 = new Machine({ storageHal: hal });
+    m2.interpret('PROJECT GAME');
+    m2.interpret('BANK-LOAD level1');
+    const loaded = m2.banks.findBankByName('LEVEL1')!;
+    expect(loaded.tag).toBe('DATA');
+    expect(m2.arena.readByte(loaded.base + 3)).toBe(42);
+  });
+
+  it('BANK-LOAD throws a clear error when the project has no such asset', () => {
     const m = new Machine({ storageHal: memoryHal() });
     m.interpret('PROJECT P');
-    expect(() => m.interpret('BLOAD DICT')).toThrow(/no saved asset/);
+    expect(() => m.interpret('BANK-LOAD DICT')).toThrow(/no loadable asset DICT/);
   });
 
-  it('BSAVE and BLOAD are now genuine dictionary entries (found by tick, listed by listDictionaryEntries) — M33', () => {
-    // Same shared "parses its tag argument from the currently-
-    // interpreted line, not a following compiled literal" shape as
-    // PROJECT/RESTORE above (and BANK@/CREATE-BANK/tick before them) —
-    // proven working when interpreted directly by the tests above. What
-    // this test actually checks is the real, new capability: existing
-    // as dictionary entries at all, where before M33 there was no
-    // BSAVE/BLOAD mechanism of any shape.
+  it('the old names CREATE-BANK, BSAVE and BLOAD are gone', () => {
+    const names = listDictionaryEntries(new Machine()).map((e) => e.name);
+    expect(names).toEqual(expect.arrayContaining(['BANK-CREATE', 'BANK-SAVE', 'BANK-LOAD']));
+    for (const old of ['CREATE-BANK', 'BSAVE', 'BLOAD']) {
+      expect(names).not.toContain(old);
+    }
+  });
+});
+
+describe('(BANK-CREATE) / (BANK-SAVE) / (BANK-LOAD) — name on the stack, 0 on failure (M73, spec/04-FORTH-CORE.md §6.14)', () => {
+  it('(BANK-CREATE) creates a named, zeroed bank and returns its MMAP slot', () => {
     const m = new Machine({ storageHal: memoryHal() });
-    expect(() => m.interpret("' BSAVE DROP")).not.toThrow();
-    expect(() => m.interpret("' BLOAD DROP")).not.toThrow();
-    const names = listDictionaryEntries(m).map((e) => e.name);
-    expect(names).toContain('BSAVE');
-    expect(names).toContain('BLOAD');
+    // Scribble where the next bank will land, to prove it gets zeroed.
+    const top = Math.max(...m.banks.getAllBanks().map((b) => b.base + b.size));
+    pushStrings(m, 'sprites', 'sprt');
+    const scratchEnd = Math.max(...m.banks.getAllBanks().map((b) => b.base + b.size));
+    expect(scratchEnd).toBeGreaterThan(top);
+    m.arena.writeByte(scratchEnd, 0xaa);
+    m.stack.push(100);
+    m.interpret('(BANK-CREATE)');
+    const slot = m.stack.pop();
+    const bank = m.banks.findBankByName('SPRITES')!;
+    expect(slot).toBe(m.banks.slotAddress('SPRITES'));
+    expect(bank.tag).toBe('SPRT');
+    expect(m.arena.readCell(slot + 12)).toBe(bank.base);
+    expect(m.arena.readCell(slot + 16)).toBe(2048);
+    expect(m.arena.readByte(bank.base)).toBe(0);
+  });
+
+  it('(BANK-CREATE) with an empty name assigns the next serial name', () => {
+    const m = new Machine();
+    pushStrings(m, '', 'DATA');
+    m.stack.push(64);
+    m.interpret('(BANK-CREATE)');
+    const slot = m.stack.pop();
+    expect(slot).not.toBe(0);
+    const name = m.banks.getAllBanks().find((b) => m.banks.slotAddress(b.name) === slot)!.name;
+    expect(name).toMatch(/^\d{8}$/);
+  });
+
+  it.each([
+    ['a duplicate name', 'DICT', 'DATA', 64],
+    ['a name over 8 characters', 'NINECHARS', 'DATA', 64],
+    ['an empty tag', 'OKNAME', '', 64],
+    ['a tag over 4 characters', 'OKNAME', 'TOOLONG', 64],
+    ['size 0', 'OKNAME', 'DATA', 0],
+    ['a size over the largest class', 'OKNAME', 'DATA', 0x7fffffff],
+  ])('(BANK-CREATE) returns 0 and changes nothing for %s', (_why, name, tag, size) => {
+    const m = new Machine();
+    pushStrings(m, name, tag);
+    const before = m.banks.getAllBanks().length;
+    m.stack.push(size);
+    m.interpret('(BANK-CREATE)');
+    expect(m.stack.toArray()).toEqual([0]);
+    expect(m.banks.getAllBanks().length).toBe(before);
+  });
+
+  it('(BANK-SAVE) / (BANK-LOAD) round-trip and report failure as FALSE / 0', () => {
+    const m = new Machine({ storageHal: memoryHal() });
+    const call = (word: string, name: string): number => {
+      pushStrings(m, name);
+      m.interpret(word);
+      return m.stack.pop();
+    };
+
+    expect(call('(BANK-SAVE)', 'CHAR')).toBe(0); // no project open yet
+    m.interpret('PROJECT RT');
+    expect(call('(BANK-SAVE)', 'NOSUCH')).toBe(0);
+    expect(call('(BANK-SAVE)', 'char')).toBe(-1);
+    expect(call('(BANK-LOAD)', 'CHAR')).toBe(m.banks.slotAddress('CHAR'));
+    expect(call('(BANK-LOAD)', 'NOSUCH')).toBe(0);
+    expect(m.stack.toArray()).toEqual([]);
   });
 });
 

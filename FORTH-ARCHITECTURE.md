@@ -455,7 +455,7 @@ Every dictionary entry, identical layout across all languages:
   * **Porting to Rebel-Sim (TypeScript):** `hal_block_read`/`write` are a
     straight `memcpy` against `BLKS-base + n*1024` — the bank is fully
     arena-resident, so these calls always succeed and never themselves
-    touch browser storage; only `SAVE`/`RESTORE`/`BSAVE`/`BLOAD` (already
+    touch browser storage; only `SAVE`/`RESTORE`/`BANK-SAVE`/`BANK-LOAD` (already
     built, M5/M33) persist `BLKS` to `localStorage`, at project
     open/close time, same as any other bank — `FLUSH`ing a dirty buffer
     into the resident `BLKS` bank is a smaller, separate act from

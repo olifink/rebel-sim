@@ -16,7 +16,7 @@
  * across reloads — trading OPFS's larger capacity (browsers typically
  * cap an origin's localStorage well under OPFS's effective disk-backed
  * quota) and native directory model for a shape that lets
- * PROJECT/SAVE/RESTORE/BSAVE/BLOAD be genuine dictionary primitives
+ * PROJECT/SAVE/RESTORE/BANK-SAVE/BANK-LOAD be genuine dictionary primitives
  * again, usable inside a colon-definition or via EXECUTE like any other
  * word. Rebel's own bank sizes (four-to-few-hundred KB size classes)
  * are nowhere near what would actually bind on that quota in practice.

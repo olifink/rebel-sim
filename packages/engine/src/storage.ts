@@ -28,7 +28,8 @@
  * into the engine's core execution model (`repl.ts` used to carry a
  * dedicated `'storage'` `StepStatus` just so a running Forth line could
  * suspend itself around a real disk write). `PROJECT`/`SAVE`/`RESTORE`/
- * `BSAVE`/`BLOAD` are ordinary `primitives.ts` dispatch cases now,
+ * `BANK-SAVE`/`BANK-LOAD` and their `(BANK-…)` forms are ordinary
+ * `primitives.ts` dispatch cases now,
  * calling straight into this class like any other primitive calls into
  * `banks`/`screen`/`sysvars` — see `DEVELOPING.md`'s storage section.
  *
@@ -43,7 +44,7 @@
  */
 
 import { Arena } from './arena.js';
-import { Bank, BankTable, roundToSizeClass } from './banks.js';
+import { Bank, BankTable, BANK_NAME_LEN, roundToSizeClass } from './banks.js';
 import { MMAP_TAG } from './mmap.js';
 
 const PROJECTS_ROOT = '/PROJECTS';
@@ -216,7 +217,7 @@ export class Storage {
    *      the asset's payload. `MemoryMap` (mmap.ts) caches nothing —
    *      every subsequent lookup immediately reflects the restored
    *      table, so no separate bump-allocator-bypass primitive is
-   *      needed. This also reactivates any extra (e.g. CREATE-BANK'd)
+   *      needed. This also reactivates any extra (e.g. BANK-CREATE'd)
    *      banks the original project had at their exact recorded bases,
    *      content still pending until phase 2.
    *   2. Content restore: every other recognized file is matched by
@@ -244,7 +245,7 @@ export class Storage {
    * that mode; phase 2 (content-only, matched by name) still runs
    * exactly as it does today — a fresh boot's own banks already carry
    * the right names, so matching still finds them, and a truly-extra
-   * saved bank (e.g. a `CREATE-BANK`'d one from before) still falls
+   * saved bank (e.g. a `BANK-CREATE`'d one from before) still falls
    * through to the same fresh-create fallback either way. */
   openProject(projectName: string, skipLayoutRestore = false): Bank[] {
     const dir = projectDir(projectName);
@@ -297,6 +298,7 @@ export class Storage {
 
       const size = roundToSizeClass(payload.length);
       if (size === undefined) continue; // larger than any size class — skip, don't crash
+      if (basename.length > BANK_NAME_LEN) continue; // not a name any bank can have
       const bank = this.banks.createBank(tag, size, basename);
       this.arena.writeBytes(bank.base, payload);
       loaded.push(bank);
@@ -334,15 +336,15 @@ export class Storage {
 
   /** Reads one bank's previously-saved asset file back into that bank's
    * own, already-existing memory region, in place — the single-bank
-   * counterpart to `openProject()`'s whole-directory restore, for
-   * `BLOAD` (`DEVELOPING.md` §8.6-adjacent storage section, M33). Unlike
+   * counterpart to `openProject()`'s whole-directory restore (M33's
+   * `BLOAD`; `BANK-LOAD` now goes through `loadAssetByName()`). Unlike
    * `openProject()`'s phase-2 tolerance (silently skip a payload too
    * large for its recorded slot, among many files), a too-large payload
    * here throws — a single explicit named request deserves a clear
    * error over a silent partial load. Zero-pads if the saved payload is
    * shorter than the bank's current size. Returns `false`, changing
    * nothing, if no asset file exists yet for this bank in this project —
-   * a `BLOAD` before any matching `BSAVE`, not treated as an error here
+   * a load before any matching save, not treated as an error here
    * so the primitive calling this can phrase its own message. */
   loadAsset(projectName: string, bank: Bank): boolean {
     const ext = TAG_TO_EXTENSION[bank.tag];
@@ -362,6 +364,45 @@ export class Storage {
     }
     this.loadPayload(bank, payload);
     return true;
+  }
+
+  /** spec/04-FORTH-CORE.md §6.14's `(BANK-LOAD)`: loads the project's
+   * asset whose basename is `name` (bank names are unique, so at most
+   * one file matches; its extension gives the tag). A resident bank of
+   * that name has its contents replaced, zero-padded; otherwise a bank
+   * is created for it exactly as `openProject` would. Returns the loaded
+   * bank, or `undefined` — changing nothing — if no asset matches, its
+   * header is bad, it is empty (a blanked asset, spec/01-HAL.md §6.3),
+   * or the bank cannot be created or is too small for the payload. */
+  loadAssetByName(projectName: string, name: string): Bank | undefined {
+    const dir = projectDir(projectName);
+    const file = this.hal.listFiles(dir).find((f) => {
+      const dot = f.lastIndexOf('.');
+      return dot > 0 && f.slice(0, dot).toUpperCase() === name && EXTENSION_TO_TAG[f.slice(dot + 1).toUpperCase()];
+    });
+    if (!file) return undefined;
+    const tag = EXTENSION_TO_TAG[file.slice(file.lastIndexOf('.') + 1).toUpperCase()];
+    const bytes = this.hal.readFile(`${dir}/${file}`);
+    if (!bytes || bytes.length < ASSET_HEADER_SIZE) return undefined;
+    if (bytes[0] !== ASSET_MAGIC_0 || bytes[1] !== ASSET_MAGIC_1) return undefined;
+    const payload = bytes.subarray(ASSET_HEADER_SIZE);
+
+    const resident = this.banks.findBankByName(name);
+    if (resident) {
+      if (payload.length > resident.size) return undefined;
+      this.loadPayload(resident, payload);
+      return resident;
+    }
+    const size = roundToSizeClass(Math.max(payload.length, 1));
+    if (size === undefined) return undefined;
+    let bank: Bank;
+    try {
+      bank = this.banks.createBank(tag, size, name);
+    } catch {
+      return undefined; // no free slot / no room in the arena / bad name
+    }
+    this.loadPayload(bank, payload);
+    return bank;
   }
 
   /** Copies an asset payload into its bank and zero-pads the rest, via

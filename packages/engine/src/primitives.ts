@@ -20,7 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel } from './channel.js';
-import { BankTable, BLOCK_SIZE } from './banks.js';
+import { type Bank, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
 import { alignCell, CELL_SIZE } from './arena.js';
 import {
@@ -71,8 +71,8 @@ export interface PrimitiveContext extends DictionaryContext {
    * host already tracks rather than duplicating it as arena bytes. */
   readonly banks: BankTable;
   /** DEVELOPING.md's storage section, M33: `PROJECT`/`SAVE`/`RESTORE`/
-   * `BSAVE`/`BLOAD` call straight into this, the same way `BANK@`/
-   * `CREATE-BANK` already call into `banks` above — storage is
+   * `BANK-SAVE`/`BANK-LOAD` call straight into this, the same way `BANK@`/
+   * `BANK-CREATE` already call into `banks` above — storage is
    * synchronous now (localStorage, not OPFS), so there's no suspension
    * mechanism left for these to need; they're ordinary primitives. */
   readonly storage: Storage;
@@ -217,6 +217,62 @@ export function projectNeedsRestart(ctx: PrimitiveContext, project: string): boo
     const bootSize = ctx.bootBankSize(asset.name);
     return bootSize !== undefined && bootSize !== asset.size;
   });
+}
+
+/** Decodes `len` arena bytes at `addr` as text — a name handed to a
+ * name-on-the-stack word (spec/04-FORTH-CORE.md §6.14). */
+function readText(ctx: PrimitiveContext, addr: number, len: number): string {
+  let text = '';
+  for (let i = 0; i < len; i++) {
+    text += String.fromCharCode(ctx.arena.readByte(addr + i));
+  }
+  return text;
+}
+
+/** spec/04-FORTH-CORE.md §6.14, M73: the one implementation behind each
+ * bank operation. The parsing words (`BANK-CREATE`/`BANK-SAVE`/
+ * `BANK-LOAD`) let a failure's error propagate as an ordinary ABORT;
+ * the parenthesized forms catch it and push 0/FALSE instead. Names and
+ * tags are folded to upper case here, once, for every caller. */
+function bankCreate(ctx: PrimitiveContext, name: string, tag: string, size: number): Bank {
+  return ctx.banks.createBank(tag.toUpperCase(), size, name.toUpperCase() || undefined);
+}
+
+function bankSave(ctx: PrimitiveContext, name: string): void {
+  const project = ctx.sysvars.getProjectName();
+  if (!project) {
+    throw new Error('no project name set - use PROJECT name first');
+  }
+  const upper = name.toUpperCase();
+  const bank = ctx.banks.findBankByName(upper);
+  if (!bank) {
+    throw new Error(`unknown bank: ${upper}`);
+  }
+  ctx.storage.saveAsset(project, bank);
+}
+
+function bankLoad(ctx: PrimitiveContext, name: string): Bank {
+  const project = ctx.sysvars.getProjectName();
+  if (!project) {
+    throw new Error('no project name set - use PROJECT name first');
+  }
+  const upper = name.toUpperCase();
+  const bank = ctx.storage.loadAssetByName(project, upper);
+  if (!bank) {
+    throw new Error(`no loadable asset ${upper} in project '${project}'`);
+  }
+  // Same reason RESTORE repaints: a direct load into CHAR bypasses the
+  // screen's write-through (§6.11).
+  if (bank.tag === 'CHAR') {
+    ctx.screen.redrawAll();
+  }
+  return bank;
+}
+
+/** A bank's MMAP slot address — the "slot" the parenthesized words
+ * return. Always defined for a bank that was just created or found. */
+function slotOf(ctx: PrimitiveContext, bank: Bank): number {
+  return ctx.banks.slotAddress(bank.name)!;
 }
 
 export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
@@ -710,19 +766,14 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     }
 
-    case 100: { // CREATE-BANK ( size "tag" -- addr ) — DEVELOPING.md §13/§14/§20, M21/M22/M27, M30
+    case 100: { // BANK-CREATE ( size "tag" -- addr ) — spec/04-FORTH-CORE.md
+      // §6.14 (renamed from CREATE-BANK, M73): an anonymous bank of that
+      // tag, named from MMAP's shared serial counter (M27), size rounded
+      // up to a size class (M30). Kept native rather than defined in
+      // Forth over (BANK-CREATE), which §6.14 permits.
       const size = s.pop();
-      const tag = ctx.nextInputToken().toUpperCase();
-      // M30 (spec/02-MEMORY-MODEL.md §4.3): routes through BankTable's
-      // own createBank() now, not a direct mmap.allocate() bypass — the
-      // spec names this call out explicitly as a source of bank-size
-      // requests that MUST round up to a size class before carving,
-      // same as any host-side creation. Auto-naming (no name given)
-      // draws from the same MMAP-header counter host-side creation
-      // uses, so this still can't collide with a host-created bank's
-      // name.
-      const bank = ctx.banks.createBank(tag, size);
-      s.push(bank.base);
+      const tag = ctx.nextInputToken();
+      s.push(bankCreate(ctx, '', tag, size).base);
       break;
     }
 
@@ -904,37 +955,18 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     // See that special case, and restoreProject()/projectNeedsRestart()
     // above, for the actual logic this case used to hold directly.
 
-    case 129: { // BSAVE ( "tag" -- ) — save just one already-existing
-      // bank, resolved by tag the same way BANK@ (case 99) does: "the
-      // bank with this tag," first match if more than one shares it.
-      const project = ctx.sysvars.getProjectName();
-      if (!project) {
-        throw new Error('no project name set - use PROJECT name first');
-      }
-      const tag = ctx.nextInputToken().toUpperCase();
-      const bank = ctx.banks.requireBank(tag);
-      ctx.storage.saveAsset(project, bank);
+    case 129: { // BANK-SAVE ( "name" -- ) — spec/04-FORTH-CORE.md §6.14
+      // (renamed from BSAVE, M73, and now resolved by name, not tag):
+      // writes one bank to the open project as a single asset.
+      bankSave(ctx, ctx.nextInputToken());
       break;
     }
 
-    case 130: { // BLOAD ( "tag" -- ) — the single-bank counterpart to
-      // RESTORE: overwrites one already-existing bank's own memory in
-      // place from its previously-BSAVEd asset, rather than restoring a
-      // whole project. Repaints the screen for the same reason RESTORE
-      // does, only when the loaded bank is actually CHAR.
-      const project = ctx.sysvars.getProjectName();
-      if (!project) {
-        throw new Error('no project name set - use PROJECT name first');
-      }
-      const tag = ctx.nextInputToken().toUpperCase();
-      const bank = ctx.banks.requireBank(tag);
-      const ok = ctx.storage.loadAsset(project, bank);
-      if (!ok) {
-        throw new Error(`no saved asset for bank ${tag} in project '${project}'`);
-      }
-      if (bank.tag === 'CHAR') {
-        ctx.screen.redrawAll();
-      }
+    case 130: { // BANK-LOAD ( "name" -- ) — spec/04-FORTH-CORE.md §6.14
+      // (renamed from BLOAD, M73): loads the open project's asset of that
+      // basename into the bank of that name, creating it if it isn't
+      // resident. Repaints the screen when the bank is CHAR.
+      bankLoad(ctx, ctx.nextInputToken());
       break;
     }
 
@@ -966,7 +998,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     // switch can do in place.
 
     case 133: // REDRAW ( -- ) — same Screen.redrawAll() call RESTORE
-      // (128) and BLOAD (130) already make internally after overwriting
+      // (128) and BANK-LOAD (130) already make internally after overwriting
       // CHAR directly; exposed as an ordinary word so Forth source that
       // pokes CHAR itself (BANK@ CHAR ... C!) has a way to repaint
       // without needing storage's fix-up path as an excuse to reach it.
@@ -1047,7 +1079,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 141: { // (BLOCK-WRITE) ( addr n -- ) hal_block_write(n, addr):
       // the write-back half of (BLOCK-READ) (140) — same bounds check,
       // copies the other direction. Doesn't itself touch disk — SAVE/
-      // BSAVE persist the whole BLKS bank separately, at project-save
+      // BANK-SAVE persist the whole BLKS bank separately, at project-save
       // time, same as any other bank.
       const n = s.pop();
       const addr = s.pop();
@@ -1145,7 +1177,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // RESTORE that finds the mismatch and restarts, projectNeedsRestart/
       // restoreProject above). Same parsed-name/uppercase/"unknown bank"
       // convention as BANK@ (99)/BANK-SIZE (144); rounds to a size class
-      // the same way CREATE-BANK (100) does, so a later BANK-SIZE on the
+      // the same way BANK-CREATE (100) does, so a later BANK-SIZE on the
       // same name reports what SAVE will actually persist. Not IMMEDIATE
       // — an action, not something a colon-definition needs to bake an
       // address into (unlike BANK@).
@@ -1171,6 +1203,45 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       const y = s.pop();
       const x = s.pop();
       s.push(ctx.screen.point(x, y));
+      break;
+    }
+
+    case 150: { // (BANK-CREATE) ( name-a name-l tag-a tag-l size -- slot | 0 )
+      // spec/04-FORTH-CORE.md §6.14, M73. A zero-length name gets the
+      // next automatic serial name. 0 on any failure, never ABORT.
+      const size = s.pop();
+      const tagLen = s.pop();
+      const tagAddr = s.pop();
+      const nameLen = s.pop();
+      const nameAddr = s.pop();
+      try {
+        s.push(slotOf(ctx, bankCreate(ctx, readText(ctx, nameAddr, nameLen), readText(ctx, tagAddr, tagLen), size)));
+      } catch {
+        s.push(0);
+      }
+      break;
+    }
+
+    case 151: { // (BANK-SAVE) ( addr len -- flag ) — §6.14, M73
+      const len = s.pop();
+      const addr = s.pop();
+      try {
+        bankSave(ctx, readText(ctx, addr, len));
+        s.push(TRUE);
+      } catch {
+        s.push(FALSE);
+      }
+      break;
+    }
+
+    case 152: { // (BANK-LOAD) ( addr len -- slot | 0 ) — §6.14, M73
+      const len = s.pop();
+      const addr = s.pop();
+      try {
+        s.push(slotOf(ctx, bankLoad(ctx, readText(ctx, addr, len))));
+      } catch {
+        s.push(0);
+      }
       break;
     }
 
