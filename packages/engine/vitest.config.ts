@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    // Compiles bootMachine()'s boot images once per run (test-support.ts).
+    globalSetup: ['src/boot-image.global-setup.ts'],
     // Screen Editor follow-up: bootMachine() now compiles ~150 extra
     // lines of system.fth (LOAD, the EDITOR vocabulary) through the
     // self-hosted INTERPRET's own O(dictionary-size) FIND chain-walk
