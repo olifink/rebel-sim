@@ -313,9 +313,7 @@ export class Screen {
    * the old order drew the cursor first, then immediately painted
    * over it with the full-framebuffer clear. */
   cls(): void {
-    for (let i = 0; i < this.charBank.size; i++) {
-      this.arena.writeByte(this.charBank.base + i, SPACE);
-    }
+    this.arena.fillBytes(this.charBank.base, this.charBank.size, SPACE);
     // spec/01-HAL.md §3.6: ATTR gets the same treatment CHAR does here —
     // filled with the current ink/paper attribute so a freshly-cleared
     // screen is attribute-consistent immediately, not stale. Only while

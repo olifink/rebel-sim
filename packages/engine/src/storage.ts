@@ -262,9 +262,7 @@ export class Storage {
         if (bytes && bytes.length >= ASSET_HEADER_SIZE) {
           const payload = bytes.subarray(ASSET_HEADER_SIZE);
           if (payload.length <= mmapBank.size) {
-            for (let i = 0; i < mmapBank.size; i++) {
-              this.arena.writeByte(mmapBank.base + i, i < payload.length ? payload[i] : 0);
-            }
+            this.loadPayload(mmapBank, payload);
             mmapRestored = true;
             loaded.push(mmapBank);
           }
@@ -289,9 +287,7 @@ export class Storage {
         const bank = this.banks.findBankByName(basename);
         if (bank) {
           if (payload.length > bank.size) continue; // too large for the recorded slot — skip, not fatal
-          for (let i = 0; i < bank.size; i++) {
-            this.arena.writeByte(bank.base + i, i < payload.length ? payload[i] : 0);
-          }
+          this.loadPayload(bank, payload);
           loaded.push(bank);
           continue;
         }
@@ -302,9 +298,7 @@ export class Storage {
       const size = roundToSizeClass(payload.length);
       if (size === undefined) continue; // larger than any size class — skip, don't crash
       const bank = this.banks.createBank(tag, size, basename);
-      for (let i = 0; i < payload.length; i++) {
-        this.arena.writeByte(bank.base + i, payload[i]);
-      }
+      this.arena.writeBytes(bank.base, payload);
       loaded.push(bank);
     }
 
@@ -366,10 +360,16 @@ export class Storage {
         `saved asset for ${bank.tag}/${bank.name} is ${payload.length} bytes, too large for its ${bank.size}-byte bank`,
       );
     }
-    for (let i = 0; i < bank.size; i++) {
-      this.arena.writeByte(bank.base + i, i < payload.length ? payload[i] : 0);
-    }
+    this.loadPayload(bank, payload);
     return true;
+  }
+
+  /** Copies an asset payload into its bank and zero-pads the rest, via
+   * the HAL bulk operations (spec/01-HAL.md §9.3). Caller has already
+   * checked `payload.length <= bank.size`. */
+  private loadPayload(bank: Bank, payload: Uint8Array): void {
+    this.arena.writeBytes(bank.base, payload);
+    this.arena.fillBytes(bank.base + payload.length, bank.size - payload.length, 0);
   }
 
   /** Opaque cart file I/O (docs/STORAGE.md §6) — "read this one file

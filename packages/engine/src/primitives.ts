@@ -770,23 +770,28 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
     case 106: // CELL+ ( addr -- addr+4 )
       s.push(toCell(s.pop() + CELL_SIZE));
       break;
-    case 107: { // FILL ( addr len char -- )
+    case 107: { // FILL ( addr len char -- ) — spec/04-FORTH-CORE.md §6.3's
+      // native path: routed through hal_mem_fill (spec/01-HAL.md §9).
       const char = s.pop();
       const len = s.pop();
       const addr = s.pop();
-      for (let i = 0; i < len; i++) {
-        ctx.arena.writeByte(addr + i, char & 0xff);
-      }
+      ctx.arena.fillBytes(addr, len, char);
       break;
     }
-    case 108: { // CMOVE ( addr1 addr2 len -- ) low-to-high; overlapping
-      // ranges where addr2 falls inside [addr1, addr1+len) corrupt data
-      // — documented footgun, not a bug (DEVELOPING.md §15).
+    case 108: { // CMOVE ( addr1 addr2 len -- ) low-to-high. Routed
+      // through hal_mem_copy (spec/01-HAL.md §9.3) except when addr2
+      // starts inside [addr1, addr1+len): the reference byte loop then
+      // propagates a repeating pattern, which the overlap-safe HAL copy
+      // would silently "fix" — so that one case stays a byte loop.
       const len = s.pop();
       const addr2 = s.pop();
       const addr1 = s.pop();
-      for (let i = 0; i < len; i++) {
-        ctx.arena.writeByte(addr2 + i, ctx.arena.readByte(addr1 + i));
+      if (addr1 < addr2 && addr2 < addr1 + len) {
+        for (let i = 0; i < len; i++) {
+          ctx.arena.writeByte(addr2 + i, ctx.arena.readByte(addr1 + i));
+        }
+      } else {
+        ctx.arena.copyBytes(addr2, addr1, len);
       }
       break;
     }
@@ -1035,9 +1040,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
         throw new Error(`block ${n} out of range (0..${blockCount - 1})`);
       }
       const blockBase = blks.base + n * BLOCK_SIZE;
-      for (let i = 0; i < BLOCK_SIZE; i++) {
-        ctx.arena.writeByte(addr + i, ctx.arena.readByte(blockBase + i));
-      }
+      ctx.arena.copyBytes(addr, blockBase, BLOCK_SIZE);
       break;
     }
 
@@ -1054,9 +1057,7 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
         throw new Error(`block ${n} out of range (0..${blockCount - 1})`);
       }
       const blockBase = blks.base + n * BLOCK_SIZE;
-      for (let i = 0; i < BLOCK_SIZE; i++) {
-        ctx.arena.writeByte(blockBase + i, ctx.arena.readByte(addr + i));
-      }
+      ctx.arena.copyBytes(blockBase, addr, BLOCK_SIZE);
       break;
     }
 

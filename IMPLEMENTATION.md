@@ -4545,6 +4545,38 @@ deleted). `rebel-opcodes.json`'s notes for both tokens updated.
 INK !`/`n PAPER !` — `Sysvars.get`/`.set` call sites in `mmap.test.ts`/
 `empty.test.ts` reach the sysvar directly and needed no change.
 
+### 1.84 HAL memory block operations: `FILL`/`CMOVE` native again (M72, spec v1.1)
+
+`rebel-specs` v1.1 (`01-HAL.md` §9) makes `hal_mem_copy` (overlap-safe,
+memmove) and `hal_mem_fill` **REQUIRED** on every target, and asks
+everything above the HAL that copies or fills a run of
+Forth-addressable bytes to go through them. Rebel-Sim realizes both as
+`Arena` methods — one implementation, no host variation, same reasoning
+as `reportError`: `fillBytes` (existing, now `len <= 0`-guarded),
+`copyBytes` (new, `Uint8Array.copyWithin`, throws `RangeError` if
+either span leaves the arena — `copyWithin` would otherwise silently
+truncate), and `writeBytes` for a host payload (a storage asset)
+landing in the arena.
+
+*Routed through them:* native `FILL`/`CMOVE` (tokens 107/108), which
+`system.fth`'s M49 `DO`/`LOOP` definitions had been shadowing ever since
+— those are deleted, so the native path is what runs now;
+`(BLOCK-READ)`/`(BLOCK-WRITE)`; `Screen.cls()`'s `CHAR` fill (its `ATTR`
+fill already used `fillBytes`); and every Storage asset load, through a
+new private `Storage.loadPayload()` doing copy-then-zero-pad.
+
+*The one semantic trap (`04-FORTH-CORE.md` §6.3, `01-HAL.md` §9.3):*
+`CMOVE` is defined as a low-to-high byte loop, so with
+`addr1 < addr2 < addr1 + len` it propagates a repeating pattern, where
+overlap-safe `copyBytes` would move the block intact. Native `CMOVE`
+detects exactly that case and keeps the byte loop; every other case
+goes to `copyBytes`.
+
+*Tests:* `low-level-batch.test.ts` — the M49 zero-length regression
+now pins the native path; new cases for `CMOVE`'s pattern propagation,
+`CMOVE` with the source inside the destination, and `copyBytes`
+overlap in both directions plus its out-of-arena `RangeError`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -4723,5 +4755,6 @@ exactly as it would be on the bare-metal target.
 | **M69** | `\` — rest-of-line comment (§1.81), closing `04-FORTH-CORE.md` §9's own long-deferred "not specified here either" item. Direct fallout from M68's `(`-comment footgun hitting a fourth time: `: \ BEGIN BL WORD NIP 0= UNTIL ; IMMEDIATE`, no new primitive — loops the already-native `WORD` (token 134) until its own "line exhausted" zero-length signal fires. Has no closing token to glue a nested paren onto, so it structurally can't suffer `(`'s failure mode. Caught a real near-miss while writing its own doc comment (the same bug, in the very comment explaining the bug), fixed by paren-free rewriting before it ever ran. | `system.fth`, `04-FORTH-CORE.md`, `comments.test.ts` |
 | **M70** | `SEE`/`HIDE` fixed to resolve names via `CONTEXT`, not raw `LATEST` (§1.82) — found by Oliver: both worked on a word in `EDITOR` once `EDITOR DEFINITIONS` had run, but threw `unrecognized word` on the same word after only `USE EDITOR`. Root cause: both predate `VOCABULARY` (M12 vs. M13) and resolve names via native `'`, which walks raw `LATEST`, never updated when M48 split browsing (`CONTEXT`) from compiling (`CURRENT-VOCAB`/`LATEST`) for real. Fixed entirely in `system.fth`: `FIND` relocated next to `WORDS` (near the top of the file) so `SEE`/`HIDE` can resolve names through it via a new `(TICK)` helper, a new shared `SEARCH-ROOT` word, and `XT-NAME`/`HIDE`'s own internal xt-to-entry walks switched from `LATEST` to `SEARCH-ROOT` too. No engine change. | `system.fth`, `see-hide.test.ts` |
 | **M71** | `INK`/`PAPER` become real variables (§1.83), Oliver's call, breaking change accepted pre-1.0: `n INK`/`n PAPER` (store, no read) replaced with `n INK !`/`n PAPER !` and the new `INK @`/`PAPER @`, matching the `BASE`/`STATE`/`HERE-ADDR`/`LATEST-ADDR` variable idiom instead of being the one remaining color-consuming-store pair. `Screen.setInk`/`setPaper` deleted (no other callers). | `primitives.ts`, `screen.ts`, `rebel-opcodes.json`, `system.fth`, `screen.test.ts`, `project.test.ts`, `remote-terminal-loopback.test.ts` |
+| **M72** | HAL memory block operations (§1.84, `rebel-specs` v1.1 `01-HAL.md` §9): `Arena.copyBytes` (new, `hal_mem_copy`), `Arena.fillBytes` (`hal_mem_fill`), `Arena.writeBytes` (host payload in). Native `FILL`/`CMOVE` route through them and `system.fth`'s shadowing `DO`/`LOOP` versions are deleted; `CMOVE` keeps a byte loop for the destination-inside-source case so it still propagates the pattern. `(BLOCK-READ)`/`(BLOCK-WRITE)`, `Screen.cls()` and Storage asset loads (`loadPayload`, copy + zero-pad) switched over too. | `arena.ts`, `primitives.ts`, `screen.ts`, `storage.ts`, `rebel-opcodes.json`, `system.fth`, `low-level-batch.test.ts`, `HAL.md` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

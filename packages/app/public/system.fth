@@ -158,15 +158,12 @@
 ( Batch 5 -- needs Batch 3/4 already loaded. )
 : ?DUP DUP IF DUP THEN ;
 : ABS DUP 0< IF NEGATE THEN ;
-( FILL/CMOVE: char/addr2 parked on the data stack underneath the )
-( DO loop's own return-stack-resident index/limit, not the return )
-( stack itself -- DO/LOOP never touch the data stack, so whatever )
-( sits there when DO runs is exactly what the loop body sees on )
-( every iteration, undisturbed. Both also need TYPE's own guard )
-( below -- a zero len still ran the body once, writing/copying )
-( one stray byte instead of staying a true no-op. )
-: FILL ( addr len char -- ) >R DUP 0= IF 2DROP R> DROP EXIT THEN R> -ROT OVER + SWAP DO DUP I C! LOOP DROP ;
-: CMOVE ( addr1 addr2 len -- ) DUP 0= IF 2DROP DROP EXIT THEN 0 DO 2DUP SWAP I + C@ SWAP I + C! LOOP 2DROP ;
+( FILL/CMOVE are deliberately NOT redefined here: they stay native, )
+( rebel-opcodes.json 107/108, routed through the HAL's bulk memory )
+( operations per spec 01-HAL.md section 9 and 04-FORTH-CORE.md )
+( section 6.3. The reference DO/LOOP definitions in that spec still )
+( fix their behavior: zero len is a no-op, and a CMOVE whose )
+( destination starts inside its source propagates the pattern. )
 ( TYPE: classic DO/LOOP still runs its body once even when )
 ( index = limit at entry -- guarded so a zero-length TYPE stays a )
 ( true no-op, matching the native behavior this replaces exactly. )

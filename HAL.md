@@ -263,6 +263,31 @@ capability sysvar or compile-time flag, not assumed universal —
 Rebel-Sim has none today, and single-chip targets like the MkI/headless
 firmware may never need more than one).
 
+### 3.1 Memory block operations (spec `01-HAL.md` §9, v1.1)
+
+`hal_mem_copy` (overlap-safe, memmove) and `hal_mem_fill` are
+**REQUIRED** on every target. Rebel-Sim realizes them as `Arena`
+methods, not a host-injectable interface — one implementation, same
+reasoning as `reportError`: `Arena.copyBytes(dst, src, len)`
+(`Uint8Array.copyWithin`) and `Arena.fillBytes(offset, len, value)`
+(`Uint8Array.fill`), plus `Arena.writeBytes(offset, bytes)` for a host
+payload landing in the arena. All three are pure bytes (§9.2: no
+write-through, no redraw) and treat `len <= 0` as a no-op.
+
+Routed through them (§9.3): native `FILL`/`CMOVE` (token 107/108 —
+`system.fth`'s DO/LOOP versions, which used to shadow them, are gone),
+`(BLOCK-READ)`/`(BLOCK-WRITE)`, `Screen.cls()`'s `CHAR`/`ATTR` fills,
+and every Storage asset load including its zero-padding. `CMOVE` keeps
+its reference low-to-high semantics: when the destination starts inside
+the source it runs a byte loop and propagates the pattern, never
+`copyBytes`.
+
+The spec's "resolved byte span" (§2.1 — host pointer + length, checked
+by the portable layer) has no separate shape here: arena offsets *are*
+the span on this target. Bank-level bounds checks are not added; within
+an arena, memory is deliberately unprotected (`02-MEMORY-MODEL.md` §3),
+and a span leaving the arena throws `RangeError`.
+
 ---
 
 ## 4. Keyboard / input

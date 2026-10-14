@@ -80,12 +80,10 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     }
   });
 
-  it('self-hosted FILL/CMOVE (system.fth, post-boot) with zero length are true no-ops — regression for a real bug found by Oliver', () => {
-    // Same DO/LOOP-always-runs-once class as the .S bug above: system.fth's
-    // own `: FILL ... SWAP DO ... LOOP DROP ;` and `: CMOVE 0 DO ... LOOP
-    // 2DROP ;` had no zero-length guard, so `addr 0 char FILL` still wrote
-    // one stray byte and `src dst 0 CMOVE` still copied one stray byte.
-    // Fixed by adding TYPE's own `DUP 0= IF ... EXIT THEN` guard to both.
+  it('FILL/CMOVE (post-boot) with zero length are true no-ops — regression for a real bug found by Oliver', () => {
+    // Originally the DO/LOOP-always-runs-once bug in system.fth's own
+    // FILL/CMOVE; both are native again now (spec/01-HAL.md §9), so this
+    // pins the same no-op contract on the HAL-routed path, post-boot.
     const m = bootMachine();
     m.interpret('64 CREATE-BANK ZLEN');
     const addr = m.stack.pop();
@@ -99,6 +97,51 @@ describe('Low-level primitive batch (DEVELOPING.md §15, M23)', () => {
     m.interpret(`${addr} ${addr + 8} 0 CMOVE`); // zero-length -- must not touch target byte 0
     m.interpret(`${addr + 8} C@`);
     expect(m.stack.pop()).toBe(99);
+  });
+
+  it('CMOVE with the destination inside the source propagates the pattern, like the reference byte loop', () => {
+    // spec/04-FORTH-CORE.md §6.3 / 01-HAL.md §9.3: the one case where
+    // CMOVE must NOT behave like overlap-safe hal_mem_copy.
+    const m = new Machine();
+    m.interpret('64 CREATE-BANK CMPR');
+    const addr = m.stack.pop();
+    m.interpret(`65 ${addr} C! 66 ${addr + 1} C!`); // "AB" then zeros
+    m.interpret(`${addr} ${addr + 2} 6 CMOVE`);
+    const bytes: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      m.interpret(`${addr + i} C@`);
+      bytes.push(m.stack.pop());
+    }
+    expect(bytes).toEqual([65, 66, 65, 66, 65, 66, 65, 66]);
+  });
+
+  it('CMOVE with the source inside the destination moves the block intact', () => {
+    const m = new Machine();
+    m.interpret('64 CREATE-BANK CMDN');
+    const addr = m.stack.pop();
+    for (let i = 0; i < 6; i++) {
+      m.interpret(`${10 + i} ${addr + 2 + i} C!`);
+    }
+    m.interpret(`${addr + 2} ${addr} 6 CMOVE`);
+    const bytes: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      m.interpret(`${addr + i} C@`);
+      bytes.push(m.stack.pop());
+    }
+    expect(bytes).toEqual([10, 11, 12, 13, 14, 15]);
+  });
+
+  it('Arena.copyBytes is overlap-safe in both directions (hal_mem_copy)', () => {
+    const m = new Machine();
+    m.interpret('64 CREATE-BANK HMEM');
+    const addr = m.stack.pop();
+    for (let i = 0; i < 4; i++) m.arena.writeByte(addr + i, 1 + i);
+    m.arena.copyBytes(addr + 2, addr, 4); // forward overlap: memmove, no propagation
+    const read = (n: number) => Array.from({ length: n }, (_, i) => m.arena.readByte(addr + i));
+    expect(read(6)).toEqual([1, 2, 1, 2, 3, 4]);
+    m.arena.copyBytes(addr, addr + 2, 4); // backward overlap
+    expect(read(4)).toEqual([1, 2, 3, 4]);
+    expect(() => m.arena.copyBytes(m.arena.sizeBytes - 2, 0, 4)).toThrow(RangeError);
   });
 
   it('BL pushes the space character code', () => {
