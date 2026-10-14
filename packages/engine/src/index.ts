@@ -37,3 +37,5 @@ export type { DictionaryEntry } from './dictionary.js';
 export { RemoteBoard } from './remote-board.js';
 export { RemoteTerminal } from './remote-terminal.js';
 export type { ByteSink } from './remote-terminal-protocol.js';
+export { MODULE_PENDING, NULL_MODULE_HAL } from './module.js';
+export type { ModuleHal } from './module.js';

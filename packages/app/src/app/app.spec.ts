@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { App } from './app';
@@ -12,23 +12,25 @@ import { App } from './app';
 // failure here means the actual shipped file broke, not a stale fixture.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const systemFthText = readFileSync(join(__dirname, '../../public/system.fth'), 'utf-8');
-// M78: the float wordset's Forth layer, fetched right after system.fth.
-const floatFthText = readFileSync(join(__dirname, '../../public/float.fth'), 'utf-8');
 // The real default font, so the font load doesn't write system.fth's
 // text into the arena (it used to, overrunning every bank after FONT).
 const fontBytes = new Uint8Array(readFileSync(join(__dirname, '../../public/rebel.FNT')));
 
-/** Serves each fetched asset by name. */
+/** Serves each fetched asset by name, like the dev server: system.fth,
+ * the font, and any `<name>.fth` source module in public/ (M79), with a
+ * 404 for a module that doesn't exist. */
 function assetResponse(url: string): Response {
-  if (url.endsWith('float.fth')) return new Response(floatFthText, { status: 200 });
   if (url.endsWith('rebel.FNT')) return new Response(fontBytes, { status: 200 });
-  return new Response(systemFthText, { status: 200 });
+  if (url.endsWith('system.fth')) return new Response(systemFthText, { status: 200 });
+  const module = join(__dirname, '../../public', url.split('/').pop() ?? '');
+  if (url.endsWith('.fth') && existsSync(module)) return new Response(readFileSync(module, 'utf-8'), { status: 200 });
+  return new Response('not found', { status: 404 });
 }
 
 // M7a: the outer loop is driven entirely by a requestAnimationFrame pump
 // now (no more synchronous submit()) — poll for the expected DOM state
 // instead of asserting immediately after dispatch.
-// M78: every test here boots a full Machine (system.fth plus float.fth)
+// M78: every test here boots a full Machine (system.fth)
 // in jsdom, which takes several seconds and varies a lot from run to
 // run — longer than vitest's 5s default once the float wordset joined
 // the boot. 60s per test, 120s for the two that boot twice (COLD,

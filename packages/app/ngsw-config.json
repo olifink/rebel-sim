@@ -33,7 +33,9 @@
           "/index.html",
           "/manifest.webmanifest",
           "/*.css",
-          "/*.js"
+          "/*.js",
+          "/*.fth",
+          "/*.FNT"
         ]
       }
     },

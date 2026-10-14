@@ -22,11 +22,26 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inject } from 'vitest';
 import { Machine, MachineOptions } from './repl.js';
+import { ModuleHal } from './module.js';
 
 const SYSTEM_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app/public/system.fth');
 /** M78: the float wordset's Forth layer — the app's vendored copy of
  * rebel-specs/07-FLOATING-POINT.fth (float.test.ts checks they match). */
 export const FLOAT_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app/public/float.fth');
+
+/** M79: the module HAL tests boot with — source modules are the app's
+ * own `public/<name>.fth` files, read straight off disk, never pending. */
+const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../app/public');
+export const NODE_MODULE_HAL: ModuleHal = {
+  read(name: string): Uint8Array | undefined {
+    const path = join(PUBLIC_DIR, `${name.toLowerCase()}.fth`);
+    return existsSync(path) ? new Uint8Array(readFileSync(path)) : undefined;
+  },
+};
+
+function withModules(options?: MachineOptions): MachineOptions {
+  return { moduleHal: NODE_MODULE_HAL, ...options };
+}
 
 let cachedSource: string | undefined;
 
@@ -77,10 +92,7 @@ function changesLayout(options?: MachineOptions): boolean {
 }
 
 function loadFloatWordset(machine: Machine): void {
-  for (const line of readFileSync(FLOAT_FTH_PATH, 'utf8').split('\n')) {
-    machine.interpret(line);
-  }
-  machine.interpret('SEAL-BOOT');
+  machine.interpret('MODULE FLOAT');
 }
 
 function loadFor(key: BootImageKey): (m: Machine) => void {
@@ -101,7 +113,7 @@ export function bootImageSourceHash(key: BootImageKey): string {
 
 /** Compiles one boot image: a default-layout Machine's whole arena. */
 export function buildBootImage(key: BootImageKey): Uint8Array {
-  const machine = new Machine();
+  const machine = new Machine(withModules());
   loadFor(key)(machine);
   return new Uint8Array(machine.arena.buffer).slice();
 }
@@ -122,7 +134,7 @@ function prebuiltImage(key: BootImageKey): Uint8Array | undefined {
 }
 
 function bootFromImage(key: BootImageKey, options?: MachineOptions): Machine {
-  const machine = new Machine(options);
+  const machine = new Machine(withModules(options));
   if (changesLayout(options)) {
     loadFor(key)(machine);
     return machine;
@@ -138,9 +150,9 @@ function bootFromImage(key: BootImageKey, options?: MachineOptions): Machine {
   return machine;
 }
 
-/** M78: `bootMachine()` plus the float wordset's Forth layer, loaded
- * after system.fth exactly as the app does. Opt-in, so tests that don't
- * need floats don't pay for the bigger dictionary. */
+/** M78: `bootMachine()` plus the float wordset, loaded the way a user
+ * loads it: `MODULE FLOAT` (M79). Opt-in, so tests that don't need
+ * floats don't pay for the bigger dictionary. */
 export function bootMachineWithFloat(options?: MachineOptions): Machine {
   return bootFromImage('system+float', options);
 }

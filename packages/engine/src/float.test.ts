@@ -141,7 +141,7 @@ describe('float Forth layer (float.fth = rebel-specs/07-FLOATING-POINT.fth, M78)
     }
   });
 
-  it('F# reads a literal interpreted or compiled, F. prints, and EMPTY keeps the wordset', () => {
+  it('F# reads a literal interpreted or compiled, F. prints, and after EMPTY MODULE FLOAT loads it again', () => {
     const m = bootMachineWithFloat();
     m.interpret('F# 1.5 F# 2 F*');
     expect(hex(m.stack.pop())).toBe('40400000'); // 3.0
@@ -154,9 +154,12 @@ describe('float Forth layer (float.fth = rebel-specs/07-FLOATING-POINT.fth, M78)
     m.interpret('CLS F# -12.5 F.');
     expect(m.screen.readRowText(0).trimEnd()).toBe('-12.5');
 
+    // Loaded on demand (M79), so EMPTY removes the wordset with its
+    // FLOAT.FTH marker, and MODULE FLOAT really loads it again.
     m.interpret('EMPTY');
-    m.interpret('F# 2 FSQRT');
+    expect(() => m.interpret('HALF')).toThrow();
+    expect(() => m.interpret('F# 2')).toThrow();
+    m.interpret('MODULE FLOAT F# 2 FSQRT');
     expect(hex(m.stack.pop())).toBe('3FB504F3');
-    expect(() => m.interpret('HALF')).toThrow(); // user word gone, float words kept
   });
 });

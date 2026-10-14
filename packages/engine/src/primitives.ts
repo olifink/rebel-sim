@@ -20,6 +20,7 @@ import { DataStack } from './stack.js';
 import { Screen } from './screen.js';
 import { Keyboard, packKeyEvent } from './keyboard.js';
 import { cellToFloat, floatToCell, floatToInt } from './float32.js';
+import { ModuleHal } from './module.js';
 import { Channel } from './channel.js';
 import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
@@ -100,6 +101,9 @@ export interface PrimitiveContext extends DictionaryContext {
    * needs to put it back, so `EVALUATE` (system.fth) can restore its
    * caller's line. */
   getInput(): { addr: number; len: number };
+  /** spec/01-HAL.md §6.7, M79: where `(MODULE-READ)` gets module
+   * source text from. */
+  readonly moduleHal: ModuleHal;
   /** M54: the size a named bank actually had the moment this `Machine`
    * finished booting — *not* `banks.findBank(name)?.size`, which reads
    * MMAP fresh and so would already reflect a `BANK-RESIZE` (146) that
@@ -279,6 +283,27 @@ function bankLoad(ctx: PrimitiveContext, name: string): Bank {
  * return. Always defined for a bank that was just created or found. */
 function slotOf(ctx: PrimitiveContext, bank: Bank): number {
   return ctx.banks.slotAddress(bank.name)!;
+}
+
+/** `(MODULE-READ)`'s second half (spec/04-FORTH-CORE.md §6.16, M79),
+ * run once inner.ts has the module's bytes or knows it is missing: the
+ * source is copied into a fresh anonymous `DATA` bank, already marked
+ * `REMOVED` so it is never saved with the project (02-MEMORY-MODEL.md
+ * §4.9), and its address and length are pushed — or `0 0` if there is
+ * no such module. Text is read in place by EVALUATE-LINES, so it needs
+ * an arena home; the bank's slot is reclaimed at the next project load. */
+export function installModuleSource(ctx: PrimitiveContext, bytes: Uint8Array | undefined): void {
+  if (bytes === undefined) {
+    ctx.stack.push(0);
+    ctx.stack.push(0);
+    return;
+  }
+  const bank = ctx.banks.createBank('DATA', Math.max(bytes.length, 1));
+  const flags = ctx.banks.slotAddress(bank.name)! + 20;
+  ctx.arena.writeCell(flags, ctx.arena.readCell(flags) | BankFlagRemoved);
+  ctx.arena.writeBytes(bank.base, bytes);
+  ctx.stack.push(bank.base);
+  ctx.stack.push(bytes.length);
 }
 
 export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {

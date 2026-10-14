@@ -1274,6 +1274,57 @@ VARIABLE BOOT-HERE
   (SET-INPUT) INTERPRET
   R> R> (SET-INPUT) ;
 
+\ EVALUATE-LINES, M79, spec 04-FORTH-CORE.md section 6.16: interprets
+\ a block of source text one line at a time, the way this file itself
+\ is loaded -- lines end at LF, and a CR before it is dropped. STATE
+\ carries over between lines, so a definition may span several. The
+\ cursor variables are saved on the return stack, so a module that
+\ loads another module, nested EVALUATE-LINES, is fine.
+VARIABLE EL-ADDR
+VARIABLE EL-END
+: EVALUATE-LINES ( addr len -- )
+  EL-ADDR @ >R  EL-END @ >R
+  OVER + EL-END !  EL-ADDR !
+  BEGIN EL-ADDR @ EL-END @ < WHILE
+    EL-ADDR @ DUP
+    BEGIN DUP EL-END @ < IF DUP C@ 10 <> ELSE 0 THEN WHILE 1+ REPEAT
+    DUP 1+ EL-ADDR !
+    OVER -
+    DUP IF 2DUP + 1- C@ 13 = IF 1- THEN THEN
+    EVALUATE
+  REPEAT
+  R> EL-END !  R> EL-ADDR ! ;
+
+\ MODULE, M79, spec 04-FORTH-CORE.md section 6.16 -- MODULE FLOAT loads
+\ the target's source module FLOAT, float.fth beside system.fth here,
+\ unless it is already loaded: a REQUIRE. Loading ends by defining the
+\ marker word FLOAT.FTH, and a module is loaded when its marker can be
+\ found, so EMPTY or FORGET, which remove the marker along with the
+\ module's words, make it loadable again. A load that aborts defines no
+\ marker. The module's words compile into CURRENT, read with CONTEXT
+\ aligned to it, as LOAD does. The name is 1 to 8 characters; the name
+\ itself stays readable in the line that called MODULE throughout, so
+\ it is kept as addr len on the return stack rather than copied.
+CREATE MOD-LINE 24 ALLOT
+: MOD-MARKER ( addr len -- line len' ) \ "CREATE NAME.FTH" in MOD-LINE
+  S" CREATE" MOD-LINE SWAP CMOVE  BL MOD-LINE 6 + C!  \ a compiled S" drops a trailing space
+  DUP >R  0 DO DUP I + C@ UPCHAR MOD-LINE 7 + I + C! LOOP DROP
+  S" .FTH" MOD-LINE 7 + R@ + SWAP CMOVE
+  MOD-LINE R> 11 + ;
+: MODULE ( "name" -- )
+  BL WORD
+  DUP 1 9 WITHIN 0= IF TYPE SPACE ." - module name must be 1-8 characters" ABORT THEN
+  2DUP MOD-MARKER SWAP 7 + SWAP 7 - FIND NIP IF 2DROP EXIT THEN
+  2DUP >R >R
+  (MODULE-READ)
+  DUP 0= IF 2DROP R> R> TYPE SPACE ." - no such module" ABORT THEN
+  CONTEXT @ >R  CURRENT-VOCAB @ CONTEXT !
+  EVALUATE-LINES
+  R> CONTEXT !
+  R> R> MOD-MARKER EVALUATE ;
+HIDE EL-ADDR
+HIDE EL-END
+
 ( M75: LOAD evaluates each line through EVALUATE now, so it hands )
 ( the caller's input line back too -- before, anything typed after )
 ( n LOAD on the same line was silently dropped. LOAD-BLK and )
@@ -1365,7 +1416,7 @@ VARIABLE ENV-FREE
     THEN
   LOOP
   ENV-FOUND @ ?DUP IF NIP NIP EXIT THEN
-  ENV-FREE @ ?DUP 0= IF TYPE ."  - no free ESCR slot" ABORT THEN
+  ENV-FREE @ ?DUP 0= IF TYPE SPACE ." - no free ESCR slot" ABORT THEN
   DUP >R ESCR-SET-NAME R> ;
 
 \ The switch, 6: save the outgoing screen into the active environment's
@@ -1391,7 +1442,7 @@ VARIABLE ENV-FREE
 : ENVIRONMENT ( xt "name" -- )
   (GET-INPUT) >R >R
   BL WORD
-  DUP 1 9 WITHIN 0= IF TYPE ."  - environment name must be 1-8 characters" ABORT THEN
+  DUP 1 9 WITHIN 0= IF TYPE SPACE ." - environment name must be 1-8 characters" ABORT THEN
   ESCR-CLAIM
   R> R> (SET-INPUT)
   CREATE HERE >R SWAP DUP >R , ,

@@ -52,6 +52,7 @@ import { Keyboard } from './keyboard.js';
 import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
 import { NULL_STORAGE_HAL, peekProjectAssets, Storage, StorageHal } from './storage.js';
 import { NULL_TIMING_HAL, TimingHal } from './timing.js';
+import { ModuleHal, NULL_MODULE_HAL } from './module.js';
 import { Inner, StepSignal } from './inner.js';
 import {
   abortDefinition,
@@ -233,6 +234,9 @@ export interface MachineOptions {
    * `Screen`/`Keyboard` are always constructed regardless in this
    * version — a deliberate, named scope limit, not an oversight. */
   personality?: Personality;
+  /** spec/01-HAL.md §6.7, M79: where `MODULE name` fetches source
+   * modules from. Defaults to a target with none. */
+  moduleHal?: ModuleHal;
 }
 
 /** `step()`'s return: `'idle'` — no session in flight, nothing to do.
@@ -272,6 +276,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly storage: Storage;
   readonly channel: Channel;
   readonly timingHal: TimingHal;
+  readonly moduleHal: ModuleHal;
   private readonly inner: Inner;
   // M31 (spec/02-MEMORY-MODEL.md §4.6): TIB and PAD share one WORK
   // bank, at fixed sub-offsets, rather than each independently
@@ -429,6 +434,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
 
     this.storage = new Storage(this.arena, this.banks, options.storageHal);
     this.timingHal = options.timingHal ?? NULL_TIMING_HAL;
+    this.moduleHal = options.moduleHal ?? NULL_MODULE_HAL;
 
     this.stack = new DataStack(this.arena, dstkBank, this.sysvars, 'SP0', 'SP');
     this.rstack = new DataStack(this.arena, rstkBank, this.sysvars, 'RP0', 'RP');

@@ -70,7 +70,8 @@
 import { Arena, alignCell, CELL_SIZE as CELL } from './arena.js';
 import { DataStack } from './stack.js';
 import { NAME_LEN_MASK } from './dictionary.js';
-import { executePrimitive, PrimitiveContext, projectNeedsRestart, restoreProject } from './primitives.js';
+import { executePrimitive, installModuleSource, PrimitiveContext, projectNeedsRestart, restoreProject } from './primitives.js';
+import { MODULE_PENDING } from './module.js';
 import opcodes from './rebel-opcodes.json' with { type: 'json' };
 
 const DOCOL = opcodes.docolTokenId;
@@ -81,6 +82,7 @@ const EXIT_TOKEN = opcodes.primitives.find((p) => p.name === 'EXIT')!.id;
 const LIT_TOKEN = opcodes.primitives.find((p) => p.name === 'LIT')!.id;
 const KEY_TOKEN = opcodes.primitives.find((p) => p.name === 'KEY')!.id;
 const EKEY_TOKEN = opcodes.primitives.find((p) => p.name === 'EKEY')!.id;
+const MODULE_READ_TOKEN = opcodes.primitives.find((p) => p.name === '(MODULE-READ)')!.id;
 const ACCEPT_TOKEN = opcodes.primitives.find((p) => p.name === 'ACCEPT')!.id;
 const BRANCH_TOKEN = opcodes.primitives.find((p) => p.name === 'BRANCH')!.id;
 const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
@@ -329,6 +331,25 @@ export class Inner {
       while (!this.ctx.channel.hasData()) {
         yield 'blocked';
       }
+    }
+    if (token === MODULE_READ_TOKEN) {
+      // (MODULE-READ) ( addr len -- src len | 0 0 ), spec/04-FORTH-CORE.md
+      // §6.16, M79: polls the non-blocking module HAL and suspends while
+      // the host is still fetching, the same 'blocked' KEY yields. The
+      // host wakes the pump when the fetch completes.
+      const len = this.ctx.stack.pop();
+      const addr = this.ctx.stack.pop();
+      let name = '';
+      for (let i = 0; i < len; i++) name += String.fromCharCode(this.ctx.arena.readByte(addr + i));
+      name = name.toUpperCase();
+      let result = this.ctx.moduleHal.read(name);
+      while (result === MODULE_PENDING) {
+        yield 'blocked';
+        result = this.ctx.moduleHal.read(name);
+      }
+      installModuleSource(this.ctx, result);
+      yield 'progress';
+      return;
     }
     if (token === EKEY_TOKEN) {
       // spec/04-FORTH-CORE.md §6.9, M76: EKEY suspends exactly as KEY

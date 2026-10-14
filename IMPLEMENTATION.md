@@ -4914,6 +4914,87 @@ New `float.test.ts`:
   (they boot twice), 15 s for `waitFor`, and 45 s for COLD's reboot
   wait. All 21 app tests pass.
 
+### 1.91 Source modules: `MODULE name` (M79)
+
+Oliver's design: the optional wordsets and environments (floating point,
+MEMO, BASIC) are **source modules** loaded on demand with `MODULE name`,
+which works like `REQUIRE`. It loads `name.fth` from beside
+`system.fth`, at most once. This was added to the specs in the same
+change: `01-HAL.md` §6.7 (`hal_module_read`, optional and
+non-blocking) and `04-FORTH-CORE.md` §6.16 (the words). `06`/`07`/`08`/
+`09` now name `MODULE` as the delivery mechanism, and BASIC's source is
+specified to begin with `MODULE FLOAT`.
+
+*HAL:* `module.ts`'s `ModuleHal.read(name)` returns the bytes,
+`undefined` (missing), or `MODULE_PENDING` (still fetching). It is
+non-blocking like every HAL read, and `MachineOptions.moduleHal`
+defaults to `NULL_MODULE_HAL`.
+
+*KERNEL `(MODULE-READ)` (164):* `( addr len -- src len | 0 0 )`.
+`inner.ts`'s `dispatch()` special-cases it as it does `KEY`: it polls
+the HAL and yields `'blocked'` while pending. `installModuleSource`
+then copies the text into an anonymous `DATA` bank, already marked
+`REMOVED` (M74), so it is never saved with a project and its slot is
+reclaimed at the next table load. Each load uses one `MMAP` slot for
+the rest of the session.
+
+*BOOTSTRAP, `system.fth`, right after `EVALUATE`:*
+- `EVALUATE-LINES ( addr len -- )` evaluates LF-separated lines and
+  drops a CR before each LF. Its cursor variables are saved on the
+  return stack, so modules can load modules.
+- `MODULE` validates the name (1–8 characters) and checks for the marker
+  word `NAME.FTH` with `FIND`. If the module isn't loaded it calls
+  `(MODULE-READ)`, then `EVALUATE-LINES` with `CONTEXT` aligned to
+  `CURRENT` (as `LOAD` does), and only then defines the marker by
+  `EVALUATE`ing `CREATE NAME.FTH` (built by `MOD-MARKER`).
+- A dictionary marker makes `EMPTY`/`FORGET`/`COLD` unload a module
+  consistently. A load that aborts leaves no marker, so it is retried.
+  The name stays readable in the caller's line throughout, so it is kept
+  as `addr len` on the return stack rather than copied.
+
+*Dialect traps found on the way,* both in `S"`/`."` *compiled inside a
+definition*: they drop a trailing space (`S" CREATE "` lost its space,
+leaving a NUL that glued `CREATE<NUL>X.FTH` into one token) and a
+leading space (`."  - msg"` printed `NAME- msg`). `MOD-MARKER` now writes
+the space with `BL … C!`, and every `TYPE ."  - …" ABORT` message
+(including M77's `ENVIRONMENT`/`ESCR` ones) became `TYPE SPACE ." - …"`.
+
+*App:*
+- `fetch-module-hal.ts` (`FetchModuleHal`): the first read starts
+  `fetch('<name>.fth')` and answers pending, and the settled fetch wakes
+  the pump. An HTML response counts as missing, because the dev server
+  answers unknown paths with `index.html` and status 200. Names other
+  than `[A-Z0-9]+` are missing, so a module name can't be used as a
+  path. A result is handed out once, so a reload after `EMPTY`
+  refetches.
+- **Floats are no longer loaded at boot** (M78 did that), which takes
+  boot back to roughly `system.fth` alone. You load them with
+  `MODULE FLOAT`.
+- `SEAL-BOOT` stays (`system.fth` ends with it), with no host caller
+  now.
+- `ngsw-config.json` now precaches `/*.fth` and `/*.FNT`. Until now
+  `system.fth` and `rebel.FNT` were *not* precached, despite `app.ts`'s
+  comment saying so, so the installed PWA couldn't boot offline.
+- The simulated `TERMINAL` board (`RemoteBoard`) builds its own
+  `Machine` and has no modules.
+
+*Also in M79: the boot `BLKS` bank is named `BLKS` again* (M50 had
+named it `EDITOR`), as `09-MEMO.md` §7.1's `EDIT` requires. A project
+saved before this restores its own `EDITOR` bank from its `MMAP`.
+
+*Tests:*
+- `test-support.ts` boots every test machine with `NODE_MODULE_HAL`
+  (reads `packages/app/public/<name>.fth`). `bootMachineWithFloat()` now
+  loads floats with `MODULE FLOAT`, the real path.
+- New `module.test.ts`: once-only loading via the marker; CRLF; a
+  multi-line definition; the module bank marked `REMOVED`; reload after
+  `EMPTY`; a module loading another; suspension while pending (3
+  `'blocked'` steps); missing and over-long names.
+- `float.test.ts` now expects `EMPTY` to unload floats and `MODULE
+  FLOAT` to bring them back.
+- `app.spec.ts`'s stub serves any `public/<name>.fth` and returns 404
+  for others.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5099,5 +5180,6 @@ exactly as it would be on the bare-metal target.
 | **M76** | `EKEY`/`EKEY?` (§1.88, `rebel-specs` v1.1 `04-FORTH-CORE.md` §6.9): primitives 154/155 returning the next raw key press as one cell (usage, modifiers << 8, char << 16), skipping releases and modifier-only events. `EKEY` blocks on the keyboard queue the way `KEY` blocks on the channel, and the two share the one queue. | `keyboard.ts`, `primitives.ts`, `inner.ts`, `rebel-opcodes.json`, `keyboard.test.ts` |
 | **M77** | Environments (§1.89, `rebel-specs` v1.1 `06-ENVIRONMENTS.md`, `03-SYSVARS.md` §12): new `ENV` sysvar group at `0x1C0`; `replLoop` runs `ENV-ENTRY`'s step word instead of reading a line when it's non-zero; the recovery path turns `ENV-REASON` from `STEP` into `RECOVER`; a new `ESCR` bank (128 KiB, created last at boot). After a switch's `WARM` the REPL prints no `ok` inside an environment and completes the line back home. `ENVIRONMENT`/`HOME`/`ESCR` save and restore/switch are all Forth in `system.fth`. `BAS`/`MEMO`/`BASW` extensions registered ahead of BASIC and MEMO. | `repl.ts`, `rebel-opcodes.json`, `storage.ts`, `system.fth`, `environments.test.ts` |
 | **M78** | Floating point (§1.90, `rebel-specs` v1.1 `07-FLOATING-POINT.md`): a binary32 float in one cell. Eight native KERNEL words (156-163) via `float32.ts`, with a canonical NaN and a saturating `F>S`. The spec's normative `07-FLOATING-POINT.fth` is loaded unchanged as `public/float.fth` (vendored, with a drift test) right after `system.fth`, and reproduces every spec test vector. New `SEAL-BOOT` lets `EMPTY` keep the float words. Also fixes `loadDefaultFont()` writing past the `FONT` bank, and gets all 21 app tests passing (8 were already timing out at `v1.0`). | `float32.ts`, `primitives.ts`, `rebel-opcodes.json`, `system.fth`, `float.fth`, `app.ts`, `app.spec.ts`, `test-support.ts`, `float.test.ts` | 
+| **M79** | Source modules (§1.91): `MODULE name` loads `name.fth` from beside `system.fth` at most once, recorded by a `NAME.FTH` marker word so `EMPTY`/`FORGET` unload it. New optional HAL read `hal_module_read` (`01-HAL.md` §6.7, `module.ts`), KERNEL `(MODULE-READ)` (164, suspends like `KEY`, text in a `REMOVED` bank), and BOOTSTRAP `EVALUATE-LINES`/`MODULE` (`04-FORTH-CORE.md` §6.16, added to the specs). Floats load on demand (`MODULE FLOAT`), not at boot; the app fetches modules through `FetchModuleHal`. Also: the boot block bank is named `BLKS` again, and the PWA now precaches `.fth`/`.FNT` (it hadn't been). | `module.ts`, `inner.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `block-io.test.ts`, `fetch-module-hal.ts`, `app.ts`, `app.spec.ts`, `ngsw-config.json`, `rebel-specs` 01/04/06/07/08/09 |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

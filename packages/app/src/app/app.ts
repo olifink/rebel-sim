@@ -16,6 +16,7 @@ import { CanvasScreenHal } from './canvas-screen-hal.js';
 import { codeToUsage } from './browser-keymap.js';
 import { createLocalStorageHalIfSupported } from './local-storage-storage-hal.js';
 import { PERFORMANCE_TIMING_HAL } from './performance-timing-hal.js';
+import { FetchModuleHal } from './fetch-module-hal.js';
 import { computePresentationSize } from './canvas-presenter.js';
 import { buildZip } from './zip-writer.js';
 
@@ -118,6 +119,10 @@ export class App implements AfterViewInit, OnDestroy {
   // during Machine's own constructor and paints through the HAL
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
+
+  // M79: `MODULE name` source modules, fetched on demand. A finished
+  // fetch wakes the pump so the suspended MODULE line carries on.
+  private readonly moduleHal = new FetchModuleHal(() => this.wake());
 
   // Set alongside this.machine in constructMachine() — was a local
   // variable there until TERMINAL (rebel-opcodes.json 147) needed to
@@ -292,6 +297,7 @@ export class App implements AfterViewInit, OnDestroy {
       storageHal,
       timingHal: PERFORMANCE_TIMING_HAL,
       remoteChannel: this.remoteChannel,
+      moduleHal: this.moduleHal,
       bootProject,
     });
     // M59: CanvasScreenHal reads glyph data from the arena's FONT bank
@@ -438,21 +444,15 @@ export class App implements AfterViewInit, OnDestroy {
   // in *our* source, not a missing browser feature, and should fail
   // loudly rather than silently boot without WORDS/SEE.
   //
-  // M78: the float wordset's Forth layer (float.fth, a vendored copy of
-  // rebel-specs/07-FLOATING-POINT.fth) loads right after system.fth, on
-  // every boot, so the wordset is always present in full
-  // (07-FLOATING-POINT.md §7). SEAL-BOOT then moves EMPTY's reset point
-  // past it, so EMPTY keeps the float words too.
+  // Everything else — the float wordset (float.fth), MEMO, BASIC — is a
+  // source module loaded on demand with `MODULE name` (M79), through
+  // `moduleHal` below, not at boot.
   private async loadSystemVocabulary(machine: Machine = this.machine): Promise<void> {
-    const [system, float] = await Promise.all([this.fetchText('system.fth'), this.fetchText('float.fth')]);
+    const system = await this.fetchText('system.fth');
     this.zone.runOutsideAngular(() => {
       for (const line of system.split('\n')) {
         machine.interpret(line);
       }
-      for (const line of float.split('\n')) {
-        machine.interpret(line);
-      }
-      machine.interpret('SEAL-BOOT');
     });
   }
 
