@@ -1,7 +1,7 @@
 /**
  * Source modules (spec/01-HAL.md §6.7, M79): Forth source files a target
  * ships alongside its bootstrap source — `float.fth`, `memo.fth`,
- * `basic.fth` — loaded on demand with `MODULE name` (system.fth).
+ * `basic.fth` — loaded on demand with `NEEDS name` (system.fth).
  *
  * The HAL read is non-blocking, like every HAL read (§2.2): it answers
  * at once with the bytes, with "missing", or with "pending" while the

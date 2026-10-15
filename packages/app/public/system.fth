@@ -1295,15 +1295,16 @@ VARIABLE EL-END
   REPEAT
   R> EL-END !  R> EL-ADDR ! ;
 
-\ MODULE, M79, spec 04-FORTH-CORE.md section 6.16 -- MODULE FLOAT loads
+\ NEEDS, M79, spec 04-FORTH-CORE.md section 6.16 -- NEEDS FLOAT loads
 \ the target's source module FLOAT, float.fth beside system.fth here,
-\ unless it is already loaded: a REQUIRE. Loading ends by defining the
-\ marker word FLOAT.FTH, and a module is loaded when its marker can be
+\ unless it is already loaded -- vForth's NEEDS, REQUIRE in other Forths.
+\ Loading ends by defining the marker word FLOAT.FTH, and a module is
+\ loaded when its marker can be
 \ found, so EMPTY or FORGET, which remove the marker along with the
 \ module's words, make it loadable again. A load that aborts defines no
 \ marker. The module's words compile into CURRENT, read with CONTEXT
 \ aligned to it, as LOAD does. The name is 1 to 8 characters; the name
-\ itself stays readable in the line that called MODULE throughout, so
+\ itself stays readable in the line that called NEEDS throughout, so
 \ it is kept as addr len on the return stack rather than copied.
 CREATE MOD-LINE 24 ALLOT
 : MOD-MARKER ( addr len -- line len' ) \ "CREATE NAME.FTH" in MOD-LINE
@@ -1311,7 +1312,7 @@ CREATE MOD-LINE 24 ALLOT
   DUP >R  0 DO DUP I + C@ UPCHAR MOD-LINE 7 + I + C! LOOP DROP
   S" .FTH" MOD-LINE 7 + R@ + SWAP CMOVE
   MOD-LINE R> 11 + ;
-: MODULE ( "name" -- )
+: NEEDS ( "name" -- )
   BL WORD
   DUP 1 9 WITHIN 0= IF TYPE SPACE ." - module name must be 1-8 characters" ABORT THEN
   2DUP MOD-MARKER SWAP 7 + SWAP 7 - FIND NIP IF 2DROP EXIT THEN

@@ -96,7 +96,7 @@ function loadFor(key: BootImageKey): (m: Machine) => void {
   const module = key === 'system+float' ? 'FLOAT' : 'MEMO';
   return (m) => {
     loadSystemVocabulary(m);
-    m.interpret(`MODULE ${module}`);
+    m.interpret(`NEEDS ${module}`);
   };
 }
 
@@ -148,13 +148,13 @@ function bootFromImage(key: BootImageKey, options?: MachineOptions): Machine {
 }
 
 /** M78: `bootMachine()` plus the float wordset, loaded the way a user
- * loads it: `MODULE FLOAT` (M79). Opt-in, so tests that don't need
+ * loads it: `NEEDS FLOAT` (M79). Opt-in, so tests that don't need
  * floats don't pay for the bigger dictionary. */
 export function bootMachineWithFloat(options?: MachineOptions): Machine {
   return bootFromImage('system+float', options);
 }
 
-/** M80: `bootMachine()` plus `MODULE MEMO`, served from a boot image. */
+/** M80: `bootMachine()` plus `NEEDS MEMO`, served from a boot image. */
 export function bootMachineWithMemo(options?: MachineOptions): Machine {
   return bootFromImage('system+memo', options);
 }

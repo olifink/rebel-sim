@@ -234,7 +234,7 @@ export interface MachineOptions {
    * `Screen`/`Keyboard` are always constructed regardless in this
    * version — a deliberate, named scope limit, not an oversight. */
   personality?: Personality;
-  /** spec/01-HAL.md §6.7, M79: where `MODULE name` fetches source
+  /** spec/01-HAL.md §6.7, M79: where `NEEDS name` fetches source
    * modules from. Defaults to a target with none. */
   moduleHal?: ModuleHal;
 }

@@ -2,7 +2,7 @@ import { MODULE_PENDING } from '@rebel-sim/engine';
 import type { ModuleHal } from '@rebel-sim/engine';
 
 /**
- * spec/01-HAL.md §6.7, M79: source modules for `MODULE name` — `name.fth`
+ * spec/01-HAL.md §6.7, M79: source modules for `NEEDS name` — `name.fth`
  * fetched from beside system.fth (public/), so precached for offline use
  * by the service worker's `/*.fth` rule like system.fth itself.
  *
@@ -11,7 +11,7 @@ import type { ModuleHal } from '@rebel-sim/engine';
  * line (as KEY does) and `onSettled` wakes the pump when the fetch
  * finishes, so the next read gets the bytes, or `undefined` for a module
  * that doesn't exist. A result is handed out once and forgotten, so a
- * later MODULE of the same name (after EMPTY) fetches afresh.
+ * later NEEDS of the same name (after EMPTY) fetches afresh.
  */
 export class FetchModuleHal implements ModuleHal {
   private readonly results = new Map<string, Uint8Array | null | typeof MODULE_PENDING>();

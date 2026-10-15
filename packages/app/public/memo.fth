@@ -1,5 +1,5 @@
 \ memo.fth -- MEMO, the full-screen page editor, rebel-specs 09-MEMO.md.
-\ A source module: load it with MODULE MEMO, enter it with MEMO.
+\ A source module: load it with NEEDS MEMO, enter it with MEMO.
 \
 \ A document is a page bank, section 3, or a BLKS block bank edited as
 \ 64 x 16 pages, 3.4. While a page is shown the screen IS the working

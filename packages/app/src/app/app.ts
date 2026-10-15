@@ -120,8 +120,8 @@ export class App implements AfterViewInit, OnDestroy {
   // immediately, so the canvas must already exist before `new Machine()`.
   private machine!: Machine;
 
-  // M79: `MODULE name` source modules, fetched on demand. A finished
-  // fetch wakes the pump so the suspended MODULE line carries on.
+  // M79: `NEEDS name` source modules, fetched on demand. A finished
+  // fetch wakes the pump so the suspended NEEDS line carries on.
   private readonly moduleHal = new FetchModuleHal(() => this.wake());
 
   // Set alongside this.machine in constructMachine() — was a local
@@ -445,7 +445,7 @@ export class App implements AfterViewInit, OnDestroy {
   // loudly rather than silently boot without WORDS/SEE.
   //
   // Everything else — the float wordset (float.fth), MEMO, BASIC — is a
-  // source module loaded on demand with `MODULE name` (M79), through
+  // source module loaded on demand with `NEEDS name` (M79), through
   // `moduleHal` below, not at boot.
   private async loadSystemVocabulary(machine: Machine = this.machine): Promise<void> {
     const system = await this.fetchText('system.fth');

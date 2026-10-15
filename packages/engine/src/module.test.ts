@@ -22,18 +22,18 @@ class FakeModules implements ModuleHal {
 const screenText = (m: ReturnType<typeof bootMachine>): string =>
   Array.from({ length: m.screen.rows }, (_, r) => m.screen.readRowText(r).trimEnd()).join('\n');
 
-describe('MODULE (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.16)', () => {
+describe('NEEDS (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.16)', () => {
   it('loads a module line by line, once, and records it with a NAME.FTH marker', () => {
     const modules = new FakeModules({
       GREET: ': GREET-A 1 ;\r\n: GREET-B\n  GREET-A 41 + ;\n\\ a comment line\n',
     });
     const m = bootMachine({ moduleHal: modules });
-    m.interpret('MODULE greet GREET-B');
+    m.interpret('NEEDS greet GREET-B');
     expect(m.stack.toArray()).toEqual([42]); // and the rest of the line ran
     m.stack.clear();
     expect(modules.reads).toEqual(['GREET']);
 
-    m.interpret('MODULE GREET'); // already loaded: a no-op
+    m.interpret('NEEDS GREET'); // already loaded: a no-op
     expect(modules.reads).toEqual(['GREET']);
     m.interpret("' GREET.FTH DROP"); // the marker word exists
 
@@ -42,7 +42,7 @@ describe('MODULE (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.
     expect(source).toBeDefined();
 
     // EMPTY removes the marker with the words, so it loads again.
-    m.interpret('EMPTY MODULE GREET GREET-B');
+    m.interpret('EMPTY NEEDS GREET GREET-B');
     expect(m.stack.toArray()).toEqual([42]);
     expect(modules.reads).toEqual(['GREET', 'GREET']);
   });
@@ -50,10 +50,10 @@ describe('MODULE (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.
   it('a module can load another module it needs', () => {
     const modules = new FakeModules({
       BASE1: ': ONE 1 ;',
-      TOP: 'MODULE BASE1\n: TWO ONE ONE + ;',
+      TOP: 'NEEDS BASE1\n: TWO ONE ONE + ;',
     });
     const m = bootMachine({ moduleHal: modules });
-    m.interpret('MODULE TOP TWO');
+    m.interpret('NEEDS TOP TWO');
     expect(m.stack.toArray()).toEqual([2]);
     m.interpret("' TOP.FTH DROP ' BASE1.FTH DROP");
   });
@@ -62,7 +62,7 @@ describe('MODULE (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.
     const modules = new FakeModules({ SLOW: ': SLOW-WORD 7 ;' });
     modules.pendingFor = 3;
     const m = bootMachine({ moduleHal: modules });
-    m.beginLine('MODULE SLOW SLOW-WORD');
+    m.beginLine('NEEDS SLOW SLOW-WORD');
     let status = '';
     let blocked = 0;
     for (let i = 0; i < 50 && status !== 'idle'; i++) {
@@ -77,9 +77,9 @@ describe('MODULE (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.
   it('a missing module or a bad name aborts, defining nothing', () => {
     const m = bootMachine({ moduleHal: new FakeModules({}) });
     m.interpret('CLS');
-    expect(() => m.interpret('MODULE NOPE')).toThrow();
+    expect(() => m.interpret('NEEDS NOPE')).toThrow();
     expect(screenText(m)).toContain('NOPE - no such module');
     expect(() => m.interpret("' NOPE.FTH")).toThrow();
-    expect(() => m.interpret('MODULE TOOLONGNAME')).toThrow();
+    expect(() => m.interpret('NEEDS TOOLONGNAME')).toThrow();
   });
 });
