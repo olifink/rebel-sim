@@ -26,6 +26,9 @@ export default defineConfig({
     // parallel contention, not from any bug in either vocabulary. 40s
     // is the same fix M48 already applied once for the same underlying
     // reason, just doubled again rather than re-litigated.
-    testTimeout: 40_000,
+    // M82: boots now come from prebuilt images, but a test that runs a
+    // real NEEDS compile mid-test (float.test.ts reloading FLOAT after
+    // EMPTY, ~7.5s alone) passed 40s under full-suite contention. 90s.
+    testTimeout: 90_000,
   },
 });

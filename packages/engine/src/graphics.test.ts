@@ -2,7 +2,7 @@
  * The GRAPHICS vocabulary (`system.fth`, M68) — LINE/RECT/CIRCLE and
  * their width/fill variants, all pure Forth built on the two new PLOT
  * (148)/POINT (149) primitives tested directly in `screen.test.ts`.
- * These tests exercise the Forth source itself (via `bootMachine()`,
+ * These tests exercise the Forth source itself (via `bootMachineWith(['GRAPHICS'])`,
  * which loads `system.fth`), not the engine primitives underneath it —
  * the point is to catch a broken algorithm or a Forth-source typo, not
  * to re-test PLOT/POINT's own bounds-checking.
@@ -10,7 +10,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ScreenHal } from './screen.js';
-import { bootMachine } from './test-support.js';
+import { bootMachineWith } from './test-support.js';
 
 function recordingHal(): { drawn: Array<[number, number, number]>; hal: ScreenHal } {
   const drawn: Array<[number, number, number]> = [];
@@ -28,7 +28,7 @@ function recordingHal(): { drawn: Array<[number, number, number]>; hal: ScreenHa
 describe('GRAPHICS vocabulary (M68)', () => {
   it('LINE draws a Bresenham diagonal from end to end inclusive', () => {
     const { drawn, hal } = recordingHal();
-    const m = bootMachine({ screenHal: hal });
+    const m = bootMachineWith(['GRAPHICS'], { screenHal: hal });
     m.interpret('GRAPHICS');
     m.interpret('0 0 5 5 LINE');
     expect(drawn).toHaveLength(6); // (0,0)..(5,5) inclusive, one pixel per step
@@ -38,7 +38,7 @@ describe('GRAPHICS vocabulary (M68)', () => {
 
   it('LINE-WIDTH offsets a horizontal line across multiple rows', () => {
     const { drawn, hal } = recordingHal();
-    const m = bootMachine({ screenHal: hal });
+    const m = bootMachineWith(['GRAPHICS'], { screenHal: hal });
     m.interpret('GRAPHICS');
     m.interpret('3 LINE-WIDTH !');
     m.interpret('10 50 15 50 LINE'); // horizontal, well inside the screen
@@ -48,7 +48,7 @@ describe('GRAPHICS vocabulary (M68)', () => {
 
   it('RECT draws a four-sided outline, not a fill', () => {
     const { drawn, hal } = recordingHal();
-    const m = bootMachine({ screenHal: hal });
+    const m = bootMachineWith(['GRAPHICS'], { screenHal: hal });
     m.interpret('GRAPHICS');
     m.interpret('10 10 6 6 RECT');
     // Four LINE1 calls, 6 pixels each (each side is 6 pixels inclusive of
@@ -63,7 +63,7 @@ describe('GRAPHICS vocabulary (M68)', () => {
 
   it('RECT-FILL fills exactly w*h pixels', () => {
     const { drawn, hal } = recordingHal();
-    const m = bootMachine({ screenHal: hal });
+    const m = bootMachineWith(['GRAPHICS'], { screenHal: hal });
     m.interpret('GRAPHICS');
     m.interpret('0 0 10 10 RECT-FILL');
     expect(drawn).toHaveLength(100);
@@ -71,7 +71,7 @@ describe('GRAPHICS vocabulary (M68)', () => {
 
   it('CIRCLE plots only points at the given radius', () => {
     const { drawn, hal } = recordingHal();
-    const m = bootMachine({ screenHal: hal });
+    const m = bootMachineWith(['GRAPHICS'], { screenHal: hal });
     m.interpret('GRAPHICS');
     m.interpret('50 50 10 CIRCLE');
     expect(drawn.length).toBeGreaterThan(0);
@@ -84,12 +84,12 @@ describe('GRAPHICS vocabulary (M68)', () => {
 
   it('CIRCLE-FILL covers strictly more area than CIRCLE, including the center', () => {
     const outline = recordingHal();
-    const m1 = bootMachine({ screenHal: outline.hal });
+    const m1 = bootMachineWith(['GRAPHICS'], { screenHal: outline.hal });
     m1.interpret('GRAPHICS');
     m1.interpret('50 50 10 CIRCLE');
 
     const filled = recordingHal();
-    const m2 = bootMachine({ screenHal: filled.hal });
+    const m2 = bootMachineWith(['GRAPHICS'], { screenHal: filled.hal });
     m2.interpret('GRAPHICS');
     m2.interpret('50 50 10 CIRCLE-FILL');
 

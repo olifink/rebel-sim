@@ -5090,6 +5090,40 @@ It covers:
   block turn;
 - `HOME` from a command.
 
+### 1.93 The block editor and GRAPHICS become source modules (M82)
+
+Oliver's follow-up to `NEEDS` (M79, M81): the two big optional
+vocabularies left in `system.fth` move out into source modules, like
+`FLOAT` and `MEMO`.
+- `editor.fth`: the classic block screen editor, the whole `EDITOR`
+  vocabulary from M48 to M57 (`LIST`, `L`, `T`, `TS`, search/replace,
+  `COPY`, …). Load it with `NEEDS EDITOR`, then `USE EDITOR`.
+- `graphics.fth`: the M68 `GRAPHICS` vocabulary (`LINE`, `RECT`,
+  `CIRCLE`, …). Load it with `NEEDS GRAPHICS`, then `USE GRAPHICS`.
+  `PLOT`/`POINT` stay native and always present.
+
+Both blocks moved byte for byte, apart from a header comment. Neither
+used anything hidden earlier in `system.fth`. The block words
+(`BLOCK`/`BUFFER`/`UPDATE`/`FLUSH`), `LOAD`, `C/L` and `L/SCR` stay in
+`system.fth`, because `LOAD` and MEMO need them without the editor.
+`system.fth` drops from 2,191 to 1,475 lines, so the boot (and every
+test boot-image build) is shorter.
+
+*Tests:*
+- `test-support.ts` boot images now take any module list:
+  `bootMachineWith(['EDITOR'])`, keyed `system+EDITOR`. The global setup
+  prebuilds the bare boot plus `FLOAT`, `MEMO`, `EDITOR`, `GRAPHICS`, and
+  any other list compiles once per worker. `bootMachineWithFloat()`/
+  `WithMemo()` are now thin wrappers.
+- `screen-editor*.test.ts`, `see-hide.test.ts` and `graphics.test.ts`
+  boot with their module.
+- `empty.test.ts`'s two vocabulary-regression tests load `EDITOR` and
+  then run `SEAL-BOOT`, which makes the vocabulary part of the boot
+  dictionary again, the exact scenario the bug was found in.
+- The global `testTimeout` goes from 40 s to 90 s. A test that runs a
+  real `NEEDS FLOAT` mid-test (after `EMPTY`) took over 40 s under
+  full-suite contention.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5278,5 +5312,6 @@ exactly as it would be on the bare-metal target.
 | **M79** | Source modules (§1.91): `NEEDS name` loads `name.fth` from beside `system.fth` at most once, recorded by a `NAME.FTH` marker word so `EMPTY`/`FORGET` unload it. New optional HAL read `hal_module_read` (`01-HAL.md` §6.7, `module.ts`), KERNEL `(MODULE-READ)` (164, suspends like `KEY`, text in a `REMOVED` bank), and BOOTSTRAP `EVALUATE-LINES`/`NEEDS` (`04-FORTH-CORE.md` §6.16, added to the specs). Floats load on demand (`NEEDS FLOAT`), not at boot; the app fetches modules through `FetchModuleHal`. Also: the boot block bank is named `BLKS` again, and the PWA now precaches `.fth`/`.FNT` (it hadn't been). | `module.ts`, `inner.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `block-io.test.ts`, `fetch-module-hal.ts`, `app.ts`, `app.spec.ts`, `ngsw-config.json`, `rebel-specs` 01/04/06/07/08/09 |
 | **M80** | MEMO (§1.92, `09-MEMO.md`): the full-screen page editor as a source module (`NEEDS MEMO`, `memo.fth`, about 330 lines of portable Forth, no engine change). The screen is the working copy, committed before every page turn, command, or switch. All §4/§5 keys; Shift-Esc runs a line as Forth with captured output and a `\ ok`/`\ error` status; `EDIT` opens Forth screens through the block buffer pool. Lines run with the caller's search order rather than MEMO's vocabulary first (now in §6.3). The app key map gains Home, Delete and End. | `memo.fth`, `browser-keymap.ts`, `test-support.ts`, `memo.test.ts` |
 | **M81** | `MODULE` renamed `NEEDS` (Oliver's call, after vForth for the ZX Spectrum Next), in code and in `rebel-specs` (`04-FORTH-CORE.md` §6.16 and every module reference). The machinery underneath keeps its names: `(MODULE-READ)`, `hal_module_read`, `ModuleHal`, and "source module" for the concept. Marker words are still `NAME.FTH`. §1.91 is updated in place. | `system.fth`, `memo.fth`, `module.ts`, `repl.ts`, `rebel-opcodes.json`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `app.ts`, `fetch-module-hal.ts`, `rebel-specs` 01/04/06/07/08/09 |
+| **M82** | The block screen editor and `GRAPHICS` become source modules (§1.93): `NEEDS EDITOR` (`editor.fth`) and `NEEDS GRAPHICS` (`graphics.fth`), moved unchanged out of `system.fth` (2,191 to 1,475 lines). The block words and `LOAD` stay core. Test boot images now take any module list (`bootMachineWith`), and the global test timeout goes to 90 s. | `system.fth`, `editor.fth`, `graphics.fth`, `test-support.ts`, `screen-editor.test.ts`, `screen-editor-commands.test.ts`, `see-hide.test.ts`, `graphics.test.ts`, `empty.test.ts`, `vitest.config.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

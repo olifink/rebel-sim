@@ -76,8 +76,11 @@ export function loadSystemVocabulary(machine: Machine): void {
  * image whose recorded source hash no longer matches system.fth/
  * float.fth (watch mode, after an edit) is ignored and compiled fresh,
  * once per worker, as is everything when the setup didn't run. */
-export const BOOT_IMAGE_KEYS = ['system', 'system+float', 'system+memo'] as const;
-type BootImageKey = (typeof BOOT_IMAGE_KEYS)[number];
+/** The images the global setup prebuilds: the bare boot, and the boot
+ * plus each source module a test file loads. Any other module list is
+ * compiled on first use, once per worker. */
+export const BOOT_IMAGE_KEYS = ['system', 'system+FLOAT', 'system+MEMO', 'system+EDITOR', 'system+GRAPHICS'];
+type BootImageKey = string;
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -91,20 +94,21 @@ function changesLayout(options?: MachineOptions): boolean {
   return options?.arenaSize !== undefined || options?.personality !== undefined || options?.bootProject !== undefined;
 }
 
+function modulesOf(key: BootImageKey): string[] {
+  return key.split('+').slice(1);
+}
+
 function loadFor(key: BootImageKey): (m: Machine) => void {
-  if (key === 'system') return loadSystemVocabulary;
-  const module = key === 'system+float' ? 'FLOAT' : 'MEMO';
   return (m) => {
     loadSystemVocabulary(m);
-    m.interpret(`NEEDS ${module}`);
+    for (const module of modulesOf(key)) m.interpret(`NEEDS ${module}`);
   };
 }
 
 /** Identifies the sources an image was compiled from. */
 export function bootImageSourceHash(key: BootImageKey): string {
   const hash = createHash('sha1').update(readFileSync(SYSTEM_FTH_PATH));
-  if (key === 'system+float') hash.update(readFileSync(FLOAT_FTH_PATH));
-  if (key === 'system+memo') hash.update(readFileSync(join(PUBLIC_DIR, 'memo.fth')));
+  for (const module of modulesOf(key)) hash.update(readFileSync(join(PUBLIC_DIR, `${module.toLowerCase()}.fth`)));
   return hash.digest('hex');
 }
 
@@ -147,16 +151,21 @@ function bootFromImage(key: BootImageKey, options?: MachineOptions): Machine {
   return machine;
 }
 
-/** M78: `bootMachine()` plus the float wordset, loaded the way a user
- * loads it: `NEEDS FLOAT` (M79). Opt-in, so tests that don't need
- * floats don't pay for the bigger dictionary. */
-export function bootMachineWithFloat(options?: MachineOptions): Machine {
-  return bootFromImage('system+float', options);
+/** M82: `bootMachine()` plus `NEEDS` of each named source module, in
+ * order, served from a boot image like `bootMachine()` itself. */
+export function bootMachineWith(modules: string[], options?: MachineOptions): Machine {
+  return bootFromImage(['system', ...modules.map((m) => m.toUpperCase())].join('+'), options);
 }
 
-/** M80: `bootMachine()` plus `NEEDS MEMO`, served from a boot image. */
+/** M78: `bootMachine()` plus the float wordset, loaded the way a user
+ * loads it: `NEEDS FLOAT` (M79). */
+export function bootMachineWithFloat(options?: MachineOptions): Machine {
+  return bootMachineWith(['FLOAT'], options);
+}
+
+/** M80: `bootMachine()` plus `NEEDS MEMO`. */
 export function bootMachineWithMemo(options?: MachineOptions): Machine {
-  return bootFromImage('system+memo', options);
+  return bootMachineWith(['MEMO'], options);
 }
 
 /** `new Machine()` plus the bootstrap load — what any test exercising a

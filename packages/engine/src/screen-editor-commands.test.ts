@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RemoteChannel } from './channel.js';
-import { bootMachine, AMPLE_STEP_BUDGET } from './test-support.js';
+import { bootMachineWith, AMPLE_STEP_BUDGET } from './test-support.js';
 
 // M55 follow-up: the remaining core screen-editor commands, ported from
 // inspiration/figforth_editor_screens.txt screens 2-6 — R# and the
@@ -19,7 +19,7 @@ function screenText(rows: number, m: ReturnType<typeof bootMachine>): string {
 
 describe('LINE (system.fth, M55)', () => {
   it('computes the address of a line within the current screen', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('5 CLEAR');
     // BLOCK resolves through the buffer pool, not a fixed blks.base +
@@ -33,7 +33,7 @@ describe('LINE (system.fth, M55)', () => {
   });
 
   it('throws on a line number outside 0..15', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('0 CLEAR');
     expect(() => m.interpret('16 LINE')).toThrow();
@@ -43,7 +43,7 @@ describe('LINE (system.fth, M55)', () => {
 
 describe('R# and the cursor-relative words #LOCATE/#LEAD/#LAG/M (system.fth, M55)', () => {
   it('#LOCATE splits R# into column and line#', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('0 CLEAR');
     m.interpret('70 R# !'); // line 1 (64..127), column 6
@@ -53,7 +53,7 @@ describe('R# and the cursor-relative words #LOCATE/#LEAD/#LAG/M (system.fth, M55
   });
 
   it('T positions R# at the start of the given line, not just wherever it last was', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('3 CLEAR');
     m.interpret('999 R# !'); // deliberately wrong, to prove T overrides it
@@ -63,7 +63,7 @@ describe('R# and the cursor-relative words #LOCATE/#LEAD/#LAG/M (system.fth, M55
   });
 
   it('M moves the cursor and redraws the current line with an underscore marker', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('4 CLEAR');
     m.interpret('0 T CURSOR TEST LINE');
@@ -76,7 +76,7 @@ describe('R# and the cursor-relative words #LOCATE/#LEAD/#LAG/M (system.fth, M55
 
 describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
   it('E blanks one line without touching its neighbors', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('5 CLEAR');
     m.interpret('0 T FIRST');
@@ -90,7 +90,7 @@ describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
   });
 
   it('D deletes a line and shifts everything after it up, blanking the last line', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('6 CLEAR');
     m.interpret('0 T LINE-ZERO');
@@ -106,7 +106,7 @@ describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
   });
 
   it('D holds the deleted line in PAD, so a following I pastes it back', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('7 CLEAR');
     m.interpret('0 T KEEP-ME');
@@ -123,7 +123,7 @@ describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
   });
 
   it('S scrolls lines down from a given line, opening a blank gap there', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('8 CLEAR');
     m.interpret('0 T FIRST');
@@ -142,7 +142,7 @@ describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
   });
 
   it('P reads a fresh line of typed text and replaces the given line with it', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('9 CLEAR');
     m.interpret('0 T ORIGINAL');
@@ -157,7 +157,7 @@ describe('Line editing: E/S/D/H/R/P/I (system.fth, M55)', () => {
 
 describe('COPY (system.fth, M55)', () => {
   it('duplicates one screen’s whole content into another', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('10 CLEAR');
     m.interpret('0 T COPY-SOURCE-CONTENT');
@@ -170,7 +170,7 @@ describe('COPY (system.fth, M55)', () => {
   });
 
   it('does not disturb the source screen', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('12 CLEAR');
     m.interpret('0 T SOURCE-STAYS-PUT');
@@ -184,7 +184,7 @@ describe('COPY (system.fth, M55)', () => {
 
 describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.fth, M55)', () => {
   it('F finds a pattern forward from the cursor, landing just past the match', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('14 CLEAR');
     m.interpret('0 T THE QUICK BROWN FOX');
@@ -195,7 +195,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('B backs the cursor up by exactly the last search pattern’s length', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('15 CLEAR');
     m.interpret('0 T THE QUICK BROWN FOX');
@@ -207,7 +207,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('N repeats the most recent search pattern without retyping it', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('0 CLEAR');
     m.interpret('0 T AAA BBB AAA CCC');
@@ -222,7 +222,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('X finds and deletes the next occurrence of a freshly typed pattern', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('1 CLEAR');
     m.interpret('0 T REMOVE THIS WORD');
@@ -237,7 +237,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('TILL deletes from the cursor through the next match on the current line', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('2 CLEAR');
     m.interpret('0 T KEEPTHIS DELETE-THROUGH-HERE KEEPTHAT');
@@ -252,7 +252,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('C overwrites from the cursor onward with freshly typed text', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('3 CLEAR');
     m.interpret('0 T KEEP OLDTEXT');
@@ -266,7 +266,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
   });
 
   it('FIND gives up after one full pass instead of looping forever when nothing matches', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('4 CLEAR');
     m.interpret('0 T SOME ORDINARY TEXT');
@@ -287,7 +287,7 @@ describe('Search and replace: TEXT-LEN/-TEXT/1LINE/FIND/N/F/B/X/TILL/C (system.f
 describe('TS: interactive multi-line block entry (system.fth, M57)', () => {
   function bootWithRemote(): { m: ReturnType<typeof bootMachine>; remote: RemoteChannel } {
     const remote = new RemoteChannel();
-    const m = bootMachine({ remoteChannel: remote });
+    const m = bootMachineWith(['EDITOR'], { remoteChannel: remote });
     return { m, remote };
   }
 

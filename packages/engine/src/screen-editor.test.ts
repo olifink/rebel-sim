@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Machine } from './repl.js';
-import { bootMachine } from './test-support.js';
+import { bootMachineWith } from './test-support.js';
 import { BLOCK_SIZE } from './banks.js';
 
 /** Whether `name` is currently findable via self-hosted FIND — i.e.
@@ -37,7 +37,7 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
     // before calling the loaded word is expected, not a leftover chore:
     // if LOAD had wrongly compiled into EDITOR instead, this same switch
     // back to FORTH would fail to find SQUARED at all.
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('2 CLEAR');
     m.interpret('0 T : SQUARED DUP * ;');
@@ -49,7 +49,7 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
   });
 
   it('interpreting multiple lines lets a later line call a word an earlier line just defined', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('3 CLEAR');
     m.interpret('0 T : DOUBLE 2 * ;');
@@ -62,14 +62,14 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
   });
 
   it('a blank (never-T-ed) screen loads as a genuine no-op, not an error', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('4 CLEAR');
     expect(() => m.interpret('4 LOAD')).not.toThrow();
   });
 
   it('a word LOADed while merely browsing EDITOR is reachable from plain FORTH afterward, not trapped inside EDITOR', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('13 CLEAR');
     m.interpret('0 T : LOADED-WORD 123 ;');
@@ -91,7 +91,7 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
   // dedicated variables, matching this file's own R#/SCR/T-LINE
   // convention for exactly this kind of loop-persistent state.
   it('a colon-definition with DO...LOOP split across block lines loads and runs correctly', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('5 CLEAR');
     m.interpret('0 T : SUM3');
@@ -111,7 +111,7 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
   // backpatch address, used to corrupt LOAD's next iteration — even
   // with no colon-definition or control-flow word involved at all.
   it('bare, uncomsumed values split across block lines do not corrupt later lines', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('6 CLEAR');
     m.interpret('0 T 42');
@@ -124,14 +124,14 @@ describe('LOAD (system.fth, FORTH-ARCHITECTURE.md §7 follow-up)', () => {
 
 describe('EDITOR vocabulary isolation (VOCABULARY/DEFINITIONS/USE, DEVELOPING.md §8, revised for the CONTEXT/CURRENT split)', () => {
   it('L/T/TOP/CLEAR/SCR are not reachable from plain FORTH', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     for (const name of ['L', 'T', 'TOP', 'CLEAR', 'SCR']) {
       expect(findable(m, name)).toBe(false);
     }
   });
 
   it('become reachable once USEing EDITOR (browsing only), and LOAD/BLOCK/DUP (FORTH-root) stay reachable from inside EDITOR too', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     for (const name of ['L', 'T', 'TOP', 'CLEAR', 'SCR', 'LOAD', 'BLOCK', 'DUP']) {
       expect(findable(m, name)).toBe(true);
@@ -139,12 +139,12 @@ describe('EDITOR vocabulary isolation (VOCABULARY/DEFINITIONS/USE, DEVELOPING.md
   });
 
   it('LOAD stays reachable from plain FORTH without ever USEing EDITOR', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     expect(findable(m, 'LOAD')).toBe(true);
   });
 
   it('USE alone (browsing) never redirects where new words compile — they land in FORTH, not EDITOR', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret(': BROWSE-DEFINED 1 ;');
     m.interpret('USE FORTH');
@@ -152,7 +152,7 @@ describe('EDITOR vocabulary isolation (VOCABULARY/DEFINITIONS/USE, DEVELOPING.md
   });
 
   it('DEFINITIONS does redirect where new words compile, unlike plain USE', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('EDITOR DEFINITIONS');
     m.interpret(': DEFINITIONS-DEFINED 2 ;');
     m.interpret('FORTH DEFINITIONS');
@@ -165,7 +165,7 @@ describe('EDITOR vocabulary isolation (VOCABULARY/DEFINITIONS/USE, DEVELOPING.md
 
 describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   it('T writes text into a line, space-padding the rest of it', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     const blks = m.banks.requireBank('BLKS');
     m.interpret('USE EDITOR');
     m.interpret('5 CLEAR');
@@ -180,7 +180,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('T truncates text longer than one line (64 chars) rather than overflowing into the next line', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     const blks = m.banks.requireBank('BLKS');
     m.interpret('USE EDITOR');
     m.interpret('6 CLEAR');
@@ -197,7 +197,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('CLEAR re-blanks a screen that already has real content', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     const blks = m.banks.requireBank('BLKS');
     m.interpret('USE EDITOR');
     m.interpret('7 CLEAR');
@@ -209,7 +209,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('LIST prints a header and every line, including the just-written text', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('8 CLEAR');
     m.interpret('3 T HELLO SCREEN EDITOR');
@@ -225,7 +225,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('L redisplays the current screen (whatever LIST/CLEAR last set SCR to) without an argument', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('9 CLEAR');
     m.interpret('0 T MARKER-NINE');
@@ -241,7 +241,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   it('L does not CLS: the listing is appended and earlier screen content stays visible', () => {
     // M56 had L CLS first; dropped in fa914ad once the display was tall
     // enough to hold a whole listing below earlier REPL output.
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('9 CLEAR');
     m.interpret('0 T MARKER-NINE');
@@ -258,7 +258,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('TOP jumps to and displays screen 0 regardless of which screen was current', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     m.interpret('USE EDITOR');
     m.interpret('0 CLEAR');
     m.interpret('0 T SCREEN-ZERO-MARKER');
@@ -275,7 +275,7 @@ describe('CLEAR/T/LIST/L (system.fth, Screen Editor follow-up)', () => {
   });
 
   it('writing to one screen never touches another (per-screen isolation via BLOCK)', () => {
-    const m = bootMachine();
+    const m = bootMachineWith(['EDITOR']);
     const blks = m.banks.requireBank('BLKS');
     m.interpret('USE EDITOR');
     m.interpret('10 CLEAR');
