@@ -176,3 +176,77 @@ describe('EKEY / EKEY? (M76, spec/04-FORTH-CORE.md §6.9)', () => {
     expect(m.stack.toArray()).toEqual([98]);
   });
 });
+
+describe('auto-repeat (M85, spec/01-HAL.md §4.3)', () => {
+  function clocked() {
+    const clock = { now: 0 };
+    const m = new Machine({ timingHal: { millis: () => clock.now } });
+    const at = (ms: number) => {
+      clock.now = ms;
+      m.keyboard.tick();
+    };
+    const drain = (): number[] => {
+      const events: number[] = [];
+      while (m.keyboard.hasKeyPress()) {
+        m.interpret('EKEY');
+        events.push(m.stack.pop());
+      }
+      while (m.keyboard.readEvent()) {
+        // releases and modifiers: not presses
+      }
+      return events;
+    };
+    return { m, at, drain };
+  }
+  const REPEAT = 1 << 24;
+
+  it('repeats a held key after REPEAT-DELAY, then every REPEAT-RATE, marking repeats', () => {
+    const { m, at, drain } = clocked();
+    m.keyboard.pushRawEvent(0x04, true); // 'a' at t = 0
+    expect(drain()).toEqual([0x04 | (97 << 16)]); // the real press, unmarked
+    at(499);
+    expect(drain()).toEqual([]);
+    at(500);
+    expect(drain()).toEqual([0x04 | (97 << 16) | REPEAT]);
+    at(549);
+    expect(drain()).toEqual([]);
+    at(550);
+    expect(drain()).toHaveLength(1);
+    at(5000); // a long gap between ticks: still only one, no flood
+    expect(drain()).toHaveLength(1);
+  });
+
+  it('stops on release, never repeats a modifier, follows the newest key, and carries the modifiers held now', () => {
+    const { m, at, drain } = clocked();
+    m.keyboard.pushRawEvent(0x81, true); // Shift alone: no repeat
+    at(1000);
+    expect(drain()).toEqual([]);
+    m.keyboard.pushRawEvent(0x04, true); // Shift-a at t = 1000
+    m.keyboard.pushRawEvent(0x05, true); // then b: b takes over
+    drain();
+    at(1500);
+    expect(drain()).toEqual([0x05 | (0x02 << 8) | (66 << 16) | REPEAT]); // 'B', shifted
+    m.keyboard.pushRawEvent(0x05, false);
+    at(2000);
+    expect(drain()).toEqual([]);
+    expect(m.keyboard.isRepeating()).toBe(false);
+  });
+
+  it('REPEAT-DELAY 0 turns it off; repeats reach KEY and leave held-key state alone', () => {
+    const { m, at, drain } = clocked();
+    expect(m.sysvars.get('KEYBOARD', 'REPEAT-DELAY')).toBe(500);
+    expect(m.sysvars.get('KEYBOARD', 'REPEAT-RATE')).toBe(50);
+    m.sysvars.set('KEYBOARD', 'REPEAT-DELAY', 0);
+    m.keyboard.pushRawEvent(0x04, true);
+    drain();
+    at(10_000);
+    expect(drain()).toEqual([]);
+    expect(m.keyboard.isRepeating()).toBe(false);
+
+    m.sysvars.set('KEYBOARD', 'REPEAT-DELAY', 500);
+    m.keyboard.pushRawEvent(0x05, true); // b at t = 10000
+    at(10_500);
+    m.interpret('KEY KEY'); // the press, then the repeat, as characters
+    expect(m.stack.toArray()).toEqual([98, 98]);
+  });
+});

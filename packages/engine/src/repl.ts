@@ -417,7 +417,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     this.screen.cls();
 
     const kmapBank = this.banks.createBank('KMAP', sizeFor('KMAP', KMAP_BANK_SIZE), 'KMAP');
-    this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank);
+    // The clock closure reads timingHal at call time, after it is set below.
+    this.keyboard = new Keyboard(this.arena, this.sysvars, kmapBank, () => this.timingHal.millis());
 
     // M59: the engine creates the container and points FONT-BASE at it,
     // same "engine owns the bank, host fills the content" split DICT/

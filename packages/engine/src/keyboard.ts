@@ -39,6 +39,8 @@ export interface KeyEvent {
   readonly modifiers: number;
   readonly char: number; // 0 if this key has no translated character
   readonly pressed: boolean;
+  /** M85: a press synthesized by auto-repeat, not a real key-down. */
+  readonly repeat?: boolean;
 }
 
 /** First pseudo-usage-code of the modifier range (docs/KEYBOARD.md §10:
@@ -53,21 +55,66 @@ function isKeyPress(event: KeyEvent): boolean {
  * code in bits 0-7, modifier mask in 8-15, translated character (0 if
  * none) in 16-23. */
 export function packKeyEvent(event: KeyEvent): number {
-  return (event.usageCode & 0xff) | ((event.modifiers & 0xff) << 8) | ((event.char & 0xff) << 16);
+  return (
+    (event.usageCode & 0xff) | ((event.modifiers & 0xff) << 8) | ((event.char & 0xff) << 16) | (event.repeat ? 1 << 24 : 0)
+  );
 }
+
+/** spec/01-HAL.md §4.3, M85: auto-repeat defaults, in milliseconds. */
+export const DEFAULT_REPEAT_DELAY = 500;
+export const DEFAULT_REPEAT_RATE = 50;
 
 export class Keyboard {
   private readonly queue: KeyEvent[] = new Array(KEYBOARD_QUEUE_SIZE);
   private head = 0;
   private tail = 0;
 
+  // M85 auto-repeat: the key that repeats (the most recent non-modifier
+  // press still held), and when it next does. Transient, like the queue.
+  private repeatUsage = -1;
+  private repeatAt = 0;
+
   constructor(
     private readonly arena: Arena,
     private readonly sysvars: Sysvars,
     private readonly kmapBank: Bank,
+    /** hal_millis, for auto-repeat timing (M85). */
+    private readonly clock: () => number = () => 0,
   ) {
     this.buildDefaultKeymap();
     this.sysvars.setUnsigned('KEYBOARD', 'MODIFIERS', 0);
+    this.sysvars.set('KEYBOARD', 'REPEAT-DELAY', DEFAULT_REPEAT_DELAY);
+    this.sysvars.set('KEYBOARD', 'REPEAT-RATE', DEFAULT_REPEAT_RATE);
+  }
+
+  /** `keyboard_tick()`, spec/01-HAL.md §4.3, M85: the target calls this
+   * regularly while a key is held. Once the repeating key has been held
+   * for REPEAT-DELAY ms it queues a press marked as a repeat, then one
+   * every REPEAT-RATE ms. At most one per call, so a long gap between
+   * calls (a hidden tab) never floods the queue. REPEAT-DELAY 0 turns
+   * repeat off. */
+  tick(): void {
+    if (this.repeatUsage < 0) return;
+    if (!this.isHeld(this.repeatUsage)) {
+      this.repeatUsage = -1; // released without its release reaching us
+      return;
+    }
+    if (this.sysvars.get('KEYBOARD', 'REPEAT-DELAY') <= 0) return;
+    const now = this.clock();
+    if (now - this.repeatAt < 0) return;
+    this.enqueue(this.repeatUsage, this.getModifiers(), true, true);
+    this.repeatAt = now + Math.max(1, this.sysvars.get('KEYBOARD', 'REPEAT-RATE'));
+  }
+
+  /** Is a key held that auto-repeat may act on? The host keeps calling
+   * `tick()` while this is true (M85). */
+  isRepeating(): boolean {
+    return this.repeatUsage >= 0 && this.sysvars.get('KEYBOARD', 'REPEAT-DELAY') > 0;
+  }
+
+  private isHeld(usageCode: number): boolean {
+    const byte = this.sysvars.fieldOffset('KEYBOARD', 'KEYS-DOWN') + ((usageCode & 0xff) >> 3);
+    return (this.arena.readByte(byte) & (1 << (usageCode & 7))) !== 0;
   }
 
   private kmapAddress(plane: 0 | 1, usageCode: number): number {
@@ -175,11 +222,17 @@ export class Keyboard {
       const mask = 1 << (usageCode - 0x80);
       modifiers = pressed ? modifiers | mask : modifiers & ~mask;
       this.sysvars.setUnsigned('KEYBOARD', 'MODIFIERS', modifiers);
+    } else if (pressed) {
+      // M85: the most recent key repeats; modifiers never do.
+      this.repeatUsage = usageCode;
+      this.repeatAt = this.clock() + this.sysvars.get('KEYBOARD', 'REPEAT-DELAY');
+    } else if (usageCode === this.repeatUsage) {
+      this.repeatUsage = -1;
     }
     this.enqueue(usageCode, modifiers, pressed);
   }
 
-  private enqueue(usageCode: number, modifiers: number, pressed: boolean): void {
+  private enqueue(usageCode: number, modifiers: number, pressed: boolean, repeat = false): void {
     const next = (this.head + 1) % KEYBOARD_QUEUE_SIZE;
     if (next === this.tail) {
       // Full — drop rather than overwrite an unconsumed event or block
@@ -190,7 +243,7 @@ export class Keyboard {
     }
     const shifted = (modifiers & (MOD_LSHIFT | MOD_RSHIFT)) !== 0;
     const char = pressed ? this.readKmapByte(shifted ? 1 : 0, usageCode) : 0;
-    this.queue[this.head] = { usageCode, modifiers, char, pressed };
+    this.queue[this.head] = repeat ? { usageCode, modifiers, char, pressed, repeat } : { usageCode, modifiers, char, pressed };
     this.head = next;
   }
 

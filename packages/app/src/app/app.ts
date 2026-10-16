@@ -1092,6 +1092,10 @@ export class App implements AfterViewInit, OnDestroy {
     // is stopped (an idle prompt) nothing can be waiting on a frame, so
     // not counting those frames is unobservable to VSYNC.
     this.machine.screen.frame();
+    // M85: keyboard_tick() — auto-repeat for a held key. Browser repeat
+    // events stay ignored (handleKeyEvent), so delay and rate come only
+    // from the REPEAT-DELAY/REPEAT-RATE sysvars, as on every target.
+    this.machine.keyboard.tick();
     try {
       if (this.pausedWord() === undefined) {
         status = this.machine.step(App.STEP_BUDGET);
@@ -1234,7 +1238,9 @@ export class App implements AfterViewInit, OnDestroy {
     // pending or actually changed.
     // 'frame' (M83) is VSYNC waiting for the next displayed frame: that
     // frame only comes from scheduling one, so it always continues too.
-    if (status !== 'more-to-run' && status !== 'frame' && !changed) {
+    // A held key may still repeat (M85), and repeats only come from
+    // ticking, so a repeating key keeps the pump alive too.
+    if (status !== 'more-to-run' && status !== 'frame' && !changed && !this.machine.keyboard.isRepeating()) {
       this.pumping = false;
       return;
     }
@@ -1253,6 +1259,7 @@ export class App implements AfterViewInit, OnDestroy {
   private tickRemote(): void {
     let status: StepStatus | undefined;
     this.remoteBoard!.machine.screen.frame(); // M83, as in tick()
+    this.remoteBoard!.machine.keyboard.tick(); // M85, as in tick()
     try {
       status = this.remoteBoard!.machine.step(App.STEP_BUDGET);
     } catch (e) {
@@ -1281,7 +1288,7 @@ export class App implements AfterViewInit, OnDestroy {
       const canvas = this.screenRef.nativeElement;
       this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
     }
-    if (status !== 'more-to-run' && status !== 'frame') {
+    if (status !== 'more-to-run' && status !== 'frame' && !this.remoteBoard!.machine.keyboard.isRepeating()) {
       this.pumping = false;
       return;
     }

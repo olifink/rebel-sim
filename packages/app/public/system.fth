@@ -1464,6 +1464,10 @@ HIDE ESCR-SET-NAME
 \ offset 8 -- SYSV 64 + 40 and SYSV 128 + 8.
 BANK@ SYSV 104 + CONSTANT FRAME-COUNT
 BANK@ SYSV 136 + CONSTANT KEYS-DOWN
+\ Auto-repeat, M85: KEYBOARD offsets 40 and 44, milliseconds. 0
+\ REPEAT-DELAY ! turns repeat off -- a game reading EKEY may want to.
+BANK@ SYSV 168 + CONSTANT REPEAT-DELAY
+BANK@ SYSV 172 + CONSTANT REPEAT-RATE
 
 \ KEY-DOWN? -- TRUE while the key with that usage code is held. A bit
 \ test on KEYS-DOWN: byte u/8, bit u mod 8.

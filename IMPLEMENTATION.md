@@ -5208,6 +5208,44 @@ The second engine slice of the game-loop draft. Its spec has landed in
 - the reference blitter's nibble order, transparency, both flips, and
   clipping, including a sprite starting off screen.
 
+### 1.96 Key auto-repeat (M85, `01-HAL.md` §4.3)
+
+Oliver's side quest, built on M83's held-key state and clock. A held
+key now auto-repeats in every mode, through `KEY`, `ACCEPT` and `EKEY`
+alike, so the REPL and MEMO's arrows and Backspace repeat. It lives in
+the portable keyboard module, not the browser, so every target repeats
+the same way. A USB HID keyboard never repeats on its own anyway.
+
+- **Behaviour:** the most recent non-modifier press still held is the
+  repeating key. Its release stops the repeat, and a newer press takes
+  over. Modifiers never repeat. After `REPEAT-DELAY` ms (default 500) a
+  press is queued with the modifiers held now and `repeat: true`, then
+  one every `REPEAT-RATE` ms (default 50). These are new `KEYBOARD`
+  sysvars at offsets 40 and 44, with `system.fth` address constants. `0
+  REPEAT-DELAY !` turns repeat off. A repeat changes neither
+  `KEYS-DOWN` nor `MODIFIERS`, so `KEY-DOWN?` and game movement are
+  unaffected.
+- **Driving it:** `Keyboard.tick()` is the new Type B `keyboard_tick()`.
+  It reads the clock and queues at most one due repeat per call, so a
+  hidden tab coming back can't flood the queue. `Keyboard` now takes a
+  clock closure over `Machine.timingHal`, read at call time.
+- **`EKEY`:** sets bit 24 on a repeat (`packKeyEvent`), so a game
+  reading `EKEY` for one-shot actions can ignore repeats.
+- **App:** `tick()` calls `keyboard.tick()` with `screen.frame()`, and
+  keeps the pump alive while `keyboard.isRepeating()`. Without that, an
+  idle prompt would stop ticking and nothing would repeat.
+  `tickRemote()` does the same for the board. The browser's own
+  `e.repeat` events stay ignored, so delay and rate come only from the
+  sysvars.
+
+*Tests:* three new `keyboard.test.ts` cases with a controllable clock:
+- the delay, then the rate, with the repeat bit set, and one repeat
+  after a long gap rather than a flood;
+- release stops it, modifiers don't repeat, the newest key takes over,
+  and a repeat carries the modifiers held now;
+- `REPEAT-DELAY 0` turns it off; the defaults; repeats arriving through
+  `KEY`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5399,5 +5437,6 @@ exactly as it would be on the bare-metal target.
 | **M82** | The block screen editor and `GRAPHICS` become source modules (§1.93): `NEEDS EDITOR` (`editor.fth`) and `NEEDS GRAPHICS` (`graphics.fth`), moved unchanged out of `system.fth` (2,191 to 1,475 lines). The block words and `LOAD` stay core. Test boot images now take any module list (`bootMachineWith`), and the global test timeout goes to 90 s. | `system.fth`, `editor.fth`, `graphics.fth`, `test-support.ts`, `screen-editor.test.ts`, `screen-editor-commands.test.ts`, `see-hide.test.ts`, `graphics.test.ts`, `empty.test.ts`, `vitest.config.ts` |
 | **M83** | Frames, time and held keys (§1.94, `13-GAME-LOOP.md` §3–§5, now in 01/03/04): `FRAME-COUNT` + `screen_frame()`; `VSYNC` (165), which suspends with a new `'frame'` status so the app keeps scheduling frames; `MS@` (166); `KEYS-DOWN` maintained by the keyboard module; `KEY-DOWN?` and `MS` in Forth. The app advances frames on every tick and ignores `FRAME-COUNT` when deciding whether to keep pumping. | `inner.ts`, `repl.ts`, `primitives.ts`, `screen.ts`, `keyboard.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `frames.test.ts` |
 | **M84** | Sprites and tiles (§1.95): `SPRITE-BASE` (`SPRITE` group, offset 0); KERNEL `SPRITE` (167) validates the active `SPRT` bank (`'S','P'` header, entry count, bounds) and blits through the new optional `ScreenHal.blitSprite`; `TILE` in Forth; `blitSpriteRgba` is the reference blitter the canvas HAL uses. Entry offsets are computed per call, never cached. Spec landed in 03 §9, 04 §6.17, 11 and 12. | `sprites.ts`, `screen.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `canvas-screen-hal.ts`, `sprites.test.ts` |
+| **M85** | Key auto-repeat (§1.96, `01-HAL.md` §4.3): the keyboard module repeats the most recent held non-modifier key after `REPEAT-DELAY` (500 ms) every `REPEAT-RATE` (50 ms). These are new `KEYBOARD` sysvars at offsets 40 and 44. It is driven by the new `keyboard_tick()` call-in (`Keyboard.tick()`), at most one repeat per call. Repeats reach `KEY`/`ACCEPT`/`EKEY` (`EKEY` bit 24 marks them) and leave `KEYS-DOWN` alone. The app ticks it each frame and keeps pumping while a key repeats. | `keyboard.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `keyboard.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
