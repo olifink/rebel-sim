@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Machine } from './repl.js';
 import { ScreenHal, NULL_SCREEN_HAL } from './screen.js';
 import { blitSpriteRgba } from './sprites.js';
@@ -129,5 +132,45 @@ describe('blitSpriteRgba (the reference hal_blit_sprite)', () => {
     blitSpriteRgba(buf, 4, 4, -1, 0, pixels, 8, 8, palette, 0); // column 0 cut off
     expect(red(buf, 4, 0, 0)).toBe(2);
     expect(() => blitSpriteRgba(buf, 4, 4, 100, 100, pixels, 8, 8, palette, 0)).not.toThrow();
+  });
+});
+
+describe('the reference sprite sheet (rebel-specs/references/rebel_rogue.SPR)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const appCopy = join(here, '../../app/public/rebel_rogue.SPR');
+  const specCopy = join(here, '../../../rebel-specs/references/rebel_rogue.SPR');
+
+  it("the app's copy matches the spec reference", () => {
+    if (!existsSync(specCopy)) return; // checkout without the rebel-specs submodule
+    expect(readFileSync(appCopy).equals(readFileSync(specCopy))).toBe(true);
+  });
+
+  it('loads as a SPRT bank and SPRITE draws every one of its 16 entries', () => {
+    const file = new Uint8Array(readFileSync(appCopy));
+    expect(String.fromCharCode(...file.subarray(0, 6))).toBe('RASPRT'); // project-asset header
+    const payload = file.subarray(6);
+
+    const target = new Uint8ClampedArray(64 * 64 * 4);
+    const blits: Blit[] = [];
+    const hal: ScreenHal = {
+      ...NULL_SCREEN_HAL,
+      blitSprite(x, y, pixels, width, height, palette, flags) {
+        blits.push({ x, y, pixels: [...pixels], width, height, palette: [...palette], flags });
+        blitSpriteRgba(target, 64, 64, x, y, pixels, width, height, palette, flags);
+      },
+    };
+    const m = new Machine({ screenHal: hal });
+    const bank = m.banks.createBank('SPRT', payload.length, 'ROGUE');
+    m.arena.writeBytes(bank.base, payload);
+    m.arena.writeCell(SPRITE_BASE(m), bank.base);
+
+    for (let n = 0; n < 16; n++) m.interpret(`0 0 ${n} SPRITE`);
+    expect(blits).toHaveLength(16);
+    expect(blits.filter((b) => b.width === 16 && b.height === 16)).toHaveLength(9);
+    expect(blits.filter((b) => b.width === 8 && b.height === 8)).toHaveLength(7);
+    expect(blits[0].palette[1]).toBe(0x5d275d);
+    m.interpret('0 0 16 SPRITE'); // one past the count: nothing
+    expect(blits).toHaveLength(16);
+    expect(target.some((v, i) => i % 4 === 3 && v === 255)).toBe(true); // real pixels drawn
   });
 });
