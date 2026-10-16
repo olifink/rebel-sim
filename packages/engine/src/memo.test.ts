@@ -6,7 +6,7 @@ import { AMPLE_STEP_BUDGET, bootMachineWithMemo } from './test-support.js';
 const K = {
   a: 0x04, b: 0x05, c: 0x06, d: 0x07, h: 0x0b, i: 0x0c, k: 0x0e, o: 0x12, x: 0x1b,
   n1: 0x1e, n2: 0x1f, n3: 0x20, n5: 0x22,
-  enter: 0x28, esc: 0x29, bs: 0x2a, space: 0x2c, equal: 0x2e, period: 0x37,
+  enter: 0x28, esc: 0x29, bs: 0x2a, tab: 0x2b, space: 0x2c, equal: 0x2e, period: 0x37,
   home: 0x4a, del: 0x4c, end: 0x4d, right: 0x4f, left: 0x50, down: 0x51, up: 0x52,
 };
 const SHIFT = 0x81;
@@ -237,6 +237,33 @@ describe('MEMO (memo.fth, M80, spec/09-MEMO.md)', () => {
     key(m, K.enter);
     expect(row(m, 0)).toBe('my notes');
     expect(row(m, 16)).not.toContain('BLKS'); // full-screen page, no status row
+  });
+
+  it('Tab moves to the next 8-column stop; Shift-Tab inserts spaces up to it, losing what passes the margin', () => {
+    const m = enterMemo();
+    key(m, K.tab);
+    expect(cursor(m)).toEqual([8, 0]);
+    key(m, K.tab);
+    expect(cursor(m)).toEqual([16, 0]);
+    for (let i = 0; i < 20; i++) key(m, K.tab);
+    expect(cursor(m)).toEqual([79, 0]); // past the last stop: the last column
+    expect(row(m, 0)).toBe(''); // Tab changes no text
+
+    key(m, K.home);
+    typeText(m, 'abc');
+    key(m, K.home);
+    key(m, K.right); // on the b, column 1
+    key(m, K.tab, true); // 7 spaces to column 8
+    expect([row(m, 0), cursor(m)]).toEqual(['a       bc', [8, 0]]);
+    key(m, K.tab, true); // a full stop more
+    expect([row(m, 0), cursor(m)]).toEqual(['a               bc', [16, 0]]);
+
+    key(m, K.down);
+    key(m, K.home);
+    for (let i = 0; i < 78; i++) typeText(m, 'x'); // x in columns 0-77
+    key(m, K.home);
+    key(m, K.tab, true); // 8 columns pushed in: the line's tail is lost
+    expect(row(m, 1)).toBe('        ' + 'x'.repeat(72));
   });
 });
 

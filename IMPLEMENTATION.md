@@ -5075,6 +5075,11 @@ no longer a deviation.
   never arrived.
 - **Shift-Esc on a blank line** commits and executes `HOME` (§6, §8),
   writing nothing to the page.
+- **Tab** (§4.1, later the same day as M85) moves to the next 8-column
+  stop, or the last column. **Shift-Tab** (§4.3) inserts spaces up to
+  that stop (`INSERT-TAB`, a `CMOVE>` by 1 to 8 columns), losing what
+  passes the margin as Shift-Space does. The cursor moves with the
+  text, so repeated presses indent further.
 
 *Tests:* new `memo.test.ts` drives the real REPL loop with raw key
 events through `bootMachineWithMemo()` (a new `system+memo` boot image).

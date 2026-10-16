@@ -27,7 +27,7 @@ MEMO-VOCAB DEFINITIONS
 HEX
 4F CONSTANT K-RIGHT  50 CONSTANT K-LEFT  51 CONSTANT K-DOWN  52 CONSTANT K-UP
 28 CONSTANT K-ENTER  29 CONSTANT K-ESC   2A CONSTANT K-BS    2C CONSTANT K-SPACE
-4A CONSTANT K-HOME   4C CONSTANT K-DEL   4D CONSTANT K-END
+4A CONSTANT K-HOME   4C CONSTANT K-DEL   4D CONSTANT K-END   2B CONSTANT K-TAB
 534B4C42 CONSTANT TAG-BLKS   \ the tag cell of a BLKS bank, little-endian
 DECIMAL
 
@@ -122,6 +122,16 @@ VARIABLE SHOWN                   \ the screen holds the page right now
 : INSERT-SPACE ( -- )
   CY LINE CX + DUP 1+ D-COLS @ CX - 1- CMOVE>
   BL CY LINE CX + C!  CHANGED REDRAW ;
+\ Tab, 4.1: the next tab stop, every 8 columns, or the last column.
+: NEXT-STOP ( -- x ) CX 8 / 1+ 8 * D-COLS @ 1- MIN ;
+\ Shift-Tab, 4.3: insert spaces up to the next tab stop, pushing the rest
+\ of the line right and losing what passes the margin, as Shift-Space
+\ does; the cursor moves to the stop with the text it was on.
+: INSERT-TAB ( -- )
+  8 CX 8 MOD -  D-COLS @ CX - MIN  >R
+  CY LINE CX +  DUP R@ +  D-COLS @ CX - R@ -  CMOVE>
+  CY LINE CX + R@ BLANKS
+  CX R> + D-COLS @ 1- MIN CY AT-XY  CHANGED REDRAW ;
 \ Shift-Delete, 4.3: clear the line from the cursor to the right margin.
 : CLEAR-TO-END ( -- ) CY LINE CX + D-COLS @ CX - BLANKS CHANGED REDRAW ;
 \ Shift-Enter, 4.4: the text from the cursor moves to a new line below.
@@ -262,6 +272,7 @@ VARIABLE KU  VARIABLE KS  VARIABLE KA  VARIABLE KC
   K-UP IS? IF PREV-PAGE -1 EXIT THEN
   K-SPACE IS? IF CY BLANK? IF SPLIT-PAGE ELSE INSERT-SPACE THEN -1 EXIT THEN
   K-ENTER IS? IF SPLIT-LINE -1 EXIT THEN
+  K-TAB IS? IF INSERT-TAB -1 EXIT THEN
   K-BS IS? IF CX IF DELETE-CHAR ELSE JOIN-LINE THEN -1 EXIT THEN
   K-DEL IS? IF CLEAR-TO-END -1 EXIT THEN
   \ Shift-Esc on a blank line leaves MEMO, as executing HOME would, 6.
@@ -273,6 +284,7 @@ VARIABLE KU  VARIABLE KS  VARIABLE KA  VARIABLE KC
   K-UP IS? IF CX CY 1- 0 MAX AT-XY EXIT THEN
   K-DOWN IS? IF CX CY 1+ D-ROWS @ 1- MIN AT-XY EXIT THEN
   K-HOME IS? IF 0 CY AT-XY EXIT THEN
+  K-TAB IS? IF NEXT-STOP CY AT-XY EXIT THEN
   K-END IS? IF CY LINE-END D-COLS @ 1- MIN CY AT-XY EXIT THEN
   K-ENTER IS? IF 0 CY 1+ D-ROWS @ 1- MIN AT-XY EXIT THEN
   K-BS IS? IF BACKSPACE EXIT THEN
