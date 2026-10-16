@@ -1458,6 +1458,25 @@ HIDE ENV-FREE
 HIDE ESCR-FREE?
 HIDE ESCR-SET-NAME
 
+\ ---- Frames, time and held keys, M83, spec 13-GAME-LOOP.md 3-5 ----
+\ VSYNC and MS@ are native; these are the portable words around them.
+\ FRAME-COUNT is SCREEN offset 40 and KEYS-DOWN, 256 bits, is KEYBOARD
+\ offset 8 -- SYSV 64 + 40 and SYSV 128 + 8.
+BANK@ SYSV 104 + CONSTANT FRAME-COUNT
+BANK@ SYSV 136 + CONSTANT KEYS-DOWN
+
+\ KEY-DOWN? -- TRUE while the key with that usage code is held. A bit
+\ test on KEYS-DOWN: byte u/8, bit u mod 8.
+: KEY-DOWN? ( usage -- flag )
+  255 AND DUP 8 / KEYS-DOWN + C@
+  SWAP 7 AND 1 SWAP BEGIN DUP WHILE SWAP 2* SWAP 1- REPEAT DROP
+  AND 0= 0= ;
+
+\ MS -- waits at least n milliseconds, calling VSYNC while it waits so
+\ the machine stays responsive. The difference is compared as a signed
+\ cell, so it is safe across MS@ wrapping.
+: MS ( n -- ) MS@ + BEGIN DUP MS@ - 0> WHILE VSYNC REPEAT DROP ;
+
 
 
 

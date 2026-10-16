@@ -164,6 +164,12 @@ export class Keyboard {
    * shift plane on press (docs/KEYBOARD.md §10, CKeyboardModule::
    * PushEvent). */
   pushRawEvent(usageCode: number, pressed: boolean): void {
+    // spec/13-GAME-LOOP.md §5, M83: held-key state, bit u of the 256-bit
+    // KEYS-DOWN map, updated before the event is queued (or dropped).
+    const bitByte = this.sysvars.fieldOffset('KEYBOARD', 'KEYS-DOWN') + ((usageCode & 0xff) >> 3);
+    const bit = 1 << (usageCode & 7);
+    const old = this.arena.readByte(bitByte);
+    this.arena.writeByte(bitByte, pressed ? old | bit : old & ~bit);
     let modifiers = this.getModifiers();
     if (usageCode >= 0x80 && usageCode <= 0x87) {
       const mask = 1 << (usageCode - 0x80);

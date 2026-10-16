@@ -21,6 +21,7 @@ import { Screen } from './screen.js';
 import { Keyboard, packKeyEvent } from './keyboard.js';
 import { cellToFloat, floatToCell, floatToInt } from './float32.js';
 import { ModuleHal } from './module.js';
+import { TimingHal } from './timing.js';
 import { Channel } from './channel.js';
 import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
@@ -104,6 +105,8 @@ export interface PrimitiveContext extends DictionaryContext {
   /** spec/01-HAL.md §6.7, M79: where `(MODULE-READ)` gets module
    * source text from. */
   readonly moduleHal: ModuleHal;
+  /** spec/01-HAL.md §7.1's `hal_millis`, which `MS@` (M83) reads. */
+  readonly timingHal: TimingHal;
   /** M54: the size a named bank actually had the moment this `Machine`
    * finished booting — *not* `banks.findBank(name)?.size`, which reads
    * MMAP fresh and so would already reflect a `BANK-RESIZE` (146) that
@@ -1317,6 +1320,11 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       break;
     case 163: // F>S ( r -- n ) — truncates toward zero, saturates, NaN -> 0
       s.push(floatToInt(cellToFloat(s.pop())));
+      break;
+
+    case 166: // MS@ ( -- n ) spec/13-GAME-LOOP.md §4, M83: hal_millis as a
+      // wrapping cell.
+      s.push(Math.floor(ctx.timingHal.millis()) | 0);
       break;
 
     case 150: { // (BANK-CREATE) ( name-a name-l tag-a tag-l size -- slot | 0 )

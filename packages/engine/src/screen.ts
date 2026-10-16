@@ -306,6 +306,13 @@ export class Screen {
     this.advanceCursor();
   }
 
+  /** `screen_frame()`, spec/13-GAME-LOOP.md §3.1, M83: the Type B call-in
+   * a host makes once per displayed frame. It only advances FRAME-COUNT,
+   * never calls into Forth, so it is safe from anywhere. */
+  frame(): void {
+    this.sysvars.setUnsigned('SCREEN', 'FRAME-COUNT', (this.sysvars.getUnsigned('SCREEN', 'FRAME-COUNT') + 1) >>> 0);
+  }
+
   /** CLS — fills the CHAR bank with spaces, clears the framebuffer to
    * the current PAPER, resets the cursor to 0,0. DEVELOPING.md §17,
    * M25: clearScreen() now runs *before* setCursor(0, 0) — a real

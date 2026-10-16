@@ -83,6 +83,7 @@ const LIT_TOKEN = opcodes.primitives.find((p) => p.name === 'LIT')!.id;
 const KEY_TOKEN = opcodes.primitives.find((p) => p.name === 'KEY')!.id;
 const EKEY_TOKEN = opcodes.primitives.find((p) => p.name === 'EKEY')!.id;
 const MODULE_READ_TOKEN = opcodes.primitives.find((p) => p.name === '(MODULE-READ)')!.id;
+const VSYNC_TOKEN = opcodes.primitives.find((p) => p.name === 'VSYNC')!.id;
 const ACCEPT_TOKEN = opcodes.primitives.find((p) => p.name === 'ACCEPT')!.id;
 const BRANCH_TOKEN = opcodes.primitives.find((p) => p.name === 'BRANCH')!.id;
 const ZBRANCH_TOKEN = opcodes.primitives.find((p) => p.name === '0BRANCH')!.id;
@@ -102,7 +103,7 @@ const CHAR_ENTER = 10;
 const CHAR_SPACE = 32;
 const FALSE_VALUE = 0;
 
-export type StepSignal = 'progress' | 'blocked' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
+export type StepSignal = 'progress' | 'blocked' | 'frame' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
 
 export class Inner {
   /** Set by `checkBreakpoint()` right before a `'breakpoint'` yield —
@@ -331,6 +332,18 @@ export class Inner {
       while (!this.ctx.channel.hasData()) {
         yield 'blocked';
       }
+    }
+    if (token === VSYNC_TOKEN) {
+      // VSYNC ( -- ), spec/13-GAME-LOOP.md §3.2, M83: waits for the next
+      // displayed frame. Unlike KEY's 'blocked' it yields 'frame', which
+      // tells the host to keep scheduling frames, advancing FRAME-COUNT
+      // on each, rather than waiting for an outside wake.
+      const start = this.ctx.sysvars.get('SCREEN', 'FRAME-COUNT');
+      while (this.ctx.sysvars.get('SCREEN', 'FRAME-COUNT') === start) {
+        yield 'frame';
+      }
+      yield 'progress';
+      return;
     }
     if (token === MODULE_READ_TOKEN) {
       // (MODULE-READ) ( addr len -- src len | 0 0 ), spec/04-FORTH-CORE.md

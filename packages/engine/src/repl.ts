@@ -262,7 +262,7 @@ export interface MachineOptions {
  * change, the host must reconstruct" shape as `'cold'`, except the host
  * should pass `pendingRestartProject()` as `MachineOptions.bootProject`
  * to the fresh `Machine` instead of booting empty. */
-export type StepStatus = 'idle' | 'blocked' | 'more-to-run' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
+export type StepStatus = 'idle' | 'blocked' | 'frame' | 'more-to-run' | 'breakpoint' | 'cold' | 'restart-project' | 'terminal';
 
 export class Machine implements PrimitiveContext, DictionaryContext {
   readonly arena: Arena;
@@ -660,6 +660,9 @@ export class Machine implements PrimitiveContext, DictionaryContext {
         }
         if (value === 'blocked') {
           return 'blocked';
+        }
+        if (value === 'frame') {
+          return 'frame'; // M83: VSYNC, waiting for the next displayed frame
         }
         if (value === 'breakpoint') {
           return 'breakpoint';

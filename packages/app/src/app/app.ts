@@ -1087,6 +1087,11 @@ export class App implements AfterViewInit, OnDestroy {
       return;
     }
     let status: StepStatus | undefined;
+    // spec/13-GAME-LOOP.md §3.1, M83: this host's screen_frame() — one
+    // displayed frame per animation frame the pump runs. While the pump
+    // is stopped (an idle prompt) nothing can be waiting on a frame, so
+    // not counting those frames is unobservable to VSYNC.
+    this.machine.screen.frame();
     try {
       if (this.pausedWord() === undefined) {
         status = this.machine.step(App.STEP_BUDGET);
@@ -1189,8 +1194,11 @@ export class App implements AfterViewInit, OnDestroy {
     // on some cheaper proxy the way LATEST-address/bankCount do for
     // their own sections; the diff below is just against the flat value
     // list so an idle prompt still lets the pump die like everything else.
+    // FRAME-COUNT (M83) advances on every tick by design, so it is left
+    // out of the change test, or it alone would keep the pump alive
+    // forever; the panel picks up its value with the next real change.
     const currentSysvars = listSysvars(this.machine.sysvars);
-    const currentSysvarValues = currentSysvars.map((e) => e.value);
+    const currentSysvarValues = currentSysvars.filter((e) => e.field !== 'FRAME-COUNT').map((e) => e.value);
     if (!arraysEqual(currentSysvarValues, this.lastSysvarsSnapshot)) {
       this.lastSysvarsSnapshot = currentSysvarValues;
       this.zone.run(() => this.sysvarsTable.set(currentSysvars));
@@ -1224,7 +1232,9 @@ export class App implements AfterViewInit, OnDestroy {
     // step() itself has nothing pending until some other event calls
     // wake() — so only keep scheduling frames if something was actually
     // pending or actually changed.
-    if (status !== 'more-to-run' && !changed) {
+    // 'frame' (M83) is VSYNC waiting for the next displayed frame: that
+    // frame only comes from scheduling one, so it always continues too.
+    if (status !== 'more-to-run' && status !== 'frame' && !changed) {
       this.pumping = false;
       return;
     }
@@ -1242,6 +1252,7 @@ export class App implements AfterViewInit, OnDestroy {
    * simplification for this pass, not silently dropped. */
   private tickRemote(): void {
     let status: StepStatus | undefined;
+    this.remoteBoard!.machine.screen.frame(); // M83, as in tick()
     try {
       status = this.remoteBoard!.machine.step(App.STEP_BUDGET);
     } catch (e) {
@@ -1270,7 +1281,7 @@ export class App implements AfterViewInit, OnDestroy {
       const canvas = this.screenRef.nativeElement;
       this.presentCtx.drawImage(this.offscreen, 0, 0, canvas.width, canvas.height);
     }
-    if (status !== 'more-to-run') {
+    if (status !== 'more-to-run' && status !== 'frame') {
       this.pumping = false;
       return;
     }

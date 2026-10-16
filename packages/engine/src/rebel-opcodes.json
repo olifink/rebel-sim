@@ -187,7 +187,9 @@
     { "id": 161, "name": "F=", "note": "( r1 r2 -- flag ) numeric equality: FALSE if either is NaN, TRUE for -0.0 and +0.0. Not a bit comparison; = is that. spec/07-FLOATING-POINT.md §4, M78, KERNEL: a float is an IEEE 754 binary32 value in one cell (float32.ts). Correctly rounded, round-to-nearest-even, subnormals kept, never traps; any NaN result is the canonical 0x7FC00000." },
     { "id": 162, "name": "S>F", "note": "( n -- r ) signed integer to float, rounded to nearest-even when n has more than 24 significant bits. spec/07-FLOATING-POINT.md §4, M78, KERNEL: a float is an IEEE 754 binary32 value in one cell (float32.ts). Correctly rounded, round-to-nearest-even, subnormals kept, never traps; any NaN result is the canonical 0x7FC00000." },
     { "id": 163, "name": "F>S", "note": "( r -- n ) truncates toward zero and saturates: above the integer range gives 0x7FFFFFFF, below it 0x80000000, NaN gives 0. spec/07-FLOATING-POINT.md §4, M78, KERNEL: a float is an IEEE 754 binary32 value in one cell (float32.ts). Correctly rounded, round-to-nearest-even, subnormals kept, never traps; any NaN result is the canonical 0x7FC00000." },
-    { "id": 164, "name": "(MODULE-READ)", "note": "( addr len -- src-addr src-len | 0 0 ) spec/04-FORTH-CORE.md §6.16, M79, KERNEL: fetches the source module named addr len (folded to upper case) through the module HAL (spec/01-HAL.md §6.7, module.ts), suspending like KEY while the host is still fetching. Copies the text into a fresh anonymous DATA bank marked REMOVED, so it is never saved with the project, and pushes its address and length; 0 0 if the target has no such module. inner.ts's dispatch() special-cases it, like KEY. NEEDS (system.fth) is built on it." }
+    { "id": 164, "name": "(MODULE-READ)", "note": "( addr len -- src-addr src-len | 0 0 ) spec/04-FORTH-CORE.md §6.16, M79, KERNEL: fetches the source module named addr len (folded to upper case) through the module HAL (spec/01-HAL.md §6.7, module.ts), suspending like KEY while the host is still fetching. Copies the text into a fresh anonymous DATA bank marked REMOVED, so it is never saved with the project, and pushes its address and length; 0 0 if the target has no such module. inner.ts's dispatch() special-cases it, like KEY. NEEDS (system.fth) is built on it." },
+    { "id": 165, "name": "VSYNC", "note": "( -- ) spec/13-GAME-LOOP.md §3.2, M83, KERNEL: suspends until FRAME-COUNT differs from its value when VSYNC was called. inner.ts's dispatch() special-cases it like KEY but yields the distinct 'frame' signal, so the host keeps scheduling frames (it advances FRAME-COUNT on each) instead of waiting for an outside wake as it does on 'blocked'." },
+    { "id": 166, "name": "MS@", "note": "( -- n ) spec/13-GAME-LOOP.md §4, M83, KERNEL: milliseconds since boot from the timing HAL (hal_millis), as a cell that wraps at 2^32; compare differences, never absolute values." }
   ],
 
   "bankTags": {
@@ -233,7 +235,8 @@
         "INK": { "offset": 24, "note": "default foreground color (0xRRGGBB) for character writes" },
         "PAPER": { "offset": 28, "note": "default background color (0xRRGGBB) for character writes" },
         "CURSOR-VISIBLE": { "offset": 32, "note": "DEVELOPING.md §17, M25: HAL boolean (TRUE=-1/FALSE=0), defaults FALSE. The reverse of this group's usual direction, same situation CORE.ARENA-SIZE (M19) was in: checked directly against rebel-rom/src/sysvars.h's real TScreenSysVars — it has no such field either, since no target renders a visible cursor yet — a genuine cross-target candidate proposed from the Rebel-Sim side, not Rebel-Sim-only." },
-        "PALETTE-BASE": { "offset": 36, "note": "Indexed color palette (spec/02-MEMORY-MODEL.md §4.6's PAL bank, spec/01-HAL.md §3.6): arena address of the active 16-entry 0xRRGGBB map, 0 = disabled (today's literal-RGB-only behavior, unchanged) — same address/0-disabled convention as FONT-BASE. Defaults FALSE (0) via the arena's own zero-init, same as CURSOR-VISIBLE — never explicitly set at boot." }
+        "PALETTE-BASE": { "offset": 36, "note": "Indexed color palette (spec/02-MEMORY-MODEL.md §4.6's PAL bank, spec/01-HAL.md §3.6): arena address of the active 16-entry 0xRRGGBB map, 0 = disabled (today's literal-RGB-only behavior, unchanged) — same address/0-disabled convention as FONT-BASE. Defaults FALSE (0) via the arena's own zero-init, same as CURSOR-VISIBLE — never explicitly set at boot." },
+        "FRAME-COUNT": { "offset": 40, "note": "spec/13-GAME-LOOP.md §3.1, M83: display frames since boot, wrapping at 2^32. Advanced by the host's screen_frame() call-in (Screen.frame()) once per displayed frame; VSYNC waits for it to change. Rebel-Sim advances it on every animation frame its pump runs." }
       },
       "groupSizeBytes": 64
     },
@@ -241,7 +244,8 @@
       "baseOffset": 128,
       "note": "matches src/sysvars.h's SYSVARS_KEYBOARD_OFFSET (0x080). M4: populated with MODIFIERS only — real TKeyboardSysVars also has nKeyboardCount (attached-device count), omitted here since browser DOM APIs have no USB-hotplug-style device enumeration to report; there's always implicitly 'some keyboard'.",
       "fields": {
-        "MODIFIERS": { "offset": 0, "note": "live modifier bitmask (docs/KEYBOARD.md §2): bit0-3 = L Ctrl/Shift/Alt/GUI, bit4-7 = R Ctrl/Shift/Alt/GUI. Updated on every modifier press/release pseudo-event (0x80+bit convention)." }
+        "MODIFIERS": { "offset": 0, "note": "live modifier bitmask (docs/KEYBOARD.md §2): bit0-3 = L Ctrl/Shift/Alt/GUI, bit4-7 = R Ctrl/Shift/Alt/GUI. Updated on every modifier press/release pseudo-event (0x80+bit convention)." },
+        "KEYS-DOWN": { "offset": 8, "note": "spec/13-GAME-LOOP.md §5, M83: the first of 8 cells, offsets 8-39, together 256 bits, bit u set while key u (usage code, modifiers 0x80-0x87 included) is held. Updated by Keyboard.pushRawEvent before the event is queued; KEY-DOWN? (system.fth) tests it." }
       },
       "groupSizeBytes": 64
     },

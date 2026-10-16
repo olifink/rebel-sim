@@ -5124,6 +5124,47 @@ test boot-image build) is shorter.
   real `NEEDS FLOAT` mid-test (after `EMPTY`) took over 40 s under
   full-suite contention.
 
+### 1.94 Frames, time and held keys (M83, `13-GAME-LOOP.md` §3–§5)
+
+The first engine slice of the game-loop draft. Its spec has now landed:
+`01-HAL.md` §3.9 and §4.3, `03-SYSVARS.md` §6 and §7, and
+`04-FORTH-CORE.md` §6.17.
+
+- **`FRAME-COUNT`** (`SCREEN` offset 40): displayed frames since boot,
+  advanced by the Type B call-in `screen_frame()`, which here is
+  `Screen.frame()`.
+- **`VSYNC` (165), KERNEL.** `inner.ts`'s `dispatch()` special-cases it
+  like `KEY`, but yields a new `StepSignal`/`StepStatus`, `'frame'`, not
+  `'blocked'`. `'blocked'` lets the app's animation-frame pump die until
+  an outside `wake()`, which is right for `KEY` but would deadlock a
+  frame wait, because the next frame only comes from scheduling one.
+  This is the `'frame'` suspend reason the old `GAME-LOOP.md` proposed.
+- **`MS@` (166), KERNEL:** `hal_millis` as a wrapping cell. To reach it,
+  `PrimitiveContext` now exposes `timingHal`.
+- **`KEYS-DOWN`** (`KEYBOARD` offsets 8–39): 256 held-key bits,
+  modifiers included. `Keyboard.pushRawEvent` sets or clears the bit
+  before queueing, so the state is right even when the queue drops the
+  event.
+- **BOOTSTRAP (`system.fth`, after the environment words):**
+  `FRAME-COUNT`/`KEYS-DOWN` address constants, `KEY-DOWN?` (a bit test
+  with no shift primitive), and `MS` (waits by `VSYNC`, comparing a
+  signed difference so it is safe across wrap).
+
+*App:*
+- `tick()` calls `screen.frame()` on every animation frame it runs.
+  While the pump is stopped at an idle prompt, nothing can be waiting on
+  a frame, which 01-HAL §3.9 permits.
+- A `'frame'` status always schedules the next animation frame.
+- The sysvars change check skips `FRAME-COUNT`, which by design changes
+  every tick, so an idle prompt still lets the pump stop.
+- `tickRemote()` does the same for the simulated board.
+
+*Tests:* new `frames.test.ts`:
+- `VSYNC` reports `'frame'` until a frame arrives;
+- `FRAME-COUNT` read from Forth;
+- `MS@`, and `MS` with a controllable clock, waiting a frame at a time;
+- `KEY-DOWN?` with modifiers, unaffected by reading the event queue.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5313,5 +5354,6 @@ exactly as it would be on the bare-metal target.
 | **M80** | MEMO (§1.92, `09-MEMO.md`): the full-screen page editor as a source module (`NEEDS MEMO`, `memo.fth`, about 330 lines of portable Forth, no engine change). The screen is the working copy, committed before every page turn, command, or switch. All §4/§5 keys; Shift-Esc runs a line as Forth with captured output and a `\ ok`/`\ error` status; `EDIT` opens Forth screens through the block buffer pool. Lines run with the caller's search order rather than MEMO's vocabulary first (now in §6.3). The app key map gains Home, Delete and End. | `memo.fth`, `browser-keymap.ts`, `test-support.ts`, `memo.test.ts` |
 | **M81** | `MODULE` renamed `NEEDS` (Oliver's call, after vForth for the ZX Spectrum Next), in code and in `rebel-specs` (`04-FORTH-CORE.md` §6.16 and every module reference). The machinery underneath keeps its names: `(MODULE-READ)`, `hal_module_read`, `ModuleHal`, and "source module" for the concept. Marker words are still `NAME.FTH`. §1.91 is updated in place. | `system.fth`, `memo.fth`, `module.ts`, `repl.ts`, `rebel-opcodes.json`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `app.ts`, `fetch-module-hal.ts`, `rebel-specs` 01/04/06/07/08/09 |
 | **M82** | The block screen editor and `GRAPHICS` become source modules (§1.93): `NEEDS EDITOR` (`editor.fth`) and `NEEDS GRAPHICS` (`graphics.fth`), moved unchanged out of `system.fth` (2,191 to 1,475 lines). The block words and `LOAD` stay core. Test boot images now take any module list (`bootMachineWith`), and the global test timeout goes to 90 s. | `system.fth`, `editor.fth`, `graphics.fth`, `test-support.ts`, `screen-editor.test.ts`, `screen-editor-commands.test.ts`, `see-hide.test.ts`, `graphics.test.ts`, `empty.test.ts`, `vitest.config.ts` |
+| **M83** | Frames, time and held keys (§1.94, `13-GAME-LOOP.md` §3–§5, now in 01/03/04): `FRAME-COUNT` + `screen_frame()`; `VSYNC` (165), which suspends with a new `'frame'` status so the app keeps scheduling frames; `MS@` (166); `KEYS-DOWN` maintained by the keyboard module; `KEY-DOWN?` and `MS` in Forth. The app advances frames on every tick and ignores `FRAME-COUNT` when deciding whether to keep pumping. | `inner.ts`, `repl.ts`, `primitives.ts`, `screen.ts`, `keyboard.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `frames.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.
