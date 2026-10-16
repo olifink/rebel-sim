@@ -8,8 +8,9 @@
 \ line under the cursor as Forth, section 6 -- the whole command system.
 \
 \ Internal words live in the MEMO-VOCAB vocabulary; MEMO, MEMO-OPEN,
-\ (MEMO-OPEN) and EDIT go in FORTH. A command line runs with the
-\ caller's search order unchanged, 6.3: with branching vocabularies,
+\ (MEMO-OPEN), EDIT, MEMO-LOAD and (MEMO-LOAD) go in FORTH. A command
+\ line runs with the caller's search order unchanged, 6.3: with
+\ branching vocabularies,
 \ MEMO-VOCAB first would hide every FORTH word defined after MEMO was
 \ loaded, the user's own words included.
 
@@ -332,6 +333,30 @@ VARIABLE KU  VARIABLE KS  VARIABLE KA  VARIABLE KC
   DUP PAGE-BANK? 0= IF DROP 0 EXIT THEN
   12 + @ DUP 4 + @ SWAP 8 + @ FITS? ;
 
+\ ---- MEMO-LOAD, 7.1: a document as Forth source ----
+\ Every line of every page, page 0 first, top to bottom, through
+\ EVALUATE, so a definition may span lines and pages. CONTEXT is set to
+\ CURRENT for the duration, as LOAD does. The cursor variables are saved
+\ on the return stack, so a document may MEMO-LOAD another. The bank is
+\ read directly, so MEMO's current document is left as it was.
+VARIABLE ML-BASE  VARIABLE ML-COLS
+: LOAD-DOC ( slot -- )
+  ML-BASE @ >R  ML-COLS @ >R  CONTEXT @ >R
+  12 + @  DUP 4 + @ ML-COLS !  DUP ML-BASE !
+  DUP 8 + @ SWAP 12 + @ *
+  CURRENT-VOCAB @ CONTEXT !
+  DUP IF
+    0 DO ML-BASE @ 32 + I ML-COLS @ * +  ML-COLS @ EVALUATE LOOP
+  ELSE DROP THEN
+  R> CONTEXT !  R> ML-COLS !  R> ML-BASE ! ;
+\ FALSE for no such bank, or one that is not a page document -- a BLKS
+\ bank of Forth screens included, which LOAD already interprets.
+: LOAD-DOC-NAMED ( addr len -- flag )
+  (BANK-FIND) DUP 0= IF EXIT THEN
+  DUP @ TAG-BLKS = IF DROP 0 EXIT THEN
+  DUP PAGE-BANK? 0= IF DROP 0 EXIT THEN
+  LOAD-DOC -1 ;
+
 \ The implementations stay here; the public words below are thin
 \ wrappers, because once FORTH is CURRENT again, words found through
 \ MEMO-VOCAB cannot see what is added to FORTH afterwards.
@@ -357,6 +382,9 @@ MEMO-STEP-XT ENVIRONMENT MEMO
 : MEMO-OPEN ( "name" -- )
   BL WORD 2DUP OPEN-DOC IF 2DROP ELSE TYPE SPACE ." - cannot open" ABORT THEN ;
 : EDIT ( n -- ) EDIT-BLOCK ;
+: (MEMO-LOAD) ( addr len -- flag ) LOAD-DOC-NAMED ;
+: MEMO-LOAD ( "name" -- )
+  BL WORD 2DUP LOAD-DOC-NAMED IF 2DROP ELSE TYPE SPACE ." - not a MEMO document" ABORT THEN ;
 
 S" NOTES" OPEN-DOC DROP
 FORTH

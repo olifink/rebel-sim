@@ -5323,6 +5323,39 @@ reference sheet (`public/rogue.spr`, renamed from M85's
   module's image depends on the modules and assets it pulls in. The
   global setup also prebuilds `system+GAME` and `system+ROGUE`.
 
+### 1.98 `MEMO-LOAD`: a MEMO document as Forth source (M87, `09-MEMO.md` §7.1)
+
+This closes `09-MEMO.md` §10's "loading a page as Forth source", and the
+last unbuilt piece of `13-GAME-LOOP.md` apart from carts: a game can now
+be written in MEMO and run on the machine.
+
+- **`MEMO-LOAD name` / `(MEMO-LOAD) ( addr len -- flag )`,** in
+  `memo.fth`'s FORTH section as thin wrappers over `LOAD-DOC-NAMED` /
+  `LOAD-DOC`, the same pattern as the other public MEMO words.
+- **Line by line:** every line of every page in use goes through
+  `EVALUATE`, read in place: line *i* is at `base + 32 + i × cols`, since
+  pages are contiguous. Because `STATE` carries over, a definition may
+  span lines and pages.
+- **Search order and nesting:** `CONTEXT` is set to `CURRENT` for the
+  duration, as `LOAD` does. `ML-BASE`/`ML-COLS`/`CONTEXT` are saved on
+  the return stack, so a document may load another.
+- **MEMO's state is untouched:** the bank is read directly, never through
+  `DOC!`, so MEMO's current document, page and cursor stay as they were,
+  and a Shift-Esc line in one document can load another.
+- **What is refused:** a `BLKS` bank, which `LOAD` already covers, and
+  anything without a page-bank header.
+- **No self-recursion guard:** the guard state would go stale after an
+  `ABORT`. A document loading itself overflows the return stack and
+  recovers as an ordinary error, which the spec says.
+
+*Tests (`memo.test.ts`):*
+- a two-page document whose definition spans the page boundary, a
+  status comment left on a line, and the rest of the calling line
+  running afterwards;
+- `(MEMO-LOAD)` failing for a missing document and for `BLKS`;
+- `MEMO-LOAD` running from a Shift-Esc line in NOTES, with the output
+  captured below it.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5516,5 +5549,6 @@ exactly as it would be on the bare-metal target.
 | **M84** | Sprites and tiles (§1.95): `SPRITE-BASE` (`SPRITE` group, offset 0); KERNEL `SPRITE` (167) validates the active `SPRT` bank (`'S','P'` header, entry count, bounds) and blits through the new optional `ScreenHal.blitSprite`; `TILE` in Forth; `blitSpriteRgba` is the reference blitter the canvas HAL uses. Entry offsets are computed per call, never cached. Spec landed in 03 §9, 04 §6.17, 11 and 12. | `sprites.ts`, `screen.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `canvas-screen-hal.ts`, `sprites.test.ts` |
 | **M85** | Key auto-repeat (§1.96, `01-HAL.md` §4.3): the keyboard module repeats the most recent held non-modifier key after `REPEAT-DELAY` (500 ms) every `REPEAT-RATE` (50 ms). These are new `KEYBOARD` sysvars at offsets 40 and 44. It is driven by the new `keyboard_tick()` call-in (`Keyboard.tick()`), at most one repeat per call. Repeats reach `KEY`/`ACCEPT`/`EKEY` (`EKEY` bit 24 marks them) and leave `KEYS-DOWN` alone. The app ticks it each frame and keeps pumping while a key repeats. | `keyboard.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `keyboard.test.ts` |
 | **M86** | The `GAME` module, `LOAD-ASSET`, and the `ROGUE` demo (§1.97, `13-GAME-LOOP.md` §7–§8). Module names may carry an extension, and `LOAD-ASSET ROGUE.SPR` loads a shipped asset file into a bank. `game.fth` provides entities, a layered render list, `OVERLAP?` and `FRAME`. `rogue.fth` is a playable demo on the reference sprite sheet. 13 is now implemented apart from `MEMO-LOAD` and carts. | `system.fth`, `game.fth`, `rogue.fth`, `rogue.spr`, `fetch-module-hal.ts`, `test-support.ts`, `module.test.ts`, `game.test.ts`, `rogue.test.ts`, `sprites.test.ts` |
+| **M87** | `MEMO-LOAD`/`(MEMO-LOAD)` (§1.98, `09-MEMO.md` §7.1): interpret a page document as Forth source, line by line through `EVALUATE`, definitions spanning lines and pages, `CONTEXT` aligned as `LOAD` does, nestable, MEMO's own state untouched. `13-GAME-LOOP.md` is now implemented apart from carts. | `memo.fth`, `memo.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

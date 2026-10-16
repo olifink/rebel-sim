@@ -36,7 +36,7 @@ function key(m: Machine, usage: number, shift = false): void {
 }
 
 const CHARS: Record<string, number> = {
-  ' ': K.space, '.': K.period, '+': -1,
+  ' ': K.space, '.': K.period, '-': 0x2d, '+': -1,
   ...Object.fromEntries('abcdefghijklmnopqrstuvwxyz'.split('').map((c, i) => [c, 0x04 + i])),
   ...Object.fromEntries('123456789'.split('').map((c, i) => [c, 0x1e + i])),
   '0': 0x27,
@@ -264,6 +264,45 @@ describe('MEMO (memo.fth, M80, spec/09-MEMO.md)', () => {
     key(m, K.home);
     key(m, K.tab, true); // 8 columns pushed in: the line's tail is lost
     expect(row(m, 1)).toBe('        ' + 'x'.repeat(72));
+  });
+
+  it('MEMO-LOAD interprets a document as Forth source, definitions spanning lines and pages', () => {
+    const m = bootMachineWithMemo();
+    m.interpret('S" PROG" (MEMO-OPEN) DROP'); // a fresh 80 x 60 page document
+    const base = m.banks.findBankByName('PROG')!.base;
+    const put = (page: number, rowIndex: number, text: string) => {
+      const at = base + 32 + page * 80 * 60 + rowIndex * 80;
+      for (let i = 0; i < text.length; i++) m.arena.writeByte(at + i, text.charCodeAt(i));
+    };
+    m.arena.writeCell(base + 12, 2); // two pages
+    for (let i = 0; i < 80 * 60; i++) m.arena.writeByte(base + 32 + 80 * 60 + i, 32);
+    put(0, 0, ': TRIPLE ( n -- 3n )');
+    put(0, 1, '  DUP DUP + + ;   \\ ok');
+    put(0, 59, ': ON-TWO-PAGES');
+    put(1, 0, '  TRIPLE 1+ ;');
+    m.interpret('MEMO-LOAD prog 5 ON-TWO-PAGES');
+    expect(m.stack.toArray()).toEqual([16]);
+    m.stack.clear();
+
+    m.interpret('S" PROG" (MEMO-LOAD) S" NOSUCH" (MEMO-LOAD) S" BLKS" (MEMO-LOAD)');
+    expect(m.stack.toArray()).toEqual([0, 0, -1]); // top first: BLKS and NOSUCH fail
+    m.stack.clear();
+    expect(() => m.interpret('MEMO-LOAD NOSUCH')).toThrow();
+  });
+
+  it('a document can be run from MEMO itself with Shift-Esc', () => {
+    const m = bootMachineWithMemo();
+    m.interpret('S" PROG" (MEMO-OPEN) DROP S" NOTES" (MEMO-OPEN) DROP');
+    const base = m.banks.findBankByName('PROG')!.base;
+    const line = ': TRIPLE DUP DUP + + ;';
+    for (let i = 0; i < line.length; i++) m.arena.writeByte(base + 32 + i, line.charCodeAt(i));
+    m.interpret('MEMO');
+    m.startRepl();
+    settle(m);
+    typeText(m, 'memo-load prog 5 triple .');
+    key(m, K.esc, true);
+    expect(row(m, 0)).toBe('memo-load prog 5 triple . \\ ok');
+    expect(row(m, 1)).toBe('15');
   });
 });
 

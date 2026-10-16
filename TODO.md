@@ -46,15 +46,6 @@ document. It would be `NEEDS BASIC`, its source starting with
 `MS@`/`MS` for `PAUSE`, `KEY-DOWN?`, and `SPRITE`/`TILE`/`PLOT`. Paused
 on 2026-10-16 to do game support first.
 
-## `MEMO-LOAD`: running a MEMO document as Forth source
-
-`MEMO-LOAD name` interprets a document's pages as Forth source, line
-by line, the way `EVALUATE-LINES` does. It is in `09-MEMO.md` §10's
-open questions and in `13-GAME-LOOP.md` §8 and §11. With it, a game
-(or anything else) can be written in MEMO, run, and saved with the
-project, without leaving the machine. Small: a loop over the page
-bank's lines calling `EVALUATE`, plus the spec text.
-
 ## Think about: MEMO as a full-screen Forth environment
 
 Oliver's idea, to think through before building anything. MEMO already
@@ -66,8 +57,8 @@ screen-oriented Forths and notebook interfaces. Questions to settle:
 
 - Is this MEMO with different defaults, or a separate environment built
   on MEMO's page bank and keys?
-- What it would add: running a whole page or a marked block (overlaps
-  `MEMO-LOAD`), a scratch page that never fills up, a history, and
+- What it would add: running a whole page or a marked block (`MEMO-LOAD`,
+  M87, already runs a whole document), a scratch page that never fills up, a history, and
   error text in the status (`09-MEMO.md` §10, which needs error codes).
 - How it relates to the Forth prompt (`HOME`) and to block `LOAD` and
   the classic block editor (`NEEDS EDITOR`).
