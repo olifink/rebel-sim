@@ -25,8 +25,9 @@ export class FetchModuleHal implements ModuleHal {
       this.results.delete(name);
       return result ?? undefined;
     }
-    // Letters and digits only: a module name never becomes a path.
-    if (!/^[A-Z0-9]+$/.test(name)) return undefined;
+    // Letters and digits only, plus at most one extension (M86): a module
+    // name never becomes a path.
+    if (!/^[A-Z0-9]{1,8}(\.[A-Z0-9]{1,3})?$/.test(name)) return undefined;
     this.results.set(name, MODULE_PENDING);
     void this.fetchModule(name);
     return MODULE_PENDING;
@@ -35,7 +36,9 @@ export class FetchModuleHal implements ModuleHal {
   private async fetchModule(name: string): Promise<void> {
     let bytes: Uint8Array | null = null;
     try {
-      const response = await fetch(`${name.toLowerCase()}.fth`);
+      // NAME is NAME.fth, source; NAME.EXT is a file as named (M86).
+      const file = name.includes('.') ? name.toLowerCase() : `${name.toLowerCase()}.fth`;
+      const response = await fetch(file);
       // A dev server answers an unknown path with index.html and 200.
       const isHtml = (response.headers.get('content-type') ?? '').includes('text/html');
       if (response.ok && !isHtml) {

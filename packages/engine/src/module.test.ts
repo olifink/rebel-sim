@@ -83,3 +83,30 @@ describe('NEEDS (system.fth over (MODULE-READ), M79, spec/04-FORTH-CORE.md §6.1
     expect(() => m.interpret('NEEDS TOOLONGNAME')).toThrow();
   });
 });
+
+describe('LOAD-ASSET (M86, spec/04-FORTH-CORE.md §6.16)', () => {
+  it('loads a project-asset file beside the modules into a bank named for its basename, tag from its header', () => {
+    const m = bootMachine(); // NODE_MODULE_HAL: packages/app/public
+    m.interpret('LOAD-ASSET ROGUE.SPR');
+    const bank = m.banks.findBankByName('ROGUE')!;
+    expect(bank.tag).toBe('SPRT');
+    expect(String.fromCharCode(m.arena.readByte(bank.base), m.arena.readByte(bank.base + 1))).toBe('SP');
+    expect(m.arena.readCell(bank.base + 4)).toBe(16); // entry count
+
+    // Loading again reuses the bank, refreshing its contents.
+    m.arena.writeByte(bank.base + 8, 0xee);
+    m.interpret('LOAD-ASSET rogue.spr');
+    expect(m.banks.getAllBanks().filter((b) => b.name === 'ROGUE')).toHaveLength(1);
+    expect(m.arena.readByte(bank.base + 8)).not.toBe(0xee);
+  });
+
+  it('reports failure: (LOAD-ASSET) returns 0 and LOAD-ASSET aborts for a missing file or one that is not an asset', () => {
+    const modules = new FakeModules({ 'NOTASSET.DAT': 'plain text' });
+    const m = bootMachine({ moduleHal: modules });
+    expect(() => m.interpret('LOAD-ASSET NOSUCH.SPR')).toThrow();
+    expect(() => m.interpret('LOAD-ASSET NOTASSET.DAT')).toThrow();
+    m.interpret('S" X" S" NOTASSET.DAT" (LOAD-ASSET)');
+    expect(m.stack.toArray()).toEqual([0]);
+    expect(m.banks.findBankByName('NOTASSET')).toBeUndefined();
+  });
+});

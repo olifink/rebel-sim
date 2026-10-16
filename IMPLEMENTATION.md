@@ -5251,6 +5251,78 @@ the same way. A USB HID keyboard never repeats on its own anyway.
 - `REPEAT-DELAY 0` turns it off; the defaults; repeats arriving through
   `KEY`.
 
+### 1.97 The `GAME` module, `LOAD-ASSET`, and the `ROGUE` demo (M86, `13-GAME-LOOP.md` §7–§8)
+
+The last step of the game-loop plan: the portable engine layer, a way
+for a module to load its art, and a game that proves the chain from
+environment to sprite.
+
+*`LOAD-ASSET`* (BOOTSTRAP, `system.fth`; `01-HAL.md` §6.7,
+`04-FORTH-CORE.md` §6.16). `NEEDS` could only fetch `.fth` source, and
+a game also needs its sprite sheet.
+- A module name may now carry an extension. `NAME` still means
+  `name.fth`; `NAME.EXT` is any file shipped beside it. `FetchModuleHal`
+  accepts `[A-Z0-9]{1,8}(\.[A-Z0-9]{1,3})?`, and the Node HAL in
+  `test-support.ts` does the same.
+- `(LOAD-ASSET) ( name-a name-l file-a file-l -- slot | 0 )` reads the
+  file through `(MODULE-READ)` and requires the project-asset
+  `'R','A'` header. It reuses the bank named `name`, or creates it with
+  the file's tag, and copies the payload in with zero-padding, as
+  `BANK-LOAD` does.
+- `LOAD-ASSET ROGUE.SPR` names the bank after the file's basename.
+
+*`game.fth` (`NEEDS GAME`)*, public words in `FORTH`, internals hidden:
+- **Entities:** `NEW-ENTITIES ( count size -- )` (bank `ENTITIES`,
+  created or reused by `GAME-BANK` and zeroed; a smaller left-over bank
+  ABORTs), `ENTITY`, `SPAWN ( xt -- rec | 0 )`, `KILL`, and
+  `RUN-ENTITIES`, which calls each active record's update word with the
+  record. A record is a flags cell and an xt, with game data from
+  `REC-DATA` = 8.
+- **Render list:** `NEW-SLOTS` (bank `RENDER`, 16-byte slots: flags with
+  bit 0 active and bits 1–2 the layer, then x, y, entry), `PLACE`,
+  `UNPLACE`, `LAYER!`, `BACKGROUND` (an xt variable, `CLS` by default),
+  and `RENDER`, which runs the background and then draws layers 0–3,
+  in slot order within a layer.
+- **The rest:** `OVERLAP?`, and `FRAME` = `RUN-ENTITIES RENDER VSYNC`.
+- The spec draft's `ENTITIES` became `RUN-ENTITIES`, so it doesn't read
+  like the table itself. A slot has no flip override; flips come from
+  the bank entry, which is now in the spec.
+
+*`rogue.fth` (`NEEDS ROGUE`, then `ROGUE`)*: the demo, using the
+reference sheet (`public/rogue.spr`, renamed from M85's
+`rebel_rogue.SPR` because fetches go by the lower-cased name).
+- **Gameplay:** a room of wall tiles, plus a score and lives display, is
+  its `BACKGROUND`. The hero walks with the arrow keys (`KEY-DOWN?`,
+  2 px a frame), animating through entries 0–3. Three skeletons and two
+  bats bounce off the walls and cost a life on contact. Five coins
+  (`OVERLAP?`) give 10 points each and re-scatter when all are taken.
+  At zero lives the game is over, and Enter starts again.
+- **On entry:** it re-activates its sheet (`SPRITE-BASE`), because
+  another environment may have changed it. It also turns key repeat off
+  and hides the cursor.
+- **Each frame:** it drains the event queue, since it only polls state.
+  Esc restores repeat and the cursor, then `HOME`.
+- **Structure:** internals live in `ROGUE-VOCAB`, and `ROGUE` is the
+  only public word, the same pattern as MEMO.
+- Found while testing it: the first version never set `SPRITE-BASE`, so
+  it drew nothing. That is why 13 §7.4's example now sets it on entry.
+
+*Tests:*
+- `module.test.ts`: `LOAD-ASSET` (the real sheet, reuse on reload, and
+  failure on a missing file or a non-asset).
+- `game.test.ts`: spawn, run and kill with record reuse; rendering by
+  layer with a custom background; `OVERLAP?` edges.
+- `rogue.test.ts`, driving the REPL a frame at a time with a recording
+  HAL:
+  - the first frame draws 124 wall tiles, the hero, 5 enemies and 5
+    coins;
+  - holding Right moves the hero 20 px in 10 frames;
+  - Esc goes home with repeat restored;
+  - typing `ROGUE` at the prompt resumes the same game.
+- Boot images now hash every `.fth`/`.spr` file in `public/`, because a
+  module's image depends on the modules and assets it pulls in. The
+  global setup also prebuilds `system+GAME` and `system+ROGUE`.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5443,5 +5515,6 @@ exactly as it would be on the bare-metal target.
 | **M83** | Frames, time and held keys (§1.94, `13-GAME-LOOP.md` §3–§5, now in 01/03/04): `FRAME-COUNT` + `screen_frame()`; `VSYNC` (165), which suspends with a new `'frame'` status so the app keeps scheduling frames; `MS@` (166); `KEYS-DOWN` maintained by the keyboard module; `KEY-DOWN?` and `MS` in Forth. The app advances frames on every tick and ignores `FRAME-COUNT` when deciding whether to keep pumping. | `inner.ts`, `repl.ts`, `primitives.ts`, `screen.ts`, `keyboard.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `frames.test.ts` |
 | **M84** | Sprites and tiles (§1.95): `SPRITE-BASE` (`SPRITE` group, offset 0); KERNEL `SPRITE` (167) validates the active `SPRT` bank (`'S','P'` header, entry count, bounds) and blits through the new optional `ScreenHal.blitSprite`; `TILE` in Forth; `blitSpriteRgba` is the reference blitter the canvas HAL uses. Entry offsets are computed per call, never cached. Spec landed in 03 §9, 04 §6.17, 11 and 12. | `sprites.ts`, `screen.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `canvas-screen-hal.ts`, `sprites.test.ts` |
 | **M85** | Key auto-repeat (§1.96, `01-HAL.md` §4.3): the keyboard module repeats the most recent held non-modifier key after `REPEAT-DELAY` (500 ms) every `REPEAT-RATE` (50 ms). These are new `KEYBOARD` sysvars at offsets 40 and 44. It is driven by the new `keyboard_tick()` call-in (`Keyboard.tick()`), at most one repeat per call. Repeats reach `KEY`/`ACCEPT`/`EKEY` (`EKEY` bit 24 marks them) and leave `KEYS-DOWN` alone. The app ticks it each frame and keeps pumping while a key repeats. | `keyboard.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `keyboard.test.ts` |
+| **M86** | The `GAME` module, `LOAD-ASSET`, and the `ROGUE` demo (§1.97, `13-GAME-LOOP.md` §7–§8). Module names may carry an extension, and `LOAD-ASSET ROGUE.SPR` loads a shipped asset file into a bank. `game.fth` provides entities, a layered render list, `OVERLAP?` and `FRAME`. `rogue.fth` is a playable demo on the reference sprite sheet. 13 is now implemented apart from `MEMO-LOAD` and carts. | `system.fth`, `game.fth`, `rogue.fth`, `rogue.spr`, `fetch-module-hal.ts`, `test-support.ts`, `module.test.ts`, `game.test.ts`, `rogue.test.ts`, `sprites.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

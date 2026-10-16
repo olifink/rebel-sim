@@ -137,10 +137,10 @@ describe('blitSpriteRgba (the reference hal_blit_sprite)', () => {
 
 describe('the reference sprite sheet (rebel-specs/references/rebel_rogue.SPR)', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const appCopy = join(here, '../../app/public/rebel_rogue.SPR');
+  const appCopy = join(here, '../../app/public/rogue.spr');
   const specCopy = join(here, '../../../rebel-specs/references/rebel_rogue.SPR');
 
-  it("the app's copy matches the spec reference", () => {
+  it("the app's copy (public/rogue.spr) matches the spec reference", () => {
     if (!existsSync(specCopy)) return; // checkout without the rebel-specs submodule
     expect(readFileSync(appCopy).equals(readFileSync(specCopy))).toBe(true);
   });

@@ -1326,6 +1326,43 @@ CREATE MOD-LINE 24 ALLOT
 HIDE EL-ADDR
 HIDE EL-END
 
+\ LOAD-ASSET, M86, spec 04-FORTH-CORE.md section 6.16 -- LOAD-ASSET
+\ ROGUE.SPR reads a file the target ships beside its modules, in the
+\ project-asset format -- 'R','A', the 4-byte tag, then the payload, as
+\ SAVE writes them -- into the bank named for the file's basename, ROGUE,
+\ creating it with the file's tag if it does not exist. The payload is
+\ copied in and the rest of the bank zeroed, as BANK-LOAD does. The
+\ non-parsing form returns the slot or 0; the parsing form ABORTs.
+VARIABLE LA-SRC  VARIABLE LA-LEN  VARIABLE LA-FA  VARIABLE LA-FL
+CREATE LA-TAG 4 ALLOT
+: LA-TAG-LEN ( -- n ) \ the tag without its NUL padding
+  4 BEGIN DUP IF DUP 1- LA-TAG + C@ 0= ELSE 0 THEN WHILE 1- REPEAT ;
+: (LOAD-ASSET) ( name-a name-l file-a file-l -- slot | 0 )
+  (MODULE-READ) LA-LEN ! LA-SRC !
+  LA-LEN @ 6 < IF 2DROP 0 EXIT THEN
+  LA-SRC @ C@ 82 =  LA-SRC @ 1+ C@ 65 =  AND 0= IF 2DROP 0 EXIT THEN
+  LA-SRC @ 2 + LA-TAG 4 CMOVE
+  2DUP (BANK-FIND) ?DUP 0= IF
+    LA-TAG LA-TAG-LEN LA-LEN @ 6 - 1 MAX (BANK-CREATE)
+    DUP 0= IF EXIT THEN
+  ELSE NIP NIP THEN
+  DUP 16 + @ LA-LEN @ 6 - < IF DROP 0 EXIT THEN
+  DUP 12 + @ >R
+  LA-SRC @ 6 + R@ LA-LEN @ 6 - CMOVE
+  R@ LA-LEN @ 6 - +  OVER 16 + @ LA-LEN @ 6 - -  0 FILL
+  R> DROP ;
+: LOAD-ASSET ( "file" -- )
+  BL WORD 2DUP LA-FL ! LA-FA !
+  0 BEGIN DUP LA-FL @ < IF LA-FA @ OVER + C@ 46 <> ELSE 0 THEN WHILE 1+ REPEAT
+  LA-FA @ SWAP 2SWAP (LOAD-ASSET)
+  0= IF LA-FA @ LA-FL @ TYPE SPACE ." - cannot load asset" ABORT THEN ;
+HIDE LA-SRC
+HIDE LA-LEN
+HIDE LA-FA
+HIDE LA-FL
+HIDE LA-TAG
+HIDE LA-TAG-LEN
+
 ( M75: LOAD evaluates each line through EVALUATE now, so it hands )
 ( the caller's input line back too -- before, anything typed after )
 ( n LOAD on the same line was silently dropped. LOAD-BLK and )

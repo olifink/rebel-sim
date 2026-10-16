@@ -17,7 +17,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inject } from 'vitest';
@@ -30,11 +30,14 @@ const SYSTEM_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app
 export const FLOAT_FTH_PATH = join(dirname(fileURLToPath(import.meta.url)), '../../app/public/float.fth');
 
 /** M79: the module HAL tests boot with — source modules are the app's
- * own `public/<name>.fth` files, read straight off disk, never pending. */
+ * own `public/<name>.fth` files (or `public/<name.ext>` for an asset, M86),
+ * read straight off disk, never pending. */
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../app/public');
 export const NODE_MODULE_HAL: ModuleHal = {
   read(name: string): Uint8Array | undefined {
-    const path = join(PUBLIC_DIR, `${name.toLowerCase()}.fth`);
+    // A name with an extension is a file as named, otherwise source (M86).
+    const file = name.includes('.') ? name.toLowerCase() : `${name.toLowerCase()}.fth`;
+    const path = join(PUBLIC_DIR, file);
     return existsSync(path) ? new Uint8Array(readFileSync(path)) : undefined;
   },
 };
@@ -79,7 +82,7 @@ export function loadSystemVocabulary(machine: Machine): void {
 /** The images the global setup prebuilds: the bare boot, and the boot
  * plus each source module a test file loads. Any other module list is
  * compiled on first use, once per worker. */
-export const BOOT_IMAGE_KEYS = ['system', 'system+FLOAT', 'system+MEMO', 'system+EDITOR', 'system+GRAPHICS'];
+export const BOOT_IMAGE_KEYS = ['system', 'system+FLOAT', 'system+MEMO', 'system+EDITOR', 'system+GRAPHICS', 'system+GAME', 'system+ROGUE'];
 type BootImageKey = string;
 
 declare module 'vitest' {
@@ -107,8 +110,13 @@ function loadFor(key: BootImageKey): (m: Machine) => void {
 
 /** Identifies the sources an image was compiled from. */
 export function bootImageSourceHash(key: BootImageKey): string {
-  const hash = createHash('sha1').update(readFileSync(SYSTEM_FTH_PATH));
-  for (const module of modulesOf(key)) hash.update(readFileSync(join(PUBLIC_DIR, `${module.toLowerCase()}.fth`)));
+  // Every source module and shipped asset, not just the key's own: a
+  // module may NEEDS others or LOAD-ASSET files (ROGUE does both), and
+  // hashing them all is cheap and never misses one.
+  const hash = createHash('sha1').update(key).update(readFileSync(SYSTEM_FTH_PATH));
+  for (const file of readdirSync(PUBLIC_DIR).filter((f) => /\.(fth|spr)$/i.test(f)).sort()) {
+    hash.update(file).update(readFileSync(join(PUBLIC_DIR, file)));
+  }
   return hash.digest('hex');
 }
 
