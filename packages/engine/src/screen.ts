@@ -38,6 +38,22 @@ export interface ScreenHal {
    * no display at all, may always return a fixed sentinel); `x`/`y` are
    * already bounds-checked by `Screen.point()`. */
   readPixel(x: number, y: number): number;
+  /** spec/01-HAL.md §3.8's `hal_blit_sprite` (M84): draws one 4bpp bitmap
+   * at pixel `(x, y)`. `pixels` is a resolved span of exactly
+   * `(width / 2) * height` bytes, high nibble the left pixel; `palette`
+   * holds 16 `0xRRGGBB` colors; index 0 is transparent; `flags` bit 0 is
+   * H-FLIP and bit 1 V-FLIP. The HAL clips. Optional: a HAL without it
+   * (the simulated board's) draws no sprites. `sprites.ts`'s
+   * `blitSpriteRgba` is a reference implementation. */
+  blitSprite?(
+    x: number,
+    y: number,
+    pixels: Uint8Array,
+    width: number,
+    height: number,
+    palette: Uint32Array,
+    flags: number,
+  ): void;
 }
 
 export const NULL_SCREEN_HAL: ScreenHal = {

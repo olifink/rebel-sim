@@ -15,7 +15,7 @@
  * local constant — no concrete need yet to sysvar-ize it.
  */
 
-import { Arena, ScreenHal, Sysvars } from '@rebel-sim/engine';
+import { Arena, ScreenHal, Sysvars, blitSpriteRgba } from '@rebel-sim/engine';
 
 const FONT_WIDTH = 8;
 const FONT_HEIGHT = 8;
@@ -79,5 +79,28 @@ export class CanvasScreenHal implements ScreenHal {
   readPixel(x: number, y: number): number {
     const [r, g, b] = this.ctx.getImageData(x, y, 1, 1).data;
     return (r << 16) | (g << 8) | b;
+  }
+
+  /** spec/01-HAL.md §3.8's `hal_blit_sprite` (M84): reads back only the
+   * clipped destination rectangle, draws into it with the engine's
+   * reference blitter (transparency, flips), and writes it back. */
+  blitSprite(
+    x: number,
+    y: number,
+    pixels: Uint8Array,
+    width: number,
+    height: number,
+    palette: Uint32Array,
+    flags: number,
+  ): void {
+    const { width: w, height: h } = this.ctx.canvas;
+    const x0 = Math.max(0, x);
+    const y0 = Math.max(0, y);
+    const x1 = Math.min(w, x + width);
+    const y1 = Math.min(h, y + height);
+    if (x0 >= x1 || y0 >= y1) return;
+    const image = this.ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+    blitSpriteRgba(image.data, x1 - x0, y1 - y0, x - x0, y - y0, pixels, width, height, palette, flags);
+    this.ctx.putImageData(image, x0, y0);
   }
 }

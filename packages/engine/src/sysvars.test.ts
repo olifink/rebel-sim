@@ -56,16 +56,18 @@ describe('Sysvars project name (spec/03-SYSVARS.md §10)', () => {
 });
 
 describe('listSysvars (web-only monitor-panel support)', () => {
-  it('lists only fields opcodes.json actually defines, skipping reserved/empty groups', () => {
+  it('lists only fields opcodes.json actually defines, skipping reserved ones', () => {
     const sysvars = makeSysvars();
     const entries = listSysvars(sysvars);
 
     // FORTH.STATE is a real, populated field.
     expect(entries.some((e) => e.group === 'FORTH' && e.field === 'STATE')).toBe(true);
-    // FONT.FONT-BASE is real now too (M59) — SPRITE is still reserved
-    // with no fields yet (rebel-opcodes.json).
+    // FONT.FONT-BASE is real too (M59), and SPRITE.SPRITE-BASE since M84,
+    // when the SPRITE group stopped being only reserved.
     expect(entries.some((e) => e.group === 'FONT' && e.field === 'FONT-BASE')).toBe(true);
-    expect(entries.some((e) => e.group === 'SPRITE')).toBe(false);
+    expect(entries.some((e) => e.group === 'SPRITE' && e.field === 'SPRITE-BASE')).toBe(true);
+    // STORAGE.MOUNTED is reserved by the spec but not defined here.
+    expect(entries.some((e) => e.group === 'STORAGE' && e.field === 'MOUNTED')).toBe(false);
   });
 
   it('reads each field\'s live current value, not a cached snapshot', () => {

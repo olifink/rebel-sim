@@ -17,11 +17,12 @@
  */
 
 import { DataStack } from './stack.js';
-import { Screen } from './screen.js';
+import { Screen, ScreenHal } from './screen.js';
 import { Keyboard, packKeyEvent } from './keyboard.js';
 import { cellToFloat, floatToCell, floatToInt } from './float32.js';
 import { ModuleHal } from './module.js';
 import { TimingHal } from './timing.js';
+import { drawSprite } from './sprites.js';
 import { Channel } from './channel.js';
 import { type Bank, BankFlagRemoved, BankTable, BLOCK_SIZE } from './banks.js';
 import { Storage } from './storage.js';
@@ -107,6 +108,9 @@ export interface PrimitiveContext extends DictionaryContext {
   readonly moduleHal: ModuleHal;
   /** spec/01-HAL.md §7.1's `hal_millis`, which `MS@` (M83) reads. */
   readonly timingHal: TimingHal;
+  /** The screen HAL itself, for `SPRITE` (M84), which hands it a bitmap
+   * directly rather than going through `Screen`. */
+  readonly screenHal: ScreenHal;
   /** M54: the size a named bank actually had the moment this `Machine`
    * finished booting — *not* `banks.findBank(name)?.size`, which reads
    * MMAP fresh and so would already reflect a `BANK-RESIZE` (146) that
@@ -1326,6 +1330,16 @@ export function executePrimitive(ctx: PrimitiveContext, tokenId: number): void {
       // wrapping cell.
       s.push(Math.floor(ctx.timingHal.millis()) | 0);
       break;
+
+    case 167: { // SPRITE ( x y n -- ) spec/13-GAME-LOOP.md §6.2, M84: entry n
+      // of the active sprite bank at pixel (x, y). sprites.ts does the
+      // portable validation; anything invalid draws nothing.
+      const n = s.pop();
+      const y = s.pop();
+      const x = s.pop();
+      drawSprite(ctx.arena, ctx.banks, ctx.sysvars, ctx.screenHal, x, y, n);
+      break;
+    }
 
     case 150: { // (BANK-CREATE) ( name-a name-l tag-a tag-l size -- slot | 0 )
       // spec/04-FORTH-CORE.md §6.14, M73. A zero-length name gets the

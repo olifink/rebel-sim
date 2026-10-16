@@ -5165,6 +5165,49 @@ The first engine slice of the game-loop draft. Its spec has now landed:
 - `MS@`, and `MS` with a controllable clock, waiting a frame at a time;
 - `KEY-DOWN?` with modifiers, unaffected by reading the event queue.
 
+### 1.95 Sprites and tiles (M84, `13-GAME-LOOP.md` §6, `01-HAL.md` §3.8)
+
+The second engine slice of the game-loop draft. Its spec has landed in
+`03-SYSVARS.md` §9, `04-FORTH-CORE.md` §6.17, `11-SPRITE-BANK.md` and
+`12-WORLD-MAP.md`.
+
+- **`SPRITE-BASE`** (`SPRITE` group, offset 0): the active `SPRT` bank,
+  `0` = none, like `FONT-BASE`. This makes the group no longer just
+  reserved, and resolves `12-WORLD-MAP.md`'s "which tile bank" gap.
+- **`SPRITE ( x y n -- )` (167), KERNEL,** because it hands the HAL a
+  resolved byte span. The portable part is `sprites.ts`'s `drawSprite`.
+  It requires `SPRITE-BASE` to be the base of an active `SPRT` bank with
+  the new `'S','P'`, v1 header (M83's format fix), bounds-checks `n`
+  against the header's entry count, finds the entry by summing the sizes
+  of the earlier entries, rejects bad dimensions and an entry running
+  past the bank's end, and passes a zero-copy `Uint8Array` view plus the
+  16-color palette to `ScreenHal.blitSprite`. Anything invalid draws
+  nothing.
+- **No offset cache.** The per-call sum can't go stale when a sheet is
+  reloaded into the same bank, which a cache keyed on the base address
+  would. `11-SPRITE-BANK.md` now allows a cache only if it never goes
+  stale, and drops `BUILD-BANK`.
+- **`ScreenHal.blitSprite` is optional.** The simulated `TERMINAL`
+  board's HAL has none, so `SPRITE` does nothing there.
+- **`blitSpriteRgba`** (exported) is a reference `hal_blit_sprite` over
+  an RGBA buffer: high nibble left, index 0 transparent, H/V flip by
+  reversed source walk, clipped. The app's `CanvasScreenHal.blitSprite`
+  reads back only the clipped rectangle as `ImageData`, runs it there,
+  and writes it back.
+- **`system.fth`:** a `SPRITE-BASE` address constant, and `TILE ( col row
+  n -- )` as `SPRITE` at the character cell times `CHAR-CELL-W`/`-H`.
+- `Machine`/`PrimitiveContext` now expose `screenHal` (defaulting to
+  `NULL_SCREEN_HAL`), because `SPRITE` goes straight to the HAL rather
+  than through `Screen`.
+
+*Tests:* new `sprites.test.ts` with a recording HAL. It covers:
+- the right entry and offset, palette and flags;
+- drawing nothing with no bank, a non-`SPRT` bank, a spoiled magic, an
+  index out of range (including negative), or an overrunning entry;
+- `TILE`'s coordinates, and setting `SPRITE-BASE` from Forth;
+- the reference blitter's nibble order, transparency, both flips, and
+  clipping, including a sprite starting off screen.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5355,5 +5398,6 @@ exactly as it would be on the bare-metal target.
 | **M81** | `MODULE` renamed `NEEDS` (Oliver's call, after vForth for the ZX Spectrum Next), in code and in `rebel-specs` (`04-FORTH-CORE.md` §6.16 and every module reference). The machinery underneath keeps its names: `(MODULE-READ)`, `hal_module_read`, `ModuleHal`, and "source module" for the concept. Marker words are still `NAME.FTH`. §1.91 is updated in place. | `system.fth`, `memo.fth`, `module.ts`, `repl.ts`, `rebel-opcodes.json`, `test-support.ts`, `module.test.ts`, `float.test.ts`, `app.ts`, `fetch-module-hal.ts`, `rebel-specs` 01/04/06/07/08/09 |
 | **M82** | The block screen editor and `GRAPHICS` become source modules (§1.93): `NEEDS EDITOR` (`editor.fth`) and `NEEDS GRAPHICS` (`graphics.fth`), moved unchanged out of `system.fth` (2,191 to 1,475 lines). The block words and `LOAD` stay core. Test boot images now take any module list (`bootMachineWith`), and the global test timeout goes to 90 s. | `system.fth`, `editor.fth`, `graphics.fth`, `test-support.ts`, `screen-editor.test.ts`, `screen-editor-commands.test.ts`, `see-hide.test.ts`, `graphics.test.ts`, `empty.test.ts`, `vitest.config.ts` |
 | **M83** | Frames, time and held keys (§1.94, `13-GAME-LOOP.md` §3–§5, now in 01/03/04): `FRAME-COUNT` + `screen_frame()`; `VSYNC` (165), which suspends with a new `'frame'` status so the app keeps scheduling frames; `MS@` (166); `KEYS-DOWN` maintained by the keyboard module; `KEY-DOWN?` and `MS` in Forth. The app advances frames on every tick and ignores `FRAME-COUNT` when deciding whether to keep pumping. | `inner.ts`, `repl.ts`, `primitives.ts`, `screen.ts`, `keyboard.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `frames.test.ts` |
+| **M84** | Sprites and tiles (§1.95): `SPRITE-BASE` (`SPRITE` group, offset 0); KERNEL `SPRITE` (167) validates the active `SPRT` bank (`'S','P'` header, entry count, bounds) and blits through the new optional `ScreenHal.blitSprite`; `TILE` in Forth; `blitSpriteRgba` is the reference blitter the canvas HAL uses. Entry offsets are computed per call, never cached. Spec landed in 03 §9, 04 §6.17, 11 and 12. | `sprites.ts`, `screen.ts`, `primitives.ts`, `repl.ts`, `index.ts`, `rebel-opcodes.json`, `system.fth`, `canvas-screen-hal.ts`, `sprites.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

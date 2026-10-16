@@ -189,7 +189,8 @@
     { "id": 163, "name": "F>S", "note": "( r -- n ) truncates toward zero and saturates: above the integer range gives 0x7FFFFFFF, below it 0x80000000, NaN gives 0. spec/07-FLOATING-POINT.md §4, M78, KERNEL: a float is an IEEE 754 binary32 value in one cell (float32.ts). Correctly rounded, round-to-nearest-even, subnormals kept, never traps; any NaN result is the canonical 0x7FC00000." },
     { "id": 164, "name": "(MODULE-READ)", "note": "( addr len -- src-addr src-len | 0 0 ) spec/04-FORTH-CORE.md §6.16, M79, KERNEL: fetches the source module named addr len (folded to upper case) through the module HAL (spec/01-HAL.md §6.7, module.ts), suspending like KEY while the host is still fetching. Copies the text into a fresh anonymous DATA bank marked REMOVED, so it is never saved with the project, and pushes its address and length; 0 0 if the target has no such module. inner.ts's dispatch() special-cases it, like KEY. NEEDS (system.fth) is built on it." },
     { "id": 165, "name": "VSYNC", "note": "( -- ) spec/13-GAME-LOOP.md §3.2, M83, KERNEL: suspends until FRAME-COUNT differs from its value when VSYNC was called. inner.ts's dispatch() special-cases it like KEY but yields the distinct 'frame' signal, so the host keeps scheduling frames (it advances FRAME-COUNT on each) instead of waiting for an outside wake as it does on 'blocked'." },
-    { "id": 166, "name": "MS@", "note": "( -- n ) spec/13-GAME-LOOP.md §4, M83, KERNEL: milliseconds since boot from the timing HAL (hal_millis), as a cell that wraps at 2^32; compare differences, never absolute values." }
+    { "id": 166, "name": "MS@", "note": "( -- n ) spec/13-GAME-LOOP.md §4, M83, KERNEL: milliseconds since boot from the timing HAL (hal_millis), as a cell that wraps at 2^32; compare differences, never absolute values." },
+    { "id": 167, "name": "SPRITE", "note": "( x y n -- ) spec/13-GAME-LOOP.md §6.2, M84, KERNEL: draws entry n of the active sprite bank (SPRITE-BASE) with its top-left at pixel (x, y), through the HAL's blitSprite (01-HAL.md §3.8). KERNEL because it hands the HAL a resolved byte span, which Forth cannot form. sprites.ts's drawSprite does the portable part: checks that SPRITE-BASE is an SPRT bank with the 'S','P' header, bounds-checks n against its entry count, finds the entry by summing earlier entry sizes, keeps the pixels inside the bank, and passes the palette. Anything invalid draws nothing; clipping is the HAL's. TILE (system.fth) is SPRITE at a character cell." }
   ],
 
   "bankTags": {
@@ -262,8 +263,10 @@
     },
     "SPRITE": {
       "baseOffset": 256,
-      "note": "matches src/sysvars.h's SYSVARS_SPRITE_OFFSET (0x100). Reserved.",
-      "fields": {},
+      "note": "matches src/sysvars.h's SYSVARS_SPRITE_OFFSET (0x100). M84: SPRITE-BASE, spec/13-GAME-LOOP.md §6.1.",
+      "fields": {
+        "SPRITE-BASE": { "offset": 0, "note": "spec/13-GAME-LOOP.md §6.1, M84: base address of the active SPRT bank, 0 = none, the same pattern as FONT-BASE. SPRITE and TILE draw from it." }
+      },
       "groupSizeBytes": 64
     },
     "STORAGE": {

@@ -39,3 +39,4 @@ export { RemoteTerminal } from './remote-terminal.js';
 export type { ByteSink } from './remote-terminal-protocol.js';
 export { MODULE_PENDING, NULL_MODULE_HAL } from './module.js';
 export type { ModuleHal } from './module.js';
+export { drawSprite, blitSpriteRgba } from './sprites.js';

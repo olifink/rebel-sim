@@ -47,7 +47,7 @@ import { Bank, BankTable, BLOCK_SIZE, type Personality } from './banks.js';
 import { DataStack } from './stack.js';
 import { Sysvars } from './sysvars.js';
 import { PrimitiveContext, WarmReset } from './primitives.js';
-import { Screen, ScreenHal } from './screen.js';
+import { NULL_SCREEN_HAL, Screen, ScreenHal } from './screen.js';
 import { Keyboard } from './keyboard.js';
 import { Channel, CompositeChannel, KeyboardChannel, RemoteChannel } from './channel.js';
 import { NULL_STORAGE_HAL, peekProjectAssets, Storage, StorageHal } from './storage.js';
@@ -277,6 +277,7 @@ export class Machine implements PrimitiveContext, DictionaryContext {
   readonly channel: Channel;
   readonly timingHal: TimingHal;
   readonly moduleHal: ModuleHal;
+  readonly screenHal: ScreenHal;
   private readonly inner: Inner;
   // M31 (spec/02-MEMORY-MODEL.md §4.6): TIB and PAD share one WORK
   // bank, at fixed sub-offsets, rather than each independently
@@ -411,7 +412,8 @@ export class Machine implements PrimitiveContext, DictionaryContext {
     // being indices into it. `0 PALETTE-BASE !` still disables it same
     // as always.
     this.sysvars.set('SCREEN', 'PALETTE-BASE', palBank.base);
-    this.screen = new Screen(this.arena, charBank, attrBank, this.sysvars, options.screenHal);
+    this.screenHal = options.screenHal ?? NULL_SCREEN_HAL;
+    this.screen = new Screen(this.arena, charBank, attrBank, this.sysvars, this.screenHal);
     this.screen.cls();
 
     const kmapBank = this.banks.createBank('KMAP', sizeFor('KMAP', KMAP_BANK_SIZE), 'KMAP');

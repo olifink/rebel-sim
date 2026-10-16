@@ -1477,6 +1477,17 @@ BANK@ SYSV 136 + CONSTANT KEYS-DOWN
 \ cell, so it is safe across MS@ wrapping.
 : MS ( n -- ) MS@ + BEGIN DUP MS@ - 0> WHILE VSYNC REPEAT DROP ;
 
+\ ---- Sprites and tiles, M84, spec 13-GAME-LOOP.md 6 ----
+\ SPRITE is native: x y n SPRITE draws entry n of the active sprite bank
+\ at pixel x y. SPRITE-BASE, SPRITE offset 0 = SYSV 256, holds that
+\ bank's base -- BANK@ SHIPS SPRITE-BASE ! makes SHIPS active.
+BANK@ SYSV 256 + CONSTANT SPRITE-BASE
+
+\ TILE -- SPRITE at a character cell, CHAR-CELL-W and CHAR-CELL-H being
+\ SCREEN offsets 8 and 12, SYSV 72 and 76.
+: TILE ( col row n -- )
+  >R  BANK@ SYSV 76 + @ *  SWAP BANK@ SYSV 72 + @ *  SWAP  R> SPRITE ;
+
 
 
 
