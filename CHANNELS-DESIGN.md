@@ -180,7 +180,7 @@ different physical link, different purpose — so there's no actual need
 for a shared multiplexing codec between them. What Net-Stick should reuse
 is the frame *shape* above (sync/id/len/checksum, endianness, booleans,
 resync-by-rescan, no-ACK philosophy), while defining its own `MSG_ID`
-catalog scoped to postboxes (`NET-STICK.md`, forthcoming) — the same
+catalog scoped to postboxes (`rebel-specs/external/NET-STICK.md`) — the same
 relationship `REMOTE-TERMINAL.md`'s catalog has to this shared shape, not
 a new relationship.
 
@@ -188,7 +188,7 @@ One consequence worth flagging now rather than rediscovering later:
 `LEN` is a `u8` (max 255-byte payload) in the adopted convention. Net-Stick
 response bodies — including anything condensor/summarizer output — will
 routinely exceed that and need chunking across multiple frames; that's a
-`NET-STICK.md` design point, not a change to this shape.
+`rebel-specs/external/NET-STICK.md` design point, not a change to this shape.
 
 **First real use of the reserved write side.** `SerialChannel`'s
 `write_byte()`/`write_string()`, reserved-but-unused since §3, get their
@@ -324,7 +324,7 @@ coherent command/response cycle looks like.
    `REMOTE-TERMINAL.md` §3, implemented in C++ for the first time (that
    doc's version is TypeScript/Rebel-Sim-side only). Sits beside
    `Channel` rather than inside it. First consumer is Rebel-Net-Stick's
-   postbox device-services module (`NET-STICK.md`, forthcoming), riding
+   postbox device-services module (`rebel-specs/external/NET-STICK.md`), riding
    on `SerialChannel`'s now-active write side, with its own `MSG_ID`
    catalog rather than sharing one with Remote-Terminal's.
 
