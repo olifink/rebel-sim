@@ -5080,6 +5080,9 @@ no longer a deviation.
   that stop (`INSERT-TAB`, a `CMOVE>` by 1 to 8 columns), losing what
   passes the margin as Shift-Space does. The cursor moves with the
   text, so repeated presses indent further.
+- **Plain Esc** (2026-10-17, Oliver) leaves MEMO from any line, as
+  Shift-Esc on a blank line does: it commits, then `HOME`
+  (`09-MEMO.md` §6, §8).
 
 *Tests:* new `memo.test.ts` drives the real REPL loop with raw key
 events through `bootMachineWithMemo()` (a new `system+memo` boot image).
@@ -5356,6 +5359,25 @@ be written in MEMO and run on the machine.
 - `MEMO-LOAD` running from a Shift-Esc line in NOTES, with the output
   captured below it.
 
+### 1.99 Small tweaks: `VLIST`, MEMO's Esc, ROGUE's start screen (M88)
+
+Three unscheduled requests from Oliver, 2026-10-17:
+- **`VLIST`** (`system.fth`, right after `WORDS`): `: VLIST WORDS ;`,
+  fig-Forth's name for the same word, for old habits. Added to
+  `04-FORTH-CORE.md` §7.2's library table.
+- **Esc leaves MEMO** from any line, committing first, like Shift-Esc on
+  a blank line (§1.92's follow-ups; `09-MEMO.md` §6, §8).
+- **ROGUE waits for a key on every entry**, new game or resumed, showing
+  "PRESS A KEY TO START" until any key but Esc is pressed (`WAITING`,
+  cleared by `DRAIN`). Nothing moves while it waits. So that the sprites
+  show while waiting, `NEW-GAME` now places every one (hero, enemies,
+  coins) instead of leaving that to their first update.
+
+*Tests:* `VLIST`'s output matches `WORDS`'s (`words-sufficiency.test.ts`);
+a plain Esc from a non-blank line goes home with the page committed
+(`memo.test.ts`); in `rogue.test.ts`, sprites are shown and enemies stay
+still until Space starts the game, and then move.
+
 ---
 
 ## 2. Worked example: tracing `: SQUARE DUP * ; 5 SQUARE .`
@@ -5550,5 +5572,6 @@ exactly as it would be on the bare-metal target.
 | **M85** | Key auto-repeat (§1.96, `01-HAL.md` §4.3): the keyboard module repeats the most recent held non-modifier key after `REPEAT-DELAY` (500 ms) every `REPEAT-RATE` (50 ms). These are new `KEYBOARD` sysvars at offsets 40 and 44. It is driven by the new `keyboard_tick()` call-in (`Keyboard.tick()`), at most one repeat per call. Repeats reach `KEY`/`ACCEPT`/`EKEY` (`EKEY` bit 24 marks them) and leave `KEYS-DOWN` alone. The app ticks it each frame and keeps pumping while a key repeats. | `keyboard.ts`, `repl.ts`, `rebel-opcodes.json`, `system.fth`, `app.ts`, `keyboard.test.ts` |
 | **M86** | The `GAME` module, `LOAD-ASSET`, and the `ROGUE` demo (§1.97, `13-GAME-LOOP.md` §7–§8). Module names may carry an extension, and `LOAD-ASSET ROGUE.SPR` loads a shipped asset file into a bank. `game.fth` provides entities, a layered render list, `OVERLAP?` and `FRAME`. `rogue.fth` is a playable demo on the reference sprite sheet. 13 is now implemented apart from `MEMO-LOAD` and carts. | `system.fth`, `game.fth`, `rogue.fth`, `rogue.spr`, `fetch-module-hal.ts`, `test-support.ts`, `module.test.ts`, `game.test.ts`, `rogue.test.ts`, `sprites.test.ts` |
 | **M87** | `MEMO-LOAD`/`(MEMO-LOAD)` (§1.98, `09-MEMO.md` §7.1): interpret a page document as Forth source, line by line through `EVALUATE`, definitions spanning lines and pages, `CONTEXT` aligned as `LOAD` does, nestable, MEMO's own state untouched. `13-GAME-LOOP.md` is now implemented apart from carts. | `memo.fth`, `memo.test.ts` |
+| **M88** | Small tweaks (§1.99): `VLIST` aliases `WORDS`; a plain Esc leaves MEMO from any line; ROGUE waits for a key, with "PRESS A KEY TO START", on every entry. | `system.fth`, `memo.fth`, `rogue.fth`, `words-sufficiency.test.ts`, `memo.test.ts`, `rogue.test.ts` |
 
 See `PLAN.md` for the decision log and detailed per-milestone build notes.

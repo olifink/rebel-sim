@@ -87,3 +87,15 @@ describe('WORDS — behavior once the real bootstrap layer has loaded', () => {
     expect(() => m.interpret("' NUM-LEN")).toThrow(/unrecognized word/i);
   });
 });
+
+describe('VLIST (fig-Forth name for WORDS)', () => {
+  it('prints exactly what WORDS prints', () => {
+    const m = bootMachine();
+    const screen = (): string => Array.from({ length: m.screen.rows }, (_, r) => m.screen.readRowText(r)).join('\n');
+    m.interpret('CLS WORDS');
+    const words = screen();
+    m.interpret('CLS VLIST');
+    expect(screen()).toBe(words);
+    expect(words).toContain('VLIST');
+  });
+});

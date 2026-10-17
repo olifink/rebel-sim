@@ -1,6 +1,7 @@
 \ rogue.fth -- ROGUE, a small demo game for rebel-specs 13-GAME-LOOP.md.
 \ Load it with NEEDS ROGUE and play with ROGUE. The arrow keys move the
 \ hero; collect the coins and keep away from the skeletons and bats.
+\ Each time it is entered it waits for a key before anything moves.
 \ Enter starts again after the game is over; Esc returns to the prompt.
 \ The art is the reference sheet rebel-specs/references/rebel_rogue.SPR,
 \ shipped beside this file as rogue.spr.
@@ -21,6 +22,7 @@ ROGUE-VOCAB DEFINITIONS
 
 \ ---- state ----
 VARIABLE SCORE  VARIABLE LIVES  VARIABLE DONE  VARIABLE STARTED
+VARIABLE WAITING   \ held until a key is pressed, after every entry
 VARIABLE HERO  VARIABLE COINS-LEFT  VARIABLE SEED  1 SEED !
 VARIABLE HERO-XT  VARIABLE ENEMY-XT  VARIABLE COIN-XT  VARIABLE ROOM-XT
 
@@ -46,7 +48,8 @@ VARIABLE HERO-XT  VARIABLE ENEMY-XT  VARIABLE COIN-XT  VARIABLE ROOM-XT
 : HUD ( -- )
   2 1 AT-XY ." ROGUE   SCORE" SPACE SCORE @ .  ." LIVES" SPACE LIVES @ .
   2 2 AT-XY ." ARROWS MOVE - ESC QUITS"
-  DONE @ IF 12 15 AT-XY ." GAME OVER - PRESS ENTER" THEN ;
+  DONE @ IF 12 15 AT-XY ." GAME OVER - PRESS ENTER" THEN
+  WAITING @ IF 12 15 AT-XY ." PRESS A KEY TO START" THEN ;
 : ROOM ( -- ) CLS WALLS HUD ;
 
 \ ---- the hero ----
@@ -73,12 +76,12 @@ VARIABLE HERO-XT  VARIABLE ENEMY-XT  VARIABLE COIN-XT  VARIABLE ROOM-XT
 : NEW-ENEMY ( entry slot vx vy -- )
   >R >R ENEMY-XT @ -ROT NEW-REC
   120 RND 160 + OVER R-X !  Y-MAX Y-MIN - 24 - RND Y-MIN + OVER R-Y !
-  R> OVER R-VX !  R> SWAP R-VY ! ;
+  R> OVER R-VX !  R> OVER R-VY !  SHOW ;
 
 \ ---- coins: scattered five at a time, ten points each ----
 : SCATTER ( rec -- )
   X-MAX X-MIN - 16 - RND X-MIN + OVER R-X !  Y-MAX Y-MIN - 16 - RND Y-MIN + SWAP R-Y ! ;
-: DROP-COINS ( -- ) 5 0 DO COIN-XT @ COIN I 6 + NEW-REC SCATTER LOOP  5 COINS-LEFT ! ;
+: DROP-COINS ( -- ) 5 0 DO COIN-XT @ COIN I 6 + NEW-REC DUP SCATTER SHOW LOOP  5 COINS-LEFT ! ;
 : COIN-UPDATE ( rec -- )
   DUP SHOW  DUP 8 TOUCHES? IF
     10 SCORE +!  DUP R-SLOT @ UNPLACE  KILL
@@ -91,14 +94,16 @@ VARIABLE HERO-XT  VARIABLE ENEMY-XT  VARIABLE COIN-XT  VARIABLE ROOM-XT
 : NEW-GAME ( -- )
   16 32 NEW-ENTITIES  16 NEW-SLOTS  1 0 LAYER!
   0 SCORE !  3 LIVES !  0 DONE !
-  HERO-XT @ HERO-0 0 NEW-REC HERO !  START-HERO
+  HERO-XT @ HERO-0 0 NEW-REC HERO !  START-HERO  HERO @ SHOW
   SKELETON 1 1 1 NEW-ENEMY  SKELETON 2 -1 1 NEW-ENEMY  SKELETON 3 1 -1 NEW-ENEMY
   BAT 4 2 1 NEW-ENEMY  BAT 5 -1 2 NEW-ENEMY
   DROP-COINS
   ROOM-XT @ BACKGROUND !
   -1 STARTED ! ;
 \ The keys are polled with KEY-DOWN?, so queued events are dropped.
-: DRAIN ( -- ) BEGIN EKEY? WHILE EKEY DROP REPEAT ;
+\ Any key press but Esc ends the wait to start.
+: DRAIN ( -- )
+  BEGIN EKEY? WHILE EKEY 255 AND 41 <> IF 0 WAITING ! THEN REPEAT ;
 : QUIT-GAME ( -- ) 500 REPEAT-DELAY !  CURSEN  HOME ;
 : ROGUE-STEP ( -- )
   ENV-REASON @  ENV-STEP ENV-REASON !
@@ -106,10 +111,13 @@ VARIABLE HERO-XT  VARIABLE ENEMY-XT  VARIABLE COIN-XT  VARIABLE ROOM-XT
   ENV-STEP = 0= IF
     BANK@ ROGUE SPRITE-BASE !  0 REPEAT-DELAY !  CURSDIS
     STARTED @ 0= IF NEW-GAME THEN
+    -1 WAITING !   \ a fighting chance: nothing moves until a key
   THEN
   DRAIN
   41 KEY-DOWN? IF QUIT-GAME THEN
-  DONE @ IF 40 KEY-DOWN? IF NEW-GAME THEN ELSE RUN-ENTITIES THEN
+  DONE @ IF 40 KEY-DOWN? IF NEW-GAME THEN ELSE
+    WAITING @ 0= IF RUN-ENTITIES THEN
+  THEN
   RENDER VSYNC ;
 ' ROGUE-STEP CONSTANT ROGUE-STEP-XT
 

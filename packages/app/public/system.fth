@@ -235,6 +235,9 @@ VARIABLE CURRENT-VOCAB
   DROP
 ;
 
+\ VLIST -- the fig-Forth name for WORDS, kept for old habits.
+: VLIST WORDS ;
+
 \ SEARCH-ROOT -- addr : the exact one-line rule WORDS above and FIND
 \ below both already inline -- pulled out as its own word here (M70)
 \ specifically so SEE/HIDE's own fixes, further down, can share it

@@ -75,4 +75,22 @@ describe('ROGUE, the demo game (rogue.fth, M86)', () => {
     expect(settle(m)).toBe('frame');
     expect(slotX(m, 0)).toBe(moved);
   });
+
+  it('waits on every entry: nothing moves until a key other than Esc is pressed', () => {
+    const { hal, draws } = recording();
+    const m = bootMachineWith(['ROGUE'], { screenHal: hal });
+    m.interpret('ROGUE');
+    m.startRepl();
+    settle(m);
+    expect(draws.filter((d) => d[2] === 16)).toHaveLength(6); // sprites shown while waiting
+    const enemy = slotX(m, 1);
+    for (let i = 0; i < 5; i++) frame(m);
+    expect(slotX(m, 1)).toBe(enemy); // still waiting
+    expect(m.screen.readRowText(15)).toContain('PRESS A KEY TO START');
+    m.keyboard.pushRawEvent(0x2c, true); // Space starts it
+    m.keyboard.pushRawEvent(0x2c, false);
+    for (let i = 0; i < 5; i++) frame(m);
+    expect(slotX(m, 1)).not.toBe(enemy);
+  });
 });
+

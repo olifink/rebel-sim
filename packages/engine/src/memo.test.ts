@@ -304,5 +304,14 @@ describe('MEMO (memo.fth, M80, spec/09-MEMO.md)', () => {
     expect(row(m, 0)).toBe('memo-load prog 5 triple . \\ ok');
     expect(row(m, 1)).toBe('15');
   });
+
+  it('a plain Esc leaves MEMO from any line, committing first', () => {
+    const m = enterMemo();
+    typeText(m, 'unsaved');
+    key(m, K.esc); // not on a blank line, and no Shift
+    const sysv = m.banks.findBankByName('SYSV')!.base;
+    expect(m.arena.readCell(sysv + 448)).toBe(0); // ENV-ENTRY: home
+    expect(notes(m).line(0, 0)).toBe('unsaved');
+  });
 });
 
